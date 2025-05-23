@@ -399,18 +399,48 @@ export const getScannedProductsData = async(req,res)=>{
 
 // ✅ Get All Dispatch Entries
 export const getAllDispatches = asyncHandler(async (req, res, next) => {
-    const dispatches = await Dispatch.find()
-        .populate('work_order', 'order_number')
-        .populate('packing_ids')
-        .populate('created_by', 'name');
+  const dispatches = await Dispatch.find({ status: 'Approved' })
+    .populate({
+      path: 'work_order',
+      select: 'work_order_number project_id',
+      populate: {
+        path: 'project_id',
+        select: 'name client',
+        populate: {
+          path: 'client',
+          select: 'name',
+        },
+      },
+    })
+    .populate({
+      path: 'products.product_id',
+      select: 'description',
+    })
+    .populate('created_by', 'username')
+    .lean();
 
-    if (!dispatches || dispatches.length === 0) {
-        return next(new ApiError(404, 'No dispatches found'));
-    }
+  if (!dispatches || dispatches.length === 0) {
+    return next(new ApiError(404, 'No approved dispatches found'));
+  }
 
-    return res.status(200).json(new ApiResponse(200, dispatches, 'Dispatch records fetched successfully'));
+  // Transform the response to match the desired format
+  const formattedDispatches = dispatches.map((dispatch) => ({
+    work_order_number: dispatch.work_order?.work_order_number || 'N/A',
+    client_name: dispatch.work_order?.project_id?.client?.name || 'N/A',
+    project_name: dispatch.work_order?.project_id?.name || 'N/A',
+    product_names: dispatch.products.map((product) => product.product_id?.description || 'N/A'),
+    product_names: dispatch.products.map((product) => ({
+      name: product.product_id?.description || product.description || 'N/A',
+      dispatch_quantity: product.dispatch_quantity != null ? product.dispatch_quantity : 'N/A',
+    })),
+    created_by: dispatch.created_by?.username || 'N/A',
+    created_at: dispatch.createdAt,
+  }));
+
+  return res.status(200).json(
+    new ApiResponse(200, formattedDispatches, 'Approved dispatch records fetched successfully')
+  );
 });
-
 // ✅ Get Dispatch by ID
 export const getDispatchById = asyncHandler(async (req, res, next) => {
     const { id } = req.params;
