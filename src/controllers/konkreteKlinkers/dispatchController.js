@@ -6,6 +6,7 @@ import { Dispatch } from '../../models/konkreteKlinkers/dispatch.model.js';
 import { Packing } from '../../models/konkreteKlinkers/packing.model.js';
 import { Inventory } from '../../models/konkreteKlinkers/inventory.model.js';
 import { WorkOrder } from '../../models/konkreteKlinkers/workOrder.model.js';
+import { DailyProduction } from '../../models/konkreteKlinkers/dailyProductionPlanning.js';
 import Joi from 'joi';
 import { putObject } from '../../../util/putObject.js';
 import path from 'path';
@@ -443,22 +444,83 @@ export const getAllDispatches = asyncHandler(async (req, res, next) => {
   );
 });
 // ✅ Get Dispatch by ID
+
 export const getDispatchById = asyncHandler(async (req, res, next) => {
-    const { id } = req.params;
-    if (!mongoose.Types.ObjectId.isValid(id)) {
-        return next(new ApiError(400, `Invalid Dispatch ID: ${id}`));
-    }
+  const { id } = req.params;
+  if (!mongoose.Types.ObjectId.isValid(id)) {
+    return next(new ApiError(400, `Invalid Dispatch ID: ${id}`));
+  }
 
-    const dispatch = await Dispatch.findById(id)
-        .populate('work_order', 'order_number')
-        .populate('packing_ids')
-        .populate('created_by', 'name');
+  // Fetch the Dispatch
+  const dispatch = await Dispatch.findById(id)
+    .populate({
+      path: 'work_order',
+      select: 'work_order_number project_id client_id',
+      populate: [
+        {
+          path: 'project_id',
+          select: 'name',
+        },
+        {
+          path: 'client_id',
+          select: 'name',
+        },
+      ],
+    })
+    .populate({
+      path: 'products.product_id',
+      select: 'product_name uom',
+    })
+    .populate('created_by', 'username')
+    .lean();
 
-    if (!dispatch) {
-        return next(new ApiError(404, 'Dispatch not found'));
-    }
+  if (!dispatch) {
+    return next(new ApiError(404, 'Dispatch not found'));
+  }
 
-    return res.status(200).json(new ApiResponse(200, dispatch, 'Dispatch details fetched successfully'));
+  // Fetch the associated JobOrder via DailyProduction
+  let jobOrder = null;
+  // const dailyProduction = await DailyProduction.findOne({
+  const dailyProduction = await DailyProduction.findOne({
+    work_order: dispatch.work_order?._id,
+    'products.product_id': { $in: dispatch.products.map((p) => p.product_id) },
+  })
+    .populate('job_order', 'job_order_id batch_number')
+    .lean();
+
+  if (dailyProduction) {
+    jobOrder = dailyProduction.job_order;
+  }
+
+  // Transform the response to match the desired format
+  const formattedDispatch = {
+    client_project: {
+      client_name: dispatch.work_order?.client_id?.name || 'N/A',
+      project_name: dispatch.work_order?.project_id?.name || 'N/A',
+    },
+    work_order_name: dispatch.work_order?.work_order_number || 'N/A',
+    work_order_id: dispatch.work_order?._id || 'N/A',
+    job_order_name: jobOrder?.job_order_id || 'N/A',
+    job_order_id: jobOrder?._id || 'N/A',
+    created: {
+      created_by: dispatch.created_by?.username || 'N/A',
+      created_at: dispatch.createdAt,
+    },
+    products: dispatch.products.map((product) => ({
+      product_name: product.product_id?.product_name || product.product_name || 'N/A',
+      uom: product.product_id?.uom || 'N/A',
+      batch_id: jobOrder?.batch_number || 'N/A',
+      dispatch_quantity: product.dispatch_quantity != null ? product.dispatch_quantity : 'N/A',
+    })),
+    dispatch_date: dispatch.date || 'N/A',
+    invoice_or_sto: dispatch.invoice_or_sto || 'N/A',
+    vehicle_number: dispatch.vehicle_number || 'N/A',
+    invoice_file: dispatch.invoice_file || 'N/A',
+  };
+
+  return res.status(200).json(
+    new ApiResponse(200, formattedDispatch, 'Dispatch details fetched successfully')
+  );
 });
 
 
