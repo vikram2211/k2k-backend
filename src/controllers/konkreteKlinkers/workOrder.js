@@ -501,6 +501,7 @@ export const createWorkOrder = async (req, res) => {
     });
   } catch (error) {
     // Cleanup: Delete temp files on error
+    console.log("error",error);
     if (req.files) {
       req.files.forEach((file) => {
         const tempFilePath = path.join('./public/temp', file.filename);
