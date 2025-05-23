@@ -528,7 +528,7 @@ export const getDispatchById = asyncHandler(async (req, res, next) => {
 
 // ✅ Update Dispatch (Status Change)
 export const updateDispatch = asyncHandler(async (req, res, next) => {
-    console.log('Dispatch update request:', req.body);
+    // console.log('Dispatch update request:', req.body);
   
     const { id } = req.params;
     const userId = req.user?.id;
@@ -585,28 +585,29 @@ export const updateDispatch = asyncHandler(async (req, res, next) => {
     }
   
     // 6. Update dispatch with transaction
-    const session = await mongoose.startSession();
+    // const session = await mongoose.startSession();
     try {
-      session.startTransaction();
+      // session.startTransaction();
       const updatedDispatch = await Dispatch.findByIdAndUpdate(
         id,
         { $set: updateFields },
-        { new: true, session, runValidators: true }
+        { new: true, runValidators: true } // session,
       );
   
       if (!updatedDispatch) {
-        await session.abortTransaction();
+        // await session.abortTransaction();
         return next(new ApiError(404, 'Dispatch not found'));
       }
   
-      await session.commitTransaction();
+      // await session.commitTransaction();
       return res.status(200).json(new ApiResponse(200, updatedDispatch, 'Dispatch updated successfully'));
     } catch (error) {
-      await session.abortTransaction();
+      // await session.abortTransaction();
       return next(new ApiError(500, `Failed to update dispatch: ${error.message}`));
-    } finally {
-      session.endSession();
-    }
+    } 
+    // finally {
+    //   session.endSession();
+    // }
   });
 
 
