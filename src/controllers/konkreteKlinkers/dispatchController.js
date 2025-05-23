@@ -425,6 +425,7 @@ export const getAllDispatches = asyncHandler(async (req, res, next) => {
 
   // Transform the response to match the desired format
   const formattedDispatches = dispatches.map((dispatch) => ({
+    _id: dispatch._id,
     work_order_number: dispatch.work_order?.work_order_number || 'N/A',
     client_name: dispatch.work_order?.project_id?.client?.name || 'N/A',
     project_name: dispatch.work_order?.project_id?.name || 'N/A',
