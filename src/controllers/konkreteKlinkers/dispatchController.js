@@ -119,11 +119,11 @@ export const createDispatch = asyncHandler(async (req, res, next) => {
     // }));
 
 
-    console.log("file", req.file);
-    const file = req.file;
-    let invoiceFileUrl;
-    if (req.file) {
-
+    console.log("file", req.files);
+    const files = req.files;
+    let invoiceFileUrls = [];
+    if (files && files.length > 0) {
+      for (const file of files) {
         const tempFilePath = path.join('./public/temp', file.filename);
         const fileBuffer = fs.readFileSync(tempFilePath);
 
@@ -132,11 +132,11 @@ export const createDispatch = asyncHandler(async (req, res, next) => {
             { data: fileBuffer, mimetype: file.mimetype },
             `dispatch/${Date.now()}-${file.originalname}`
         );
-        invoiceFileUrl = url;
+        invoiceFileUrls.push(url);
         // Delete temp file
         fs.unlinkSync(tempFilePath);
 
-
+        }
     }
 
     // ✅ Create Dispatch Entry
@@ -166,7 +166,7 @@ export const createDispatch = asyncHandler(async (req, res, next) => {
                     qr_codes,
                     vehicle_number,
                     created_by: userId,
-                    invoice_file: invoiceFileUrl,
+                    invoice_file: invoiceFileUrls,
                     date,
                 },
             ],
@@ -515,7 +515,7 @@ export const getDispatchById = asyncHandler(async (req, res, next) => {
     dispatch_date: dispatch.date || 'N/A',
     invoice_or_sto: dispatch.invoice_or_sto || 'N/A',
     vehicle_number: dispatch.vehicle_number || 'N/A',
-    invoice_file: dispatch.invoice_file || 'N/A',
+    invoice_file: dispatch.invoice_file?.length > 0 ? dispatch.invoice_file : ['N/A'],
   };
 
   return res.status(200).json(

@@ -10,7 +10,7 @@ import {
 const router = Router();
 router.use(verifyJWT);
 // console.log("coming to projects router")
-router.route('/dispatch/create').post(upload.single('invoice_file'),createDispatch);
+router.route('/dispatch/create').post(upload.array('invoice_file'),createDispatch);
 router.route('/dispatch').get(getAllDispatches);
 router.route('/dispatch/qrscan').get(getScannedProductsData);
 router.route('/dispatch/:id').get(getDispatchById).put(upload.single('invoice_file'),updateDispatch);

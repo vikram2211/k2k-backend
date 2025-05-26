@@ -60,9 +60,9 @@ const dispatchSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
     },
-    invoice_file: {
-      type: String, // URL of the uploaded invoice file (stored in AWS S3 or similar storage)
-      required: true,
+    invoice_file: { // Changed from `invoice_file` to `invoice_files` to reflect multiple files
+      type: [String], // Array of strings to store multiple file URLs
+      default: [], // Default to empty array to handle cases with no files
     },
     date:{
       type:Date,
