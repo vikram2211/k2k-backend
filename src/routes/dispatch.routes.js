@@ -13,7 +13,7 @@ router.use(verifyJWT);
 router.route('/dispatch/create').post(upload.array('invoice_file'),createDispatch);
 router.route('/dispatch').get(getAllDispatches);
 router.route('/dispatch/qrscan').get(getScannedProductsData);
-router.route('/dispatch/:id').get(getDispatchById).put(upload.single('invoice_file'),updateDispatch);
+router.route('/dispatch/:id').get(getDispatchById).put(upload.array('invoice_file'),updateDispatch);
 
 
 export default router;

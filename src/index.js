@@ -12,6 +12,8 @@ import mongoose from 'mongoose';
 
 const app = express();
 
+
+
 // Middleware setup
 app.use(morgan('combined'));
 app.use(cors({ origin: process.env.CORS_ORIGIN || '*', credentials: true }));

@@ -524,6 +524,16 @@ export const getDispatchById = asyncHandler(async (req, res, next) => {
 });
 
 
+const updateDispatchSchema = Joi.object({
+  invoice_or_sto: Joi.string().optional().messages({ 'string.empty': 'Invoice/STO cannot be empty' }),
+  vehicle_number: Joi.string().optional().messages({ 'string.empty': 'Vehicle number cannot be empty' }),
+  date: Joi.date()
+    .iso()
+    .optional()
+    .messages({
+      'date.base': 'Date must be a valid ISO date',
+    }),
+});
 
 
 // ✅ Update Dispatch (Status Change)
@@ -541,9 +551,13 @@ export const updateDispatch = asyncHandler(async (req, res, next) => {
       return next(new ApiError(400, `Invalid Dispatch ID: ${id}`));
     }
   
+    const { error, value } = updateDispatchSchema.validate(req.body, { abortEarly: false });
+  if (error) {
+    return next(new ApiError(400, 'Validation failed for dispatch update', error.details));
+  }
   
-    const { invoice_or_sto, vehicle_number, date } = req.body;
-    const file = req.file;
+    const { invoice_or_sto, vehicle_number, date } = value;
+    const files = req.files;
   
     // 3. Prepare update object
     const updateFields = {
@@ -554,8 +568,9 @@ export const updateDispatch = asyncHandler(async (req, res, next) => {
     };
   
     // 4. Handle file upload to S3 if provided
-    let invoiceFileUrl;
-    if (file) {
+    let invoiceFileUrls = [];
+    if (files && Array.isArray(files) && files.length > 0) {
+      for (const file of files) {
       const tempFilePath = path.join('./public/temp', file.filename);
       try {
         const fileBuffer = fs.readFileSync(tempFilePath);
@@ -564,8 +579,8 @@ export const updateDispatch = asyncHandler(async (req, res, next) => {
           { data: fileBuffer, mimetype: file.mimetype },
           s3Path
         );
-        invoiceFileUrl = url;
-        updateFields.invoice_file = invoiceFileUrl;
+        invoiceFileUrls.push(url);
+        // updateFields.invoice_file = invoiceFileUrl;
       } catch (error) {
         return next(new ApiError(500, `Failed to upload invoice file to S3: ${error.message}`));
       } finally {
@@ -578,9 +593,11 @@ export const updateDispatch = asyncHandler(async (req, res, next) => {
         }
       }
     }
+    updateFields.invoice_file = invoiceFileUrls; // Replace existing array
+    }
   
     // 5. Check if there are fields to update
-    if (Object.keys(updateFields).length === 1 && updateFields.updated_by) {
+    if (Object.keys(updateFields).length === 1 && updateFields.updated_by && !invoiceFileUrls.length) {
       return next(new ApiError(400, 'No valid fields provided for update'));
     }
   
