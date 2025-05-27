@@ -42,7 +42,7 @@ app.get('/', (req, res) => {
   res.status(200).json("K2K LIVE - 12-05-2025")
 })
 // Routes
-app.use('/', mainRouter);
+app.use('/api', mainRouter);
 
 // Error handler middleware
 app.use(errorHandler);
