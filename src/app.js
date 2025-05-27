@@ -13,7 +13,20 @@ const app = express();
 // Middleware
 app.use(morgan('combined'));
 // app.use(cors({ origin: process.env.CORS_ORIGIN, credentials: true }));
-app.use(cors({ origin: process.env.CORS_ORIGIN || '*', credentials: true }));
+// app.use(cors({ origin: ['https://k2k-iot.kods.app', 'http://13.201.103.133'], credentials: true }));
+const allowedOrigins = ['https://k2k-iot.kods.app', 'http://13.201.103.133', 'https://k2k.kods.work'];
+
+app.use(cors({
+  origin: function (origin, callback) {
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true,
+}));
+
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -60,7 +73,7 @@ app.use((req, res, next) => {
 
 //Routes
 //the main route is coming form the routes index.js file
-app.use('/', mainRouter);
+app.use('/api', mainRouter);
 
 // Test route
 app.get('/test', (req, res) => {
