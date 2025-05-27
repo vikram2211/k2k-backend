@@ -7,9 +7,10 @@ import fs from 'fs';
 import path from 'path';
 import { z } from 'zod';
 import mongoose from 'mongoose';
+import { Packing } from '../../models/konkreteKlinkers/packing.model.js';
 
 const transferStockSchema = z.object({
-    from_buffer_stock_id: z.string().refine((val) => mongoose.isValidObjectId(val), {
+    from_work_order_id: z.string().refine((val) => mongoose.isValidObjectId(val), {
         message: 'Invalid from_buffer_stock_id',
     }),
     to_work_order_id: z.string().refine((val) => mongoose.isValidObjectId(val), {
@@ -18,6 +19,7 @@ const transferStockSchema = z.object({
     product_id: z.string().refine((val) => mongoose.isValidObjectId(val), {
         message: 'Invalid product_id',
     }),
+    isBufferTransfer: z.boolean(),
     quantity_transferred: z.number().positive({ message: 'Quantity must be positive' })
 });
 
@@ -29,7 +31,7 @@ export const transferStock = async (req, res) => {
 
         // Check if referenced documents exist
         const [fromWorkOrder, toWorkOrder, product] = await Promise.all([
-            WorkOrder.findById(validatedData.from_buffer_stock_id),
+            WorkOrder.findById(validatedData.from_work_order_id),
             WorkOrder.findById(validatedData.to_work_order_id),
             Product.findById(validatedData.product_id),
         ]);
@@ -37,7 +39,7 @@ export const transferStock = async (req, res) => {
         if (!fromWorkOrder) {
             return res.status(400).json({
                 success: false,
-                errors: [{ field: 'from_buffer_stock_id', message: 'Source work order not found' }],
+                errors: [{ field: 'from_work_order_id', message: 'Source work order not found' }],
             });
         }
         if (!toWorkOrder) {
@@ -56,12 +58,13 @@ export const transferStock = async (req, res) => {
 
         // Create new BufferTransfer
         const bufferTransfer = new BufferTransfer({
-            from_buffer_stock_id: validatedData.from_buffer_stock_id,
+            from_work_order_id: validatedData.from_work_order_id,
             to_work_order_id: validatedData.to_work_order_id,
             product_id: validatedData.product_id,
             quantity_transferred: validatedData.quantity_transferred,
             transferred_by: req.user._id,
             transfer_date: new Date(),
+            isBufferTransfer: validatedData.isBufferTransfer
         });
 
         // Save the transfer
@@ -121,9 +124,9 @@ export const getAllTransfers = async (req, res) => {
 
         const [transfers, total] = await Promise.all([
             BufferTransfer.find()
-                .populate('from_buffer_stock_id', 'name') // Adjust fields as needed
-                .populate('to_work_order_id', 'name')
-                .populate('product_id', 'name')
+                .populate('from_work_order_id', 'work_order_number') // Adjust fields as needed
+                .populate('to_work_order_id', 'work_order_number')
+                .populate('product_id', 'description')
                 .populate('transferred_by', 'username')
                 .skip(skip)
                 .limit(limit)
@@ -131,16 +134,26 @@ export const getAllTransfers = async (req, res) => {
             BufferTransfer.countDocuments(),
         ]);
 
+        // Transform the transfers data to match the desired response format
+        const transformedTransfers = transfers.map(transfer => ({
+            ...transfer,
+            from_work_order_id: transfer.from_work_order_id?.work_order_number || null,
+            to_work_order_id: transfer.to_work_order_id?.work_order_number || null,
+            product_name: transfer.product_id?.description || null,
+            transferred_by: transfer.transferred_by?.username || null,
+            product_id: undefined, // Remove the product_id object
+        }));
+
         return res.status(200).json({
             success: true,
             message: 'Buffer transfers retrieved successfully',
-            data: transfers,
-            pagination: {
-                page,
-                limit,
-                total,
-                totalPages: Math.ceil(total / limit),
-            },
+            data: transformedTransfers,
+            // pagination: {
+            //     page,
+            //     limit,
+            //     total,
+            //     totalPages: Math.ceil(total / limit),
+            // },
         });
     } catch (error) {
         // Cleanup: Delete temp files on error
@@ -164,15 +177,81 @@ const idSchema = z.string().refine((val) => mongoose.isValidObjectId(val), {
     message: 'Invalid ID',
 });
 
+// export const getTransferById = async (req, res) => {
+//     try {
+//         // Validate ID
+//         const validatedId = idSchema.parse(req.params.id);
+
+//         const transfer = await BufferTransfer.findById(validatedId)
+//             .populate('from_work_order_id', 'work_order_number')
+//             .populate('to_work_order_id', 'work_order_number')
+//             .populate('product_id', 'name')
+//             .populate('transferred_by', 'username')
+//             .lean();
+
+//         if (!transfer) {
+//             return res.status(404).json({
+//                 success: false,
+//                 errors: [{ field: 'id', message: 'Buffer transfer not found' }],
+//             });
+//         }
+
+//         return res.status(200).json({
+//             success: true,
+//             message: 'Buffer transfer retrieved successfully',
+//             data: transfer,
+//         });
+//     } catch (error) {
+//         // Cleanup: Delete temp files on error
+//         if (req.files) {
+//             req.files.forEach((file) => {
+//                 const tempFilePath = path.join('./public/temp', file.filename);
+//                 if (fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath);
+//             });
+//         }
+
+//         if (error instanceof z.ZodError) {
+//             return res.status(400).json({
+//                 success: false,
+//                 errors: error.errors.map((err) => ({
+//                     field: err.path.join('.'),
+//                     message: err.message,
+//                 })),
+//             });
+//         }
+
+//         console.error('Error fetching buffer transfer:', error);
+//         res.status(500).json({
+//             success: false,
+//             message: error.message || 'Internal Server Error',
+//         });
+//     }
+// };
+
+
 export const getTransferById = async (req, res) => {
     try {
         // Validate ID
         const validatedId = idSchema.parse(req.params.id);
 
         const transfer = await BufferTransfer.findById(validatedId)
-            .populate('from_buffer_stock_id', 'name')
-            .populate('to_work_order_id', 'name')
-            .populate('product_id', 'name')
+            .populate({
+                path: 'from_work_order_id',
+                select: 'work_order_number',
+                populate: [
+                    { path: 'client_id', select: 'name', model: 'Client' },
+                    { path: 'project_id', select: 'name', model: 'Project' },
+                ],
+            })
+            .populate({
+                path: 'to_work_order_id',
+                select: 'work_order_number',
+                populate: [
+                    { path: 'client_id', select: 'name', model: 'Client' },
+                    { path: 'project_id', select: 'name', model: 'Project' },
+                ],
+            })
+            .populate('product_id', 'description')
             .populate('transferred_by', 'username')
             .lean();
 
@@ -183,10 +262,52 @@ export const getTransferById = async (req, res) => {
             });
         }
 
+        // Determine the message based on isBufferTransfer
+        const message = transfer.isBufferTransfer
+            ? 'buffer transfer details'
+            : 'transfer details';
+
+        // Define the base data for "from" and "to" objects
+        const baseFromData = {
+            work_order_id: transfer.from_work_order_id?.work_order_number || null,
+            product_name: transfer.product_id?.description || null,
+            quantity_transferred: transfer.quantity_transferred || null,
+            createdAt: transfer.createdAt || null,
+            transferred_by: transfer.transferred_by?.username || null,
+        };
+
+        const baseToData = {
+            work_order_id: transfer.to_work_order_id?.work_order_number || null,
+            product_name: transfer.product_id?.description || null,
+            quantity_transferred: transfer.quantity_transferred || null,
+            createdAt: transfer.createdAt || null,
+            transferred_by: transfer.transferred_by?.username || null,
+        };
+
+        // Conditionally add client and project fields if isBufferTransfer is false
+        const fromData = transfer.isBufferTransfer
+            ? baseFromData
+            : {
+                  ...baseFromData,
+                  client: transfer.from_work_order_id?.client_id?.name || null,
+                  project: transfer.from_work_order_id?.project_id?.name || null,
+              };
+
+        const toData = transfer.isBufferTransfer
+            ? baseToData
+            : {
+                  ...baseToData,
+                  client: transfer.to_work_order_id?.client_id?.name || null,
+                  project: transfer.to_work_order_id?.project_id?.name || null,
+              };
+
         return res.status(200).json({
             success: true,
-            message: 'Buffer transfer retrieved successfully',
-            data: transfer,
+            message: message,
+            data: {
+                from: fromData,
+                to: toData,
+            },
         });
     } catch (error) {
         // Cleanup: Delete temp files on error
@@ -214,7 +335,6 @@ export const getTransferById = async (req, res) => {
         });
     }
 };
-
 const updateTransferSchema = z.object({
     quantity_transferred: z.number().positive({ message: 'Quantity must be positive' }).optional(),
     status: z.enum(['Completed', 'Reversed'], { message: 'Invalid status' }).optional(),
@@ -354,7 +474,7 @@ export const deleteTransfers = async (req, res) => {
 
 ////////SHOW WORK ORDERS RELATED TO ONLY PRODUCT SELECTED AND WHICH ARE NOT DISPATCH YET - (STOCK TRANSFER (ONLY ACTUAL WO))
 
-export const getWorkOrdersByProduct = async (req, res) => {
+export const getWorkOrdersByProduct1 = async (req, res) => {
     try {
         // Extract query parameters
         const { prId: productId, isBuffer } = req.query;
@@ -415,10 +535,10 @@ export const getWorkOrdersByProduct = async (req, res) => {
             {
                 $project: {
                     work_order_number: 1,
-                    date: 1,
-                    buffer_stock: 1,
-                    products: 1,
-                    status: 1,
+                    // date: 1,
+                    // buffer_stock: 1,
+                    // products: 1,
+                    // status: 1,
                     // Optionally include packingRecords if needed in the response
                     // packingRecords: 1,
                 },
@@ -439,6 +559,96 @@ export const getWorkOrdersByProduct = async (req, res) => {
             data: workOrders,
         });
 
+    } catch (error) {
+        console.error('Error fetching work orders:', error);
+        return res.status(500).json({
+            success: false,
+            message: 'Internal Server Error',
+        });
+    }
+};
+export const getWorkOrdersByProduct = async (req, res) => {
+    try {
+        // Extract query parameters
+        const { prId: productId, isBuffer } = req.query;
+
+        // Validate input parameters
+        if (!productId) {
+            return res.status(400).json({
+                success: false,
+                message: 'Product ID is required',
+            });
+        }
+
+        if (isBuffer === undefined || isBuffer === null) {
+            return res.status(400).json({
+                success: false,
+                message: 'isBuffer parameter is required (true/false)',
+            });
+        }
+
+        // Convert isBuffer to boolean
+        const bufferStock = isBuffer === 'true';
+
+        // Find packing records with delivery_stage 'Packed' for the given productId
+        const packingRecords = await Packing.find({
+            product: productId,
+            delivery_stage: 'Packed',
+        }).select('work_order');
+
+        // Extract work order IDs from packing records
+        const workOrderIds = packingRecords
+            .filter(record => record.work_order) // Filter out records without work_order
+            .map(record => record.work_order);
+
+        if (!workOrderIds.length) {
+            return res.status(200).json({
+                success: true,
+                message: 'No work orders found with packed products for the given criteria',
+                data: [],
+            });
+        }
+
+        // Find work orders that match the productId, buffer_stock, and are in the packing records
+        const workOrders = await WorkOrder.find({
+            _id: { $in: workOrderIds },
+            buffer_stock: bufferStock,
+            'products.product_id': productId,
+        })
+            .populate('client_id', 'name') // Populate client name if needed
+            .populate('project_id', 'name') // Populate project name if needed
+            .populate('products.product_id', 'name') // Populate product details
+            .populate('created_by', 'name') // Populate creator details
+            .populate('updated_by', 'name'); // Populate updater details
+
+        // Format the response
+        const formattedWorkOrders = workOrders.map(workOrder => ({
+            work_order_id: workOrder._id,
+            work_order_number: workOrder.work_order_number,
+            // date: workOrder.date,
+            // buffer_stock: workOrder.buffer_stock,
+            // client: workOrder.client_id ? workOrder.client_id.name : null,
+            // project: workOrder.project_id ? workOrder.project_id.name : null,
+            // products: workOrder.products.map(product => ({
+            //     product_id: product.product_id._id,
+            //     product_name: product.product_id.name,
+            //     uom: product.uom,
+            //     po_quantity: product.po_quantity,
+            //     qty_in_nos: product.qty_in_nos,
+            //     delivery_date: product.delivery_date,
+            // })),
+            // status: workOrder.status,
+            // created_by: workOrder.created_by ? workOrder.created_by.name : null,
+            // updated_by: workOrder.updated_by ? workOrder.updated_by.name : null,
+            // created_at: workOrder.createdAt,
+            // updated_at: workOrder.updatedAt,
+        }));
+
+        return res.status(200).json({
+            success: true,
+            message: 'Work orders retrieved successfully',
+            data: formattedWorkOrders,
+        });
     } catch (error) {
         console.error('Error fetching work orders:', error);
         return res.status(500).json({
@@ -597,7 +807,7 @@ export const getWorkOrderProductQuantity = async (req, res) => {
                 $unwind: '$products',
             },
             // Filter to only include products matching the productId
-            { 
+            {
                 $match: {
                     'products.product_id': new mongoose.Types.ObjectId(productId),
                 },

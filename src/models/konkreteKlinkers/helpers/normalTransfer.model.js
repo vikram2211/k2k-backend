@@ -2,12 +2,6 @@ import mongoose from "mongoose";
 
 const bufferTransferSchema = new mongoose.Schema(
   {
-    // from_buffer_stock_id: {
-    //   type: mongoose.Schema.Types.ObjectId,
-    //   // ref: "BufferStock", // Reference to the buffer stock being transferred
-    //   ref:'WorkOrder',
-    //   required: true,
-    // },
     from_work_order_id: {
       type: mongoose.Schema.Types.ObjectId,
       // ref: "BufferStock", // Reference to the buffer stock being transferred
@@ -36,10 +30,6 @@ const bufferTransferSchema = new mongoose.Schema(
     transfer_date: {
       type: Date, // Timestamp of the transfer
       default: Date.now,
-    },
-    isBufferTransfer:{
-      type:Boolean,
-      required:true
     },
     status: {
       type: String,
