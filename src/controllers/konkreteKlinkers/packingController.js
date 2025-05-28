@@ -811,7 +811,7 @@ const createPackingSchema = z.object({
   export const getAllPacking = async (req, res) => {
     try {
         // 1. Fetch packing records with delivery_stage: "Packed" and populated fields
-        const packingRecords = await Packing.find({ delivery_stage: 'Packed' })
+        const packingRecords = await Packing.find({ delivery_stage: { $in: ['Packed', 'Dispatched'] } })
             .populate({
                 path: 'work_order',
                 select: 'work_order_number',
