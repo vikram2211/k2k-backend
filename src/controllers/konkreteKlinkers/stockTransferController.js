@@ -288,18 +288,18 @@ export const getTransferById = async (req, res) => {
         const fromData = transfer.isBufferTransfer
             ? baseFromData
             : {
-                  ...baseFromData,
-                  client: transfer.from_work_order_id?.client_id?.name || null,
-                  project: transfer.from_work_order_id?.project_id?.name || null,
-              };
+                ...baseFromData,
+                client: transfer.from_work_order_id?.client_id?.name || null,
+                project: transfer.from_work_order_id?.project_id?.name || null,
+            };
 
         const toData = transfer.isBufferTransfer
             ? baseToData
             : {
-                  ...baseToData,
-                  client: transfer.to_work_order_id?.client_id?.name || null,
-                  project: transfer.to_work_order_id?.project_id?.name || null,
-              };
+                ...baseToData,
+                client: transfer.to_work_order_id?.client_id?.name || null,
+                project: transfer.to_work_order_id?.project_id?.name || null,
+            };
 
         return res.status(200).json({
             success: true,
