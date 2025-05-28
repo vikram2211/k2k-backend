@@ -956,7 +956,7 @@ export const getWorkOrderByIds = async (req, res) => {
   }
 };
 
-export const getWorkOrderById = async (req, res) => {
+export const getWorkOrderById2 = async (req, res) => {
   try {
     const woId = req.params.id;
 
@@ -1255,6 +1255,381 @@ export const getWorkOrderById = async (req, res) => {
           created_by: jobOrder.created_by || null,
           updated_by: jobOrder.updated_by || null,
           daily_production: transformedDailyProduction,
+        };
+
+        return transformedJobOrder;
+      })
+    );
+
+    // Transform the response, preserving original key names and renaming product_id to product
+    const transformedData = {
+      ...woData,
+      client_id: woData.client_id || null,
+      project_id: woData.project_id
+        ? {
+            ...woData.project_id,
+            client: woData.project_id.client || null,
+          }
+        : null,
+      created_by: woData.created_by || null,
+      updated_by: woData.updated_by || null,
+      products: woData.products.map((product) => {
+        const productId = product.product_id?._id.toString();
+        return {
+          ...product,
+          product: product.product_id || null,
+          plant: product.product_id?.plant || null,
+          achieved_quantity: achievedQuantities[productId] || 0,
+          packed_quantity: packingQuantities[productId]?.packed_quantity || 0,
+          dispatched_quantity: packingQuantities[productId]?.dispatched_quantity || 0,
+        };
+      }),
+      job_orders: jobOrdersWithProduction,
+      Packings: packingsArray,
+      dispatches: dispatchesArray,
+      qc_details: qcDetailsArray,
+    };
+
+    // Clean up unwanted fields, preserving original key names
+    transformedData.products.forEach((product) => {
+      delete product.product_id;
+      delete product.plant_code;
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: `Work Order Data for id ${woId} found.`,
+      data: transformedData,
+    });
+  } catch (error) {
+    console.log('error', error);
+    if (error.name === 'ValidationError') {
+      const formattedErrors = Object.values(error.errors).map((err) => ({
+        field: err.path,
+        message: err.message,
+      }));
+      return res.status(400).json({ success: false, errors: formattedErrors });
+    }
+
+    if (error.name === 'CastError') {
+      return res.status(400).json({
+        success: false,
+        message: `Invalid ${error.path}: ${error.value}`,
+      });
+    }
+
+    console.error('Error fetching work order:', error.message);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+    });
+  }
+};
+
+
+export const getWorkOrderById = async (req, res) => {
+  try {
+    const woId = req.params.id;
+
+    const woData = await WorkOrder.findById(woId)
+      .populate({
+        path: 'client_id',
+        select: 'name address',
+      })
+      .populate({
+        path: 'project_id',
+        select: 'name',
+        match: { isDeleted: false },
+        populate: {
+          path: 'client',
+          select: 'name',
+        },
+      })
+      .populate({
+        path: 'created_by',
+        select: 'username userType',
+      })
+      .populate({
+        path: 'updated_by',
+        select: 'username',
+      })
+      .populate({
+        path: 'products.product_id',
+        select: 'description material_code uom',
+        populate: {
+          path: 'plant',
+          select: 'plant_code',
+        },
+      })
+      .lean();
+
+    if (!woData) {
+      return res.status(404).json({
+        success: false,
+        message: `Work Order with id ${woId} not found`,
+      });
+    }
+
+    // Fetch aggregated data from DailyProduction for achieved_quantity
+    const dailyProductions = await DailyProduction.find({ work_order: woId })
+      .select('products.product_id products.achieved_quantity')
+      .lean();
+
+    // Aggregate achieved_quantity by product_id
+    const achievedQuantities = dailyProductions.reduce((acc, dp) => {
+      dp.products.forEach((product) => {
+        const productId = product.product_id.toString();
+        acc[productId] = (acc[productId] || 0) + (product.achieved_quantity || 0);
+      });
+      return acc;
+    }, {});
+
+    // Fetch aggregated data from Packing for packed and dispatched quantities
+    const packingData = await Packing.find({
+      work_order: woId,
+      delivery_stage: { $in: ['Packed', 'Dispatched'] },
+    })
+      .select('product_id product_quantity delivery_stage')
+      .lean();
+
+    // Aggregate packed and dispatched quantities by product_id
+    const packingQuantities = packingData.reduce(
+      (acc, packing) => {
+        const productId = packing._id.toString();
+        if (!acc[productId]) {
+          acc[productId] = { packed_quantity: 0, dispatched_quantity: 0 };
+        }
+        if (packing.delivery_stage === 'Packed') {
+          acc[productId].packed_quantity += packing.product_quantity || 0;
+        } else if (packing.delivery_stage === 'Dispatched') {
+          acc[productId].dispatched_quantity += packing.product_quantity || 0;
+        }
+        return acc;
+      },
+      {}
+    );
+
+    // Fetch Packing data for the Packings array
+    const packingDetails = await Packing.find({ work_order: woId })
+      .select('product product_quantity rejected_quantity createdAt packed_by')
+      .populate({
+        path: 'product',
+        select: 'description',
+      })
+      .populate({
+        path: 'packed_by',
+        select: 'username',
+      })
+      .lean();
+
+    // Aggregate packing details by product
+    const packingByProduct = packingDetails.reduce((acc, packing) => {
+      const productId = packing.product?._id.toString();
+      if (!acc[productId]) {
+        acc[productId] = {
+          product: packing.product?.description || null,
+          date: packing.createdAt,
+          total_qty: 0,
+          rejected_quantity: 0,
+          created_by: packing.packed_by?.username || null,
+        };
+      }
+      acc[productId].total_qty += packing.product_quantity || 0;
+      acc[productId].rejected_quantity += packing.rejected_quantity || 0;
+      // Use the latest createdAt date for the product
+      if (packing.createdAt > acc[productId].date) {
+        acc[productId].date = packing.createdAt;
+        acc[productId].created_by = packing.packed_by?.username || null;
+      }
+      return acc;
+    }, {});
+
+    // Format Packings array with sl_no
+    const packingsArray = Object.values(packingByProduct).map((packing, index) => ({
+      sl_no: index + 1,
+      product: packing.product,
+      date: new Date(packing.date).toLocaleString('en-US', {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: true,
+      }).replace(',', ''),
+      total_qty: packing.total_qty,
+      'Rejected Quantity': packing.rejected_quantity,
+      created_by: packing.created_by,
+    }));
+
+    // Fetch Dispatch data for the dispatches array
+    const dispatchDetails = await Dispatch.find({ work_order: woId })
+      .select('products date vehicle_number')
+      .populate({
+        path: 'products.product_id',
+        select: 'description uom',
+      })
+      .lean();
+
+    // Aggregate dispatch details by product
+    const dispatchByProduct = dispatchDetails.reduce((acc, dispatch) => {
+      dispatch.products.forEach((product) => {
+        const productId = product.product_id?._id;
+        if (!acc[productId]) {
+          acc[productId] = {
+            product: product.product_id?.description || null,
+            date: dispatch.date,
+            total_qty: 0,
+            uom: product.product_id?.uom || null,
+            vehicle_number: null,
+          };
+        }
+        acc[productId].total_qty += product.dispatch_quantity || 0;
+        // Use the latest date and vehicle_number for the product
+        if (dispatch.date > acc[productId].date) {
+          acc[productId].date = dispatch.date;
+          acc[productId].vehicle_number = dispatch.vehicle_number || null;
+        }
+      });
+      return acc;
+    }, {});
+
+    // Format dispatches array with sl_no
+    const dispatchesArray = Object.values(dispatchByProduct).map((dispatch, index) => ({
+      sl_no: index + 1,
+      product: dispatch.product,
+      date: new Date(dispatch.date).toLocaleString('en-US', {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: true,
+      }).replace(',', ''),
+      total_qty: dispatch.total_qty,
+      uom: dispatch.uom,
+      vehicle_number: dispatch.vehicle_number,
+    }));
+
+    // Fetch QC data for the qc_details array
+    const qcDetails = await QCCheck.find({ work_order: woId })
+      .select('product_id rejected_quantity recycled_quantity remarks')
+      .populate({
+        path: 'product_id',
+        select: 'description',
+      })
+      .lean();
+
+    // Aggregate QC details by product
+    const qcByProduct = qcDetails.reduce((acc, qc) => {
+      const productId = qc.product_id?._id.toString();
+      if (!acc[productId]) {
+        acc[productId] = {
+          product: qc.product_id?.description || null,
+          recycled_quantity: 0,
+          rejected_quantity: 0,
+          remarks: qc.remarks || null,
+        };
+      }
+      acc[productId].recycled_quantity += qc.recycled_quantity || 0;
+      acc[productId].rejected_quantity += qc.rejected_quantity || 0;
+      // Use the latest remarks for the product
+      if (qc.remarks && (!acc[productId].remarks || qc.createdAt > acc[productId].createdAt)) {
+        acc[productId].remarks = qc.remarks;
+        acc[productId].createdAt = qc.createdAt;
+      }
+      return acc;
+    }, {});
+
+    // Format qc_details array with sl_no
+    const qcDetailsArray = Object.values(qcByProduct).map((qc, index) => ({
+      sl_no: index + 1,
+      product: qc.product,
+      recycled_quantity: qc.recycled_quantity,
+      rejected_quantity: qc.rejected_quantity,
+      remarks: qc.remarks,
+    }));
+
+    // Fetch Job Orders directly from JobOrder model where work_order matches woId
+    const jobOrders = await JobOrder.find({ work_order: woId })
+      .select('job_order_id work_order sales_order_number products batch_number date status created_by updated_by createdAt updatedAt')
+      .populate([
+        {
+          path: 'products.product',
+          select: 'description material_code',
+        },
+        {
+          path: 'products.machine_name',
+          select: 'name',
+        },
+        {
+          path: 'created_by',
+          select: 'username userType',
+        },
+        {
+          path: 'updated_by',
+          select: 'username',
+        },
+      ])
+      .lean();
+
+    // Fetch DailyProduction data for each JobOrder, including downtime
+    const jobOrdersWithProduction = await Promise.all(
+      jobOrders.map(async (jobOrder) => {
+        const dailyProductionData = await DailyProduction.find({ job_order: jobOrder._id })
+          .select('products date submitted_by started_at stopped_at qc_checked_by status downtime created_by updated_by createdAt updatedAt')
+          .populate({
+            path: 'products.product_id',
+            select: 'description material_code',
+          })
+          .populate({
+            path: 'submitted_by',
+            select: 'username userType',
+          })
+          .populate({
+            path: 'qc_checked_by',
+            select: 'username',
+          })
+          .lean();
+
+        // Transform daily production data to rename product_id to product
+        const transformedDailyProduction = dailyProductionData.map((dp) => ({
+          ...dp,
+          products: dp.products.map((prod) => ({
+            ...prod,
+            product: prod.product_id || null,
+          })).map((prod) => {
+            delete prod.product_id;
+            return prod;
+          }),
+          submitted_by: dp.submitted_by || null,
+          qc_checked_by: dp.qc_checked_by || null,
+          created_by: dp.created_by || null,
+          updated_by: dp.updated_by || null,
+          downtime: dp.downtime || [],
+        }));
+
+        // Transform job order products to include uom, po_quantity, and daily_production
+        const transformedJobOrder = {
+          ...jobOrder,
+          products: jobOrder.products.map((prod) => {
+            const woProduct = woData.products.find(
+              (woProd) => woProd.product_id && woProd.product_id._id.toString() === prod.product?._id.toString()
+            );
+            // Find the daily production record for this product
+            const productDailyProduction = transformedDailyProduction.find((dp) =>
+              dp.products.some((p) => p.product?._id.toString() === prod.product?._id.toString())
+            );
+            return {
+              ...prod,
+              product: prod.product || null,
+              machine_name: prod.machine_name || null,
+              uom: woProduct?.uom || null,
+              po_quantity: woProduct?.po_quantity || null,
+              daily_production: productDailyProduction || null,
+            };
+          }),
+          created_by: jobOrder.created_by || null,
+          updated_by: jobOrder.updated_by || null,
         };
 
         return transformedJobOrder;
