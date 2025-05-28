@@ -543,6 +543,20 @@ export const getJobOrdersByDate = async (req, res) => {
       const workOrderProduct = jobOrder?.work_order?.products?.find(
         (prod) => prod.product_id.toString() === productId
       );
+      let started_at = null;
+      let stopped_at = null;
+
+      if (dailyProduction.production_logs && dailyProduction.production_logs.length > 0) {
+        const startLog = dailyProduction.production_logs
+          .filter((log) => log.action === 'Start')
+          .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))[0]; // Latest Start
+        const stopLog = dailyProduction.production_logs
+          .filter((log) => log.action === 'Stop')
+          .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))[0]; // Latest Stop
+
+        started_at = startLog ? startLog.timestamp : null;
+        stopped_at = stopLog ? stopLog.timestamp : null;
+      }
 
       // Create the entry for this JobOrder with the first product
       const entry = {
@@ -573,8 +587,8 @@ export const getJobOrdersByDate = async (req, res) => {
         achieved_quantity: dpProduct.achieved_quantity || 0,
         rejected_quantity: dpProduct.rejected_quantity || 0,
         recycled_quantity: dpProduct.recycled_quantity || 0,
-        started_at: dpProduct.started_at || null,
-        stopped_at: dpProduct.stopped_at || null,
+        started_at,
+        stopped_at,
         submitted_by: dpProduct.submitted_by || null,
         daily_production: {
           _id: dailyProduction._id,
