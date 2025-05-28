@@ -199,8 +199,8 @@ export const getQcCheckById = async (req, res) => {
             'work_order job_order product_id rejected_quantity recycled_quantity remarks created_by createdAt'
         )
         .populate('work_order', 'work_order_number')
-        .populate('job_order', 'job_order_id') // Populate work_order_number
-        .populate('product_id', 'description')
+        .populate('job_order', '_id job_order_id') // Populate work_order_number
+        .populate('product_id', 'description material_code')
         .populate('created_by', 'username')
         .lean();
 
@@ -213,7 +213,12 @@ export const getQcCheckById = async (req, res) => {
         }
         const transformedData = {
           ...findQcDataById,
-          job_order: findQcDataById.job_order?.job_order_id || null,
+          job_order: findQcDataById.job_order
+              ? {
+                    _id: findQcDataById.job_order._id,
+                    job_order_id: findQcDataById.job_order.job_order_id,
+                }
+              : null,
       };
         return res.status(200).json({
             success: true,
