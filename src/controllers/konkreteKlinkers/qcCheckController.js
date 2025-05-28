@@ -198,8 +198,11 @@ export const getQcCheckById = async (req, res) => {
         const findQcDataById = await QCCheck.findById(qcId).select(
             'work_order job_order product_id rejected_quantity recycled_quantity remarks created_by createdAt'
         )
-        .populate('work_order', 'work_order_number') // Populate work_order_number
-        .populate('product_id', 'description').populate('created_by', 'username') .lean();
+        .populate('work_order', 'work_order_number')
+        .populate('job_order', 'job_order_id') // Populate work_order_number
+        .populate('product_id', 'description')
+        .populate('created_by', 'username')
+        .lean();
 
         // Check if data exists
         if (!findQcDataById) {
@@ -208,10 +211,15 @@ export const getQcCheckById = async (req, res) => {
                 message: 'QC data not found',
             });
         }
+        const transformedData = {
+          ...findQcDataById,
+          job_order: findQcDataById.job_order?.job_order_id || null,
+      };
         return res.status(200).json({
             success: true,
             message: 'QC data found',
-            data: findQcDataById,
+            data: transformedData,
+            // data: findQcDataById,
         });
     } catch (error) {
         if (error.name === 'CastError') {
