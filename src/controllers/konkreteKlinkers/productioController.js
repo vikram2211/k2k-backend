@@ -481,7 +481,7 @@ export const getJobOrdersByDate = async (req, res) => {
     const dailyProductions = await DailyProduction.find(query)
       .populate({
         path: 'job_order',
-        select: 'sales_order_number batch_number date status created_by updated_by createdAt updatedAt products',
+        select: 'job_order_id sales_order_number batch_number date status created_by updated_by createdAt updatedAt products',
         populate: [
           {
             path: 'work_order',
@@ -576,6 +576,7 @@ export const getJobOrdersByDate = async (req, res) => {
         createdAt: jobOrder?.createdAt || dailyProduction.createdAt,
         updatedAt: jobOrder?.updatedAt || dailyProduction.updatedAt,
         job_order: jobOrder?._id || dailyProduction._id,
+        job_order_id: jobOrder?.job_order_id,
         product_id: dpProduct.product_id._id,
         plant_name: dpProduct.product_id?.plant?.plant_name || 'N/A',
         machine_name: jobOrderProduct?.machine_name?.name || 'N/A',
