@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { QCCheck } from '../../models/konkreteKlinkers/qcCheck.model.js';
 import { JobOrder } from '../../models/konkreteKlinkers/jobOrders.model.js';
+import {DailyProduction} from '../../models/konkreteKlinkers/dailyProductionPlanning.js';
 import mongoose from 'mongoose';
 
 // Helper for MongoDB ObjectId validation
@@ -21,7 +22,7 @@ const qcCheckZodSchema = z.object({
     "Recycled quantity cannot exceed rejected quantity"
 );
 
-export const addQcCheck = async (req, res) => {
+export const addQcCheck1 = async (req, res) => {
     try {
         // 1. Validate request data using Zod
         const validatedData = qcCheckZodSchema.parse(req.body);
@@ -88,6 +89,169 @@ export const addQcCheck = async (req, res) => {
             error: error.message
         });
     }
+};
+
+export const addQcCheck = async (req, res) => {
+  try {
+    // 1. Validate request data using Zod
+    const validatedData = qcCheckZodSchema.parse(req.body);
+    console.log("validatedData", validatedData);
+
+    // 2. Add created_by and updated_by from authenticated user
+    if (!req.user?.id) {
+      return res.status(401).json({
+        success: false,
+        message: "Unauthorized: User not authenticated",
+      });
+    }
+    validatedData.created_by = req.user._id;
+    validatedData.updated_by = req.user._id;
+
+    // 3. Validate product_id against JobOrder
+    const jobOrder = await JobOrder.findById(validatedData.job_order)
+      .select('products')
+      .lean();
+
+    if (!jobOrder) {
+      return res.status(404).json({
+        success: false,
+        message: `Job order ${validatedData.job_order} not found`,
+      });
+    }
+
+    const isValidProduct = jobOrder.products.some(
+      (p) => p.product && p.product.toString() === validatedData.product_id.toString()
+    );
+
+    if (!isValidProduct) {
+      return res.status(400).json({
+        success: false,
+        message: `Product ${validatedData.product_id} is not associated with job order ${validatedData.job_order}`,
+      });
+    }
+
+    // 4. Create and save the QC Check
+    const qcCheck = new QCCheck(validatedData);
+    await qcCheck.save();
+
+    // 5. Update or create DailyProduction with rejected_quantity and recycled_quantity
+    let warnings = [];
+    const dailyProductions = await DailyProduction.find({
+      work_order: validatedData.work_order,
+      job_order: validatedData.job_order,
+    });
+    console.log("dailyProductions", dailyProductions);
+
+    let updated = false;
+
+    for (let dailyProduction of dailyProductions) {
+      const productIndex = dailyProduction.products.findIndex(
+        (p) => p.product_id.toString() === validatedData.product_id.toString()
+      );
+      console.log("productIndex for document", dailyProduction._id, productIndex);
+
+      if (productIndex !== -1) {
+        // Update rejected_quantity and recycled_quantity for the product
+        dailyProduction.products[productIndex].rejected_quantity =
+          (dailyProduction.products[productIndex].rejected_quantity || 0) +
+          (validatedData.rejected_quantity || 0);
+        dailyProduction.products[productIndex].recycled_quantity =
+          (dailyProduction.products[productIndex].recycled_quantity || 0) +
+          (validatedData.recycled_quantity || 0);
+        dailyProduction.updated_by = req.user._id;
+        console.log("Updating DailyProduction", dailyProduction._id);
+        await dailyProduction.save();
+        updated = true;
+        break; // Exit loop after updating the first matching document
+      }
+    }
+
+    if (!updated) {
+      // No matching product found in existing DailyProduction documents
+      if (dailyProductions.length === 0) {
+        // Create new DailyProduction document
+        const newDailyProduction = new DailyProduction({
+          work_order: validatedData.work_order,
+          job_order: validatedData.job_order,
+          products: [
+            {
+              product_id: validatedData.product_id,
+              achieved_quantity: 0,
+              rejected_quantity: validatedData.rejected_quantity || 0,
+              recycled_quantity: validatedData.recycled_quantity || 0,
+            },
+          ],
+          date: new Date().setUTCHours(0, 0, 0, 0),
+          created_by: req.user._id,
+          updated_by: req.user._id,
+          status: 'Pending',
+        });
+        await newDailyProduction.save();
+        console.log("Created new DailyProduction", newDailyProduction);
+      } else {
+        // Add product to the first DailyProduction document
+        const dailyProduction = dailyProductions[0];
+        dailyProduction.products.push({
+          product_id: validatedData.product_id,
+          achieved_quantity: 0,
+          rejected_quantity: validatedData.rejected_quantity || 0,
+          recycled_quantity: validatedData.recycled_quantity || 0,
+        });
+        dailyProduction.updated_by = req.user._id;
+        console.log("Added product to DailyProduction", dailyProduction._id);
+        await dailyProduction.save();
+      }
+    }
+
+    // 6. Return success response with optional warnings
+    res.status(201).json({
+      success: true,
+      message: warnings.length > 0 ? "QC Check added with warnings" : "QC Check added successfully",
+      data: qcCheck,
+      warnings: warnings.length > 0 ? warnings : undefined,
+    });
+
+  } catch (error) {
+    // Handle Zod validation errors
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({
+        success: false,
+        errors: error.errors.map((err) => ({
+          field: err.path.join('.'),
+          message: err.message,
+        })),
+      });
+    }
+
+    // Handle Mongoose validation errors
+    if (error.name === 'ValidationError') {
+      const formattedErrors = Object.values(error.errors).map((err) => ({
+        field: err.path,
+        message: err.message,
+      }));
+      return res.status(400).json({
+        success: false,
+        errors: formattedErrors,
+      });
+    }
+
+    // Handle duplicate key errors
+    if (error.code === 11000) {
+      return res.status(400).json({
+        success: false,
+        message: "Duplicate key error",
+        field: Object.keys(error.keyPattern)[0],
+      });
+    }
+
+    // Handle other errors
+    console.error("Error creating QC Check:", error);
+    res.status(500).json({
+      success: false,
+      message: "Internal Server Error",
+      error: error.message,
+    });
+  }
 };
 
 //FOR UPDATING DAILY PRODUCTION DATA BELLOW API WILL DO IF WE ARE ADDING REJECTED AND RECYCLED QUANTITY ---- >>>>>>
@@ -439,7 +603,7 @@ const deleteQcCheckZodSchema = z.object({
   }).strict();
   
  
-export const getProductByJobOrder = async (req, res) => {
+export const getProductByJobOrder1 = async (req, res) => {
     try {
       // 1. Validate query parameter
       const validatedQuery = getProductByJobOrderZodSchema.parse(req.query);
@@ -488,6 +652,96 @@ export const getProductByJobOrder = async (req, res) => {
       return res.status(200).json({
         success: true,
         message: products.length > 0 || workOrder ? 'Work order and products found for job order' : 'No products found for job order',
+        data: {
+          work_order: workOrder,
+          products: products,
+        },
+      });
+    } catch (error) {
+      // Handle Zod validation errors
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({
+          success: false,
+          errors: error.errors.map((err) => ({
+            field: err.path.join('.'),
+            message: err.message,
+          })),
+        });
+      }
+  
+      // Handle other errors
+      console.error('Error fetching work order and products for job order:', error);
+      return res.status(500).json({
+        success: false,
+        message: 'Internal Server Error',
+        error: error.message,
+      });
+    }
+  };
+
+  export const getProductByJobOrder = async (req, res) => {
+    try {
+      // 1. Validate query parameter
+      const validatedQuery = getProductByJobOrderZodSchema.parse(req.query);
+      const joId = validatedQuery.id;
+  
+      // 2. Find active QC checks for the job order
+      const qcChecks = await QCCheck.find({
+        job_order: joId,
+        status: 'Active',
+      })
+        .select('product_id')
+        .lean();
+  
+      // Extract product IDs with active QC checks
+      const qcProductIds = qcChecks.map((qc) => qc.product_id.toString());
+  
+      // 3. Find job order and populate work_order and products
+      const jobOrder = await JobOrder.findById(joId)
+        .select('work_order products')
+        .populate({
+          path: 'work_order',
+          select: 'work_order_number',
+        })
+        .populate({
+          path: 'products.product',
+          select: 'description material_code',
+          match: { isDeleted: false }, // Only include non-deleted products
+        })
+        .lean();
+  
+      // 4. Check if job order exists
+      if (!jobOrder) {
+        return res.status(404).json({
+          success: false,
+          message: 'Job order not found',
+        });
+      }
+  
+      // 5. Extract work order details
+      const workOrder = jobOrder.work_order
+        ? {
+            _id: jobOrder.work_order._id,
+            work_order_number: jobOrder.work_order.work_order_number || 'N/A',
+          }
+        : null;
+  
+      // 6. Extract products, filter out null entries and products with active QC checks
+      const products = jobOrder.products
+        .filter((item) => item.product && !qcProductIds.includes(item.product._id.toString())) // Exclude null products and those with active QC checks
+        .map((item) => ({
+          _id: item.product._id,
+          description: item.product.description,
+          material_code: item.product.material_code || 'N/A', // Include material_code, fallback to 'N/A' if not present
+        }));
+  
+      // 7. Return success response
+      return res.status(200).json({
+        success: true,
+        message:
+          products.length > 0 || workOrder
+            ? 'Work order and products found for job order'
+            : 'No eligible products found for job order (all products may have active QC checks or no products exist)',
         data: {
           work_order: workOrder,
           products: products,

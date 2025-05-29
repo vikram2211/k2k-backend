@@ -1384,30 +1384,20 @@ export const getWorkOrderById = async (req, res) => {
       return acc;
     }, {});
 
-    // Fetch aggregated data from Packing for packed and dispatched quantities
-    const packingData = await Packing.find({
-      work_order: woId,
-      delivery_stage: { $in: ['Packed', 'Dispatched'] },
-    })
-      .select('product_id product_quantity delivery_stage')
+    // Fetch packed and dispatched quantities from Inventory
+    const inventoryData = await Inventory.find({ work_order: woId })
+      .select('product packed_quantity dispatched_quantity')
       .lean();
 
-    // Aggregate packed and dispatched quantities by product_id
-    const packingQuantities = packingData.reduce(
-      (acc, packing) => {
-        const productId = packing._id.toString();
-        if (!acc[productId]) {
-          acc[productId] = { packed_quantity: 0, dispatched_quantity: 0 };
-        }
-        if (packing.delivery_stage === 'Packed') {
-          acc[productId].packed_quantity += packing.product_quantity || 0;
-        } else if (packing.delivery_stage === 'Dispatched') {
-          acc[productId].dispatched_quantity += packing.product_quantity || 0;
-        }
-        return acc;
-      },
-      {}
-    );
+    // Map inventory quantities by product_id
+    const inventoryQuantities = inventoryData.reduce((acc, inventory) => {
+      const productId = inventory.product.toString();
+      acc[productId] = {
+        packed_quantity: inventory.packed_quantity || 0,
+        dispatched_quantity: inventory.dispatched_quantity || 0,
+      };
+      return acc;
+    }, {});
 
     // Fetch Packing data for the Packings array
     const packingDetails = await Packing.find({ work_order: woId })
@@ -1473,14 +1463,14 @@ export const getWorkOrderById = async (req, res) => {
     // Aggregate dispatch details by product
     const dispatchByProduct = dispatchDetails.reduce((acc, dispatch) => {
       dispatch.products.forEach((product) => {
-        const productId = product.product_id?._id;
+        const productId = product.product_id?._id.toString();
         if (!acc[productId]) {
           acc[productId] = {
             product: product.product_id?.description || null,
             date: dispatch.date,
             total_qty: 0,
             uom: product.product_id?.uom || null,
-            vehicle_number: dispatch.vehicle_number,
+            vehicle_number: dispatch.vehicle_number || null,
           };
         }
         acc[productId].total_qty += product.dispatch_quantity || 0;
@@ -1655,8 +1645,8 @@ export const getWorkOrderById = async (req, res) => {
           product: product.product_id || null,
           plant: product.product_id?.plant || null,
           achieved_quantity: achievedQuantities[productId] || 0,
-          packed_quantity: packingQuantities[productId]?.packed_quantity || 0,
-          dispatched_quantity: packingQuantities[productId]?.dispatched_quantity || 0,
+          packed_quantity: inventoryQuantities[productId]?.packed_quantity || 0,
+          dispatched_quantity: inventoryQuantities[productId]?.dispatched_quantity || 0,
         };
       }),
       job_orders: jobOrdersWithProduction,
