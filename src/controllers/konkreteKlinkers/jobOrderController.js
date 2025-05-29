@@ -368,6 +368,7 @@ export const createJobOrder = async (req, res, next) => {
   console.log("came here");
   try {
     const validatedData = jobOrderZodSchema.parse(req.body);
+    console.log("validatedData",validatedData);
 
     if (!req.user || !req.user._id) {
       return next(new ApiError(401, 'Unauthorized: User not authenticated'));
@@ -450,11 +451,16 @@ export const createJobOrder = async (req, res, next) => {
       };
       console.log("validatedData",validatedData);
 
+      console.log("date",product.scheduled_date
+      );
+      // date:new Date(product.scheduled_date),
+
+
       const newProduction = new DailyProduction({
         work_order: validatedData.work_order,
         job_order: jobOrder[0]._id,
         products: [schemaProduct],
-        date: new Date(validatedData.date.from),
+        date: new Date(product.scheduled_date),
         submitted_by: req.user._id,
         created_by: req.user._id,
         updated_by: req.user._id,

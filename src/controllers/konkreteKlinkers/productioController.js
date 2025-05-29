@@ -441,6 +441,7 @@ export const getJobOrdersByDate2 = async (req, res) => {
 
 export const getJobOrdersByDate = async (req, res) => {
   try {
+    console.log("came here in by dateeeee");
     // Normalize today's date (UTC at 00:00)
     const today = new Date();
     // console.log("today", today);
