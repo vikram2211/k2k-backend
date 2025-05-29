@@ -1028,9 +1028,10 @@ export const getJobOrders = async (req, res) => {
 
 
 
-export const getJobOrderById = async (req, res) => {
+export const getJobOrderById1 = async (req, res) => {
   try {
     const joId = req.params.id;
+    console.log("joId",joId);
 
     // Validate joId
     if (!mongoose.isValidObjectId(joId)) {
@@ -1334,6 +1335,370 @@ export const getJobOrderById = async (req, res) => {
     });
   }
 };
+
+
+export const getJobOrderById = async (req, res) => {
+  try {
+    const joId = req.params.id;
+    console.log("joId", joId);
+
+    // Validate joId
+    if (!mongoose.isValidObjectId(joId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid Job Order ID',
+      });
+    }
+
+    const joData = await JobOrder.aggregate([
+      // Match the JobOrder by ID
+      { $match: { _id: new mongoose.Types.ObjectId(joId) } },
+
+      // Lookup WorkOrder details
+      {
+        $lookup: {
+          from: 'workorders',
+          localField: 'work_order',
+          foreignField: '_id',
+          as: 'work_order',
+        },
+      },
+      { $unwind: { path: '$work_order', preserveNullAndEmptyArrays: true } },
+
+      // Lookup Client details
+      {
+        $lookup: {
+          from: 'clients',
+          localField: 'work_order.client_id',
+          foreignField: '_id',
+          as: 'client',
+        },
+      },
+      { $unwind: { path: '$client', preserveNullAndEmptyArrays: true } },
+
+      // Lookup WorkOrder creator
+      {
+        $lookup: {
+          from: 'users',
+          localField: 'work_order.created_by',
+          foreignField: '_id',
+          as: 'work_order_creator',
+        },
+      },
+      { $unwind: { path: '$work_order_creator', preserveNullAndEmptyArrays: true } },
+
+      // Lookup JobOrder creator
+      {
+        $lookup: {
+          from: 'users',
+          localField: 'created_by',
+          foreignField: '_id',
+          as: 'job_order_creator',
+        },
+      },
+      { $unwind: { path: '$job_order_creator', preserveNullAndEmptyArrays: true } },
+
+      // Lookup Product details for each product in JobOrder
+      {
+        $lookup: {
+          from: 'products',
+          localField: 'products.product',
+          foreignField: '_id',
+          as: 'product_details',
+        },
+      },
+
+      // Lookup Machine details for each product in JobOrder
+      {
+        $lookup: {
+          from: 'machines',
+          localField: 'products.machine_name',
+          foreignField: '_id',
+          as: 'machine_details',
+        },
+      },
+
+      // Lookup Plant details via Product's plant_id
+      {
+        $lookup: {
+          from: 'plants',
+          localField: 'product_details.plant',
+          foreignField: '_id',
+          as: 'plant_details',
+        },
+      },
+
+      // Lookup DailyProduction data to get achieved_quantity and rejected_quantity
+      {
+        $lookup: {
+          from: 'dailyproductions',
+          let: { job_order_id: '$_id' },
+          pipeline: [
+            { $match: { $expr: { $eq: ['$job_order', '$$job_order_id' ]} } },
+            { $unwind: '$products' },
+            {
+              $group: {
+                _id: '$products.product_id',
+                achieved_quantity: { $sum: '$products.achieved_quantity' },
+                rejected_quantity: { $sum: '$products.rejected_quantity' },
+              },
+            },
+          ],
+          as: 'daily_production_data',
+        },
+      },
+
+      // Transform the products array
+      {
+        $addFields: {
+          products: {
+            $map: {
+              input: '$products',
+              as: 'p',
+              in: {
+                _id: '$$p._id',
+                product: '$$p.product',
+                planned_quantity: '$$p.planned_quantity',
+                scheduled_date: '$$p.scheduled_date',
+                description: {
+                  $let: {
+                    vars: {
+                      pd: {
+                        $arrayElemAt: [
+                          '$product_details',
+                          {
+                            $indexOfArray: ['$product_details._id', '$$p.product'],
+                          },
+                        ],
+                      },
+                    },
+                    in: '$$pd.description',
+                  },
+                },
+                material_code: {
+                  $let: {
+                    vars: {
+                      pd: {
+                        $arrayElemAt: [
+                          '$product_details',
+                          {
+                            $indexOfArray: ['$product_details._id', '$$p.product'],
+                          },
+                        ],
+                      },
+                    },
+                    in: '$$pd.material_code',
+                  },
+                },
+                machine_id: '$$p.machine_name',
+                machine_name: {
+                  $let: {
+                    vars: {
+                      md: {
+                        $arrayElemAt: [
+                          '$machine_details',
+                          {
+                            $indexOfArray: ['$machine_details._id', '$$p.machine_name'],
+                          },
+                        ],
+                      },
+                    },
+                    in: '$$md.name',
+                  },
+                },
+                plant_id: {
+                  $let: {
+                    vars: {
+                      pd: {
+                        $arrayElemAt: [
+                          '$product_details',
+                          {
+                            $indexOfArray: ['$product_details._id', '$$p.product'],
+                          },
+                        ],
+                      },
+                      pld: {
+                        $arrayElemAt: [
+                          '$plant_details',
+                          {
+                            $indexOfArray: ['$plant_details._id', {
+                              $let: {
+                                vars: {
+                                  pd: {
+                                    $arrayElemAt: [
+                                      '$product_details',
+                                      {
+                                        $indexOfArray: ['$product_details._id', '$$p.product'],
+                                      },
+                                    ],
+                                  },
+                                },
+                                in: '$$pd.plant',
+                              },
+                            }],
+                          },
+                        ],
+                      },
+                    },
+                    in: '$$pld._id',
+                  },
+                },
+                plant_name: {
+                  $let: {
+                    vars: {
+                      pd: {
+                        $arrayElemAt: [
+                          '$product_details',
+                          {
+                            $indexOfArray: ['$product_details._id', '$$p.product'],
+                          },
+                        ],
+                      },
+                      pld: {
+                        $arrayElemAt: [
+                          '$plant_details',
+                          {
+                            $indexOfArray: ['$plant_details._id', {
+                              $let: {
+                                vars: {
+                                  pd: {
+                                    $arrayElemAt: [
+                                      '$product_details',
+                                      {
+                                        $indexOfArray: ['$product_details._id', '$$p.product'],
+                                      },
+                                    ],
+                                  },
+                                },
+                                in: '$$pd.plant',
+                              },
+                            }],
+                          },
+                        ],
+                      },
+                    },
+                    in: '$$pld.plant_name',
+                  },
+                },
+                achieved_quantity: {
+                  $let: {
+                    vars: {
+                      dp: {
+                        $arrayElemAt: [
+                          '$daily_production_data',
+                          {
+                            $indexOfArray: ['$daily_production_data._id', '$$p.product'],
+                          },
+                        ],
+                      },
+                    },
+                    in: { $ifNull: ['$$dp.achieved_quantity', 0] },
+                  },
+                },
+                rejected_quantity: {
+                  $let: {
+                    vars: {
+                      dp: {
+                        $arrayElemAt: [
+                          '$daily_production_data',
+                          {
+                            $indexOfArray: ['$daily_production_data._id', '$$p.product'],
+                          },
+                        ],
+                      },
+                    },
+                    in: { $ifNull: ['$$dp.rejected_quantity', 0] },
+                  },
+                },
+              },
+            },
+          },
+          client_name: { $ifNull: ['$client.name', 'N/A'] },
+          client_address: { $ifNull: ['$client.address', 'N/A'] },
+          work_order_details: {
+            _id: '$work_order._id',
+            work_order_number: '$work_order.work_order_number',
+            status: '$work_order.status',
+            created_at: '$work_order.createdAt',
+            created_by: { $ifNull: ['$work_order_creator.username', 'N/A'] },
+          },
+          job_order_status: '$status',
+          created_by_name: { $ifNull: ['$job_order_creator.username', 'N/A'] },
+        },
+      },
+
+      // Project final fields
+      {
+        $project: {
+          _id: 1,
+          sales_order_number: 1,
+          products: {
+            _id: 1,
+            product: 1,
+            description: 1,
+            material_code: 1,
+            machine_id: 1,
+            machine_name: 1,
+            plant_id: 1,
+            plant_name: 1,
+            planned_quantity: 1,
+            scheduled_date: 1,
+            achieved_quantity: 1,
+            rejected_quantity: 1,
+          },
+          batch_number: 1,
+          date: 1,
+          status: 1,
+          createdAt: 1,
+          updatedAt: 1,
+          work_order_details: 1,
+          job_order_status: 1,
+          created_by: '$created_by_name',
+          client: {
+            name: '$client_name',
+            address: '$client_address',
+          },
+        },
+      },
+    ]);
+
+    if (!joData || joData.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: `Job Order with id ${joId} not found`,
+      });
+    }
+
+    // Format the response
+    const result = joData[0];
+    result.products = result.products.map((p) => ({
+      ...p,
+      description: p.description || 'N/A',
+      material_code: p.material_code || 'N/A',
+      machine_id: p.machine_id || 'N/A',
+      machine_name: p.machine_name || 'N/A',
+      plant_id: p.plant_id || 'N/A',
+      plant_name: p.plant_name || 'N/A',
+      achieved_quantity: p.achieved_quantity || 0,
+      rejected_quantity: p.rejected_quantity || 0,
+    }));
+
+    return res.status(200).json({
+      success: true,
+      message: `Job Order with id ${joId} found.`,
+      data: result,
+    });
+
+  } catch (error) {
+    console.error('Error getting JobOrder by ID:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal Server Error',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined,
+    });
+  }
+};
+
 export const updateJobOrder = async (req, res) => {
   try {
     // 1. Get job order ID from params
