@@ -504,7 +504,8 @@ export const getJobOrders = async (req, res) => {
           select: 'username'
         }
       })
-
+      .populate({path : 'created_by', select:'username'})
+      
     // Transform the response to include project_name at the top level
     const transformedOrders = jobOrders.map(order => {
       const orderObj = order.toObject();

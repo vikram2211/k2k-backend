@@ -1480,14 +1480,14 @@ export const getWorkOrderById = async (req, res) => {
             date: dispatch.date,
             total_qty: 0,
             uom: product.product_id?.uom || null,
-            vehicle_number: null,
+            vehicle_number: dispatch.vehicle_number,
           };
         }
         acc[productId].total_qty += product.dispatch_quantity || 0;
         // Use the latest date and vehicle_number for the product
         if (dispatch.date > acc[productId].date) {
           acc[productId].date = dispatch.date;
-          acc[productId].vehicle_number = dispatch.vehicle_number || null;
+          // acc[productId].vehicle_number = dispatch.vehicle_number || null;
         }
       });
       return acc;

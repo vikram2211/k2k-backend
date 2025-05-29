@@ -832,6 +832,7 @@ const createPackingSchema = z.object({
             const workOrderNumber = record.work_order ? record.work_order.work_order_number : 'No Work Order';
             const productId = record.product ? record.product._id.toString() : 'no_product';
             const productName = record.product ? record.product.description : 'No Product';
+            const createdAt = record.createdAt;
 
             // Create a unique key for the work_order and product combination
             const key = `${workOrderId}_${productId}`;
@@ -851,6 +852,7 @@ const createPackingSchema = z.object({
                     created_by: record.packed_by ? record.packed_by.username : null,
                     status: record.delivery_stage,
                     packings: [],
+                    createdAt
                 };
             }
 
