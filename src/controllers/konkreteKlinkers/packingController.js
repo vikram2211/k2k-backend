@@ -926,7 +926,7 @@ const createPackingSchema = z.object({
         const packingRecords = await Packing.find({
             work_order: work_order_id,
             product: product_id,
-            delivery_stage: 'Packed',
+            // delivery_stage: 'Packed',
         })
             .populate({
                 path: 'work_order',
