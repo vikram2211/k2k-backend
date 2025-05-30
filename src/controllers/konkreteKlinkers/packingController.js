@@ -109,6 +109,9 @@ import { WorkOrder } from '../../models/konkreteKlinkers/workOrder.model.js';
 import { Product } from '../../models/konkreteKlinkers/product.model.js';
 import {Inventory} from '../../models/konkreteKlinkers/inventory.model.js';
 import { DailyProduction } from '../../models/konkreteKlinkers/dailyProductionPlanning.js';
+import {Client} from '../../models/konkreteKlinkers/helpers/client.model.js';
+import {Project} from '../../models/konkreteKlinkers/helpers/project.model.js';
+import {JobOrder} from '../../models/konkreteKlinkers/jobOrders.model.js';
 
 
 // Helper for MongoDB ObjectId validation
@@ -908,91 +911,158 @@ const createPackingSchema = z.object({
     }
 };
 
-  const getPackingSchema = z.object({
-    work_order_id: z.string().refine((val) => mongoose.isValidObjectId(val), {
-        message: 'Invalid work order ID',
-    }),
-    product_id: z.string().refine((val) => mongoose.isValidObjectId(val), {
-        message: 'Invalid product ID',
-    }),
+const getPackingSchema = z.object({
+  work_order_id: z.string().refine((val) => mongoose.isValidObjectId(val), {
+    message: 'Invalid work order ID',
+  }),
+  product_id: z.string().refine((val) => mongoose.isValidObjectId(val), {
+    message: 'Invalid product ID',
+  }),
 }).strict();
-  export const getPackingByWorkOrderAndProduct = async (req, res) => {
-    try {
-        // 1. Validate query parameters
-        const validatedData = getPackingSchema.parse(req.query);
-        const { work_order_id, product_id } = validatedData;
 
-        // 2. Fetch packing records with populated fields and delivery_stage: "Packed"
-        const packingRecords = await Packing.find({
-            work_order: work_order_id,
-            product: product_id,
-            // delivery_stage: 'Packed',
-        })
-            .populate({
-                path: 'work_order',
-                select: 'work_order_number',
-            })
-            .populate({
-                path: 'product',
-                select: 'description',
-            })
-            .populate({
-                path: 'packed_by',
-                select: 'username',
-            })
-            .lean(); // Use lean for performance
+export const getPackingByWorkOrderAndProduct = async (req, res) => {
+  try {
+    // 1. Validate query parameters
+    const validatedData = getPackingSchema.parse(req.query);
+    const { work_order_id, product_id } = validatedData;
 
-        // 3. Check if records exist
-        if (packingRecords.length === 0) {
-            return res.status(404).json({
-                success: false,
-                message: 'No packing records found for the provided work order and product with status Packed',
-            });
-        }
+    // 2. Fetch WorkOrder details
+    const workOrder = await WorkOrder.findById(work_order_id)
+      .select('work_order_number client_id project_id created_by createdAt')
+      .populate({
+        path: 'created_by',
+        select: 'username',
+      })
+      .lean();
 
-        // 4. Transform the data to match the requested format
-        const formattedRecords = packingRecords.map((record) => ({
-            packing_id: record._id.toString(),
-            work_order_number: record.work_order ? record.work_order.work_order_number : null,
-            product_name: record.product ? record.product.description : null,
-            product_quantity: record.product_quantity,
-            bundle_size: record.bundle_size,
-            qr_id: record.qr_id || null,
-            qr_code: record.qr_code || null,
-            rejected_quantity: record.rejected_quantity,
-            uom: record.uom,
-            status: record.delivery_stage,
-            created_by: record.packed_by ? record.packed_by.username : null,
-            createdAt: record.createdAt,
-            updatedAt: record.updatedAt,
-        }));
-
-        // 5. Return success response
-        return res.status(200).json({
-            success: true,
-            message: 'Packing details retrieved successfully',
-            data: formattedRecords,
-        });
-    } catch (error) {
-        // Handle Zod validation errors
-        if (error instanceof z.ZodError) {
-            return res.status(400).json({
-                success: false,
-                errors: error.errors.map((err) => ({
-                    field: err.path.join('.'),
-                    message: err.message,
-                })),
-            });
-        }
-
-        // Handle other errors
-        console.error('Error fetching packing details:', error);
-        return res.status(500).json({
-            success: false,
-            message: 'Internal Server Error',
-            error: error.message,
-        });
+    if (!workOrder) {
+      return res.status(404).json({
+        success: false,
+        message: 'Work order not found',
+      });
     }
+
+    // 3. Fetch Client and Project details
+    const client = await Client.findById(workOrder.client_id)
+      .select('name')
+      .lean();
+
+    const project = await Project.findById(workOrder.project_id)
+      .select('name')
+      .lean();
+
+    if (!client || !project) {
+      return res.status(404).json({
+        success: false,
+        message: 'Client or project not found',
+      });
+    }
+
+    // 4. Fetch JobOrder details
+    const jobOrder = await JobOrder.findOne({
+      work_order: work_order_id,
+      'products.product': product_id,
+    })
+      .select('job_order_id')
+      .lean();
+
+    if (!jobOrder) {
+      return res.status(404).json({
+        success: false,
+        message: 'Job order not found for the provided work order and product',
+      });
+    }
+
+    // 5. Fetch packing records
+    const packingRecords = await Packing.find({
+      work_order: work_order_id,
+      product: product_id,
+      // delivery_stage: 'Packed', // Uncomment if filtering by Packed is needed
+    })
+      .populate({
+        path: 'work_order',
+        select: 'work_order_number',
+      })
+      .populate({
+        path: 'product',
+        select: 'description',
+      })
+      .populate({
+        path: 'packed_by',
+        select: 'username',
+      })
+      .lean();
+
+    if (packingRecords.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'No packing records found for the provided work order and product',
+      });
+    }
+
+    // 6. Transform packing details
+    const packingDetails = packingRecords.map((record) => ({
+      packing_id: record._id.toString(),
+      work_order_number: record.work_order ? record.work_order.work_order_number : null,
+      job_order_name: jobOrder.job_order_id || null,
+      client_name: client.name || null,
+      project_name: project.name || null,
+      product_name: record.product ? record.product.description : null,
+      product_quantity: record.product_quantity,
+      bundle_size: record.bundle_size,
+      qr_id: record.qr_id || null,
+      qr_code: record.qr_code || null,
+      rejected_quantity: record.rejected_quantity,
+      uom: record.uom,
+      status: record.delivery_stage,
+      created_by: record.packed_by ? record.packed_by.username : null,
+      createdAt: record.createdAt,
+      updatedAt: record.updatedAt,
+    }));
+
+    // 7. Construct the response
+    const responseData = {
+      client_project: {
+        client_name: client.name || 'N/A',
+        project_name: project.name || 'N/A',
+      },
+      work_order_name: workOrder.work_order_number || 'N/A',
+      work_order_id: work_order_id,
+      job_order_name: jobOrder.job_order_id || 'N/A',
+      job_order_id: jobOrder._id.toString(),
+      created: {
+        created_by: workOrder.created_by ? workOrder.created_by.username : 'N/A',
+        created_at: workOrder.createdAt,
+      },
+      packing_details:packingDetails,
+    };
+
+    // 8. Return success response
+    return res.status(200).json({
+      success: true,
+      message: 'Packing details retrieved successfully',
+      data: [responseData],
+    });
+  } catch (error) {
+    // Handle Zod validation errors
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({
+        success: false,
+        errors: error.errors.map((err) => ({
+          field: err.path.join('.'),
+          message: err.message,
+        })),
+      });
+    }
+
+    // Handle other errors
+    console.error('Error fetching packing details:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Internal Server Error',
+      error: error.message,
+    });
+  }
 };
   const deletePackingSchema = z.object({
     work_order_number: z.string().min(1, 'Work order number is required'),
