@@ -44,10 +44,13 @@ import falconClientRouter from './falconFacadeRoutes/client.routes.js';
 import falconProjectRouter from './falconFacadeRoutes/project.routes.js';
 import falconSystemRouter from './falconFacadeRoutes/system.routes.js';
 import falconProductSystemRouter from './falconFacadeRoutes/productsystem.routes.js';
+import falconProductRouter from './falconFacadeRoutes/product.routes.js';
+
 router.use('/falconFacade', falconClientRouter);
 router.use('/falconFacade', falconProjectRouter);
 router.use('/falconFacade', falconSystemRouter);
 router.use('/falconFacade', falconProductSystemRouter);
+router.use('/falconFacade', falconProductRouter);
 
 
 //routes a/c to the employee permissions. 
