@@ -191,4 +191,4 @@ const getAllFalconClients = asyncHandler(async (req, res) => {
     );
   });
 
-export { createFalconClient, updateFalconClient, getAllFalconClients, getFalconClientById, deleteFalconClient };
+export { createFalconClient, updateFalconClient, getAllFalconClients, getFalconClientById, deleteFalconClient };    
