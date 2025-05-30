@@ -10,12 +10,12 @@ import Joi from 'joi';
 
 const sendResponse = (res, response) => {
     return res.status(response.statusCode).json({
-      statusCode: response.statusCode,
-      success: response.success,
-      message: response.message,
-      data: response.data,
+        statusCode: response.statusCode,
+        success: response.success,
+        message: response.message,
+        data: response.data,
     });
-  };
+};
 
 // Create a new project
 const createFalconProject = asyncHandler(async (req, res, next) => {
@@ -23,7 +23,7 @@ const createFalconProject = asyncHandler(async (req, res, next) => {
 
     if (!req.user || !req.user._id) {
         return next(new ApiError(401, "Unauthorized. User must be logged in."));
-    } 
+    }
 
     // Validation schema
     const projectSchema = Joi.object({
@@ -54,7 +54,7 @@ const createFalconProject = asyncHandler(async (req, res, next) => {
     const created_by = req.user._id;
     if (!created_by || !mongoose.Types.ObjectId.isValid(created_by)) {
         throw new ApiError(400, 'Invalid or missing user ID in request');
-      }
+    }
 
     const project = await falconProject.create({ name, client, address, created_by });
 
@@ -62,53 +62,83 @@ const createFalconProject = asyncHandler(async (req, res, next) => {
 });
 
 // Update a project
-const updateFalconProject = asyncHandler(async (req, res, next) => {
+const updateFalconProject = asyncHandler(async (req, res) => {
+    // Validation schema
     const projectSchema = Joi.object({
-        name: Joi.string().optional().messages({ 'string.empty': 'Project Name cannot be empty' }),
-        client: Joi.string().optional().messages({ 'string.empty': 'Client ID cannot be empty' }),
-        address: Joi.string().optional().messages({ 'string.empty': 'address cannot be empty' }),
-
+        name: Joi.string().optional().allow('').messages({ 'string.empty': 'Project Name cannot be empty' }),
+        address: Joi.string().optional().allow('').messages({ 'string.empty': 'Address cannot be empty' }),
+        client: Joi.string()
+            .optional()
+            .custom((value, helpers) => {
+                if (value && !mongoose.Types.ObjectId.isValid(value)) {
+                    return helpers.error('any.invalid', { message: `Client ID (${value}) is not a valid ObjectId` });
+                }
+                return value;
+            }, 'ObjectId validation'),
     });
 
+    // Validate request body
     const { error, value } = projectSchema.validate(req.body, { abortEarly: false });
     if (error) {
-        return next(new ApiError(400, 'Validation failed for project update', error.details));
+        throw new ApiError(400, 'Validation failed for project update', error.details);
     }
 
-    const projectId = req.params.id;
+    const { id: projectId } = req.params;
+
+    // Validate projectId
     if (!mongoose.Types.ObjectId.isValid(projectId)) {
-        return next(new ApiError(400, `Provided Project ID (${projectId}) is not a valid ObjectId`));
+        throw new ApiError(400, `Provided Project ID (${projectId}) is not a valid ObjectId`);
     }
 
-    if (value.client && !mongoose.Types.ObjectId.isValid(value.client)) {
-        return next(new ApiError(400, `Provided Client ID (${value.client}) is not a valid ObjectId`));
-    }
-
+    // Prepare update data
     const updateData = {};
     if (value.name) updateData.name = value.name;
-    if (value.client) updateData.client = value.client;
     if (value.address) updateData.address = value.address;
+    if (value.client) updateData.client = value.client;
 
-    const project = await Project.findByIdAndUpdate(projectId, updateData, { new: true });
-
-    if (!project) {
-        return next(new ApiError(404, 'No project found with the given ID'));
+    // Check if updateData is empty
+    if (Object.keys(updateData).length === 0) {
+        throw new ApiError(400, 'No valid fields provided for update');
     }
 
-    return res.status(200).json(new ApiResponse(200, project, 'Project updated successfully'));
+    // Update project
+    const project = await falconProject.findByIdAndUpdate(projectId, updateData, { new: true })
+        .populate({
+            path: 'client',
+            select: 'name address',
+            match: { isDeleted: false },
+        })
+        .populate('created_by', 'username email')
+        .lean();
+
+    if (!project) {
+        throw new ApiError(404, 'No project found with the given ID');
+    }
+
+    // Convert timestamps to IST
+    const formattedProject = formatDateToIST(project);
+
+    // Send response
+    return sendResponse(res, new ApiResponse(200, formattedProject, 'Project updated successfully'));
 });
 
 // Fetch all projects
-const getAllFalconProjects = asyncHandler(async (req, res, next) => {
-    const projects = await falconProject.find({ isDeleted: false })
+const getAllFalconProjects = asyncHandler(async (req, res) => {
+    const projects = await falconProject
+        .find({ isDeleted: false })
         .populate({
-            path: 'falconClient',
+            path: 'client', // Correct path matching schema field
             select: 'name address',
             match: { isDeleted: false }, // Only include non-deleted clients
         })
-        .populate('created_by', 'username email');
+        .populate('created_by', 'username email')
+        .lean();
 
-  
+    if (!projects || projects.length === 0) {
+        throw new ApiError(404, 'No active projects available');
+    }
+
+    // Convert timestamps to IST
     const formattedProjects = formatDateToIST(projects);
 
     return sendResponse(res, new ApiResponse(200, formattedProjects, 'Projects fetched successfully'));
@@ -121,15 +151,18 @@ const getFalconProjectById = asyncHandler(async (req, res, next) => {
         return next(new ApiError(400, `Provided Project ID (${projectId}) is not a valid ObjectId`));
     }
 
-    const project = await Project.findById(projectId)
+    const project = await falconProject.findById(projectId)
         .populate('client', 'name address') // Fetch Client details
-        .populate('created_by', 'username email'); // Fetch User details who created the project
+        .populate('created_by', 'username email')
+        .lean(); // Fetch User details who created the project
 
     if (!project) {
         return next(new ApiError(404, 'No project found with the given ID'));
     }
+    const formattedProject = formatDateToIST(project);
 
-    return res.status(200).json(new ApiResponse(200, project, 'Project fetched successfully'));
+    return sendResponse(res, new ApiResponse(200, formattedProject, 'Project fetched successfully'));
+
 });
 
 const deleteFalconProject = asyncHandler(async (req, res, next) => {
@@ -157,9 +190,15 @@ const deleteFalconProject = asyncHandler(async (req, res, next) => {
     }
 
     // Perform soft deletion by setting isDeleted: true
-    const result = await Project.updateMany(
+    const result = await falconProject.updateMany(
         { _id: { $in: ids }, isDeleted: false }, // Only update non-deleted projects
-        { $set: { isDeleted: true, updatedAt: Date.now() } } // Set isDeleted and update timestamp
+        {
+            $set: {
+                isDeleted: true,
+                status: 'Inactive',
+                updatedAt: Date.now()
+            }
+        } // Set isDeleted and update timestamp
     );
 
     // Check if any documents were updated
@@ -167,13 +206,15 @@ const deleteFalconProject = asyncHandler(async (req, res, next) => {
         return res.status(404).json(new ApiResponse(404, null, 'No non-deleted projects found with provided IDs'));
     }
 
-    return res.status(200).json(
+    // Send response
+    return sendResponse(
+        res,
         new ApiResponse(
-            200,
-            { modifiedCount: result.modifiedCount },
-            `${result.modifiedCount} project(s) marked as deleted successfully`
+          200,
+          { modifiedCount: result.modifiedCount },
+          `${result.modifiedCount} project(s) marked as deleted successfully`
         )
-    );
+      );
 });
 
 export { createFalconProject, updateFalconProject, getAllFalconProjects, getFalconProjectById, deleteFalconProject };
