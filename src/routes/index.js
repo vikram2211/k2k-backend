@@ -37,6 +37,15 @@ router.use('/konkreteKlinkers',dispatchRouter);
 router.use('/konkreteKlinkers',tranferRouter);
 router.use('/konkreteKlinkers',inventoryRouter);
 
+
+
+//////FALCON FACADE - 
+import falconClientRouter from './falconFacadeRoutes/client.routes.js';
+import falconProjectRouter from './falconFacadeRoutes/project.routes.js';
+router.use('/falconFacade', falconClientRouter);
+router.use('/falconFacade', falconProjectRouter);
+
+
 //routes a/c to the employee permissions. 
 //either the employee can have the access to the individual CRUD operations (more chances this will be implemented ~ full control , create any type of user in the future and use. submadmin,qc check, inventory check , etc.. no difference among each other.)or
 // according to the process which means in each continuous checks page can be added. and if its done for multiple employees .(complex)
