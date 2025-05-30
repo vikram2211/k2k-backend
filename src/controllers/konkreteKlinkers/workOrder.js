@@ -1219,6 +1219,7 @@ export const getWorkOrderById2 = async (req, res) => {
             select: 'username',
           })
           .lean();
+          console.log("dailyProductionDatassssss",dailyProductionData);
 
         // Transform daily production data to rename product_id to product
         const transformedDailyProduction = dailyProductionData.map((dp) => ({

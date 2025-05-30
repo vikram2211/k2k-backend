@@ -928,7 +928,7 @@ export const getPackingByWorkOrderAndProduct = async (req, res) => {
 
     // 2. Fetch WorkOrder details
     const workOrder = await WorkOrder.findById(work_order_id)
-      .select('work_order_number client_id project_id created_by createdAt')
+      .select('work_order_number client_id project_id created_by createdAt products status')
       .populate({
         path: 'created_by',
         select: 'username',
@@ -941,6 +941,17 @@ export const getPackingByWorkOrderAndProduct = async (req, res) => {
         message: 'Work order not found',
       });
     }
+
+    // Calculate total_quantity and get uom for the specified product_id
+    const productData = workOrder.products.find((p) => p.product_id.toString() === product_id);
+    if (!productData) {
+      return res.status(404).json({
+        success: false,
+        message: 'Product not found in work order',
+      });
+    }
+    const totalQuantity = productData.po_quantity || 0;
+    const uom = productData.uom || 'N/A';
 
     // 3. Fetch Client and Project details
     const client = await Client.findById(workOrder.client_id)
@@ -1028,6 +1039,9 @@ export const getPackingByWorkOrderAndProduct = async (req, res) => {
       },
       work_order_name: workOrder.work_order_number || 'N/A',
       work_order_id: work_order_id,
+      total_quantity: totalQuantity,
+      uom: uom,
+      status: workOrder.status || 'N/A',
       job_order_name: jobOrder.job_order_id || 'N/A',
       job_order_id: jobOrder._id.toString(),
       created: {
