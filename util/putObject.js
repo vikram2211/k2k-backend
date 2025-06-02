@@ -25,7 +25,7 @@ export const putObject = async (file, fileName) => {
         }
 
         const url = `https://${process.env.AWS_S3_BUCKET}.s3.${process.env.AWS_REGION}.amazonaws.com/${params.Key}`;
-        // console.log("Uploaded file URL:", url);
+        console.log("Uploaded file URL:", url);
 
         return { url, key: params.Key };
     } catch (err) {
