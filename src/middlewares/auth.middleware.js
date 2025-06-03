@@ -10,12 +10,12 @@ import { User } from "../models/user.model.js";
 
 export const verifyJWT = asyncHandler(async (req, res, next) => {
   try {
-    console.log("came in auth");
+    // console.log("came in auth");
     const accessToken =
       // req.cookies?.accessToken 
       // ||
       req.header("Authorization")?.replace("Bearer ", "");
-    console.log("verifyJwt - accessToken", accessToken);
+    // console.log("verifyJwt - accessToken", accessToken);
 
     if (!accessToken) {
       throw new ApiError(401, "Unauthorized request");
@@ -24,12 +24,12 @@ export const verifyJWT = asyncHandler(async (req, res, next) => {
     let decodedToken;
     try {
       decodedToken = jwt.verify(accessToken, process.env.ACCESS_TOKEN_SECRET);
-      console.log("decodedToken",decodedToken);
+      // console.log("decodedToken",decodedToken);
     } catch (error) {
       if (error.name === "TokenExpiredError") {
         // Access token expired. Attempt to refresh.
         const refreshToken = req.cookies?.refreshToken;
-        console.log("refreshToken", refreshToken);
+        // console.log("refreshToken", refreshToken);
         if (!refreshToken) {
           throw new ApiError(401, "Session expired. Please log in again.");
         }
@@ -38,10 +38,10 @@ export const verifyJWT = asyncHandler(async (req, res, next) => {
           refreshToken,
           process.env.REFRESH_TOKEN_SECRET
         );
-        console.log("decodedRefreshToken", decodedRefreshToken);
+        // console.log("decodedRefreshToken", decodedRefreshToken);
 
         const user = await User.findById(decodedRefreshToken._id);
-        console.log("user", user);
+        // console.log("user", user);
 
         if (!user || user.refreshToken !== refreshToken) {
           throw new ApiError(401, "Invalid refresh token");
