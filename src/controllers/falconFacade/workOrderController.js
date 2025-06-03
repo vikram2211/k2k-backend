@@ -10,9 +10,6 @@ import { formatDateToIST } from '../../utils/formatDate.js';
 import { putObject } from '../../../util/putObject.js';
 import { z } from 'zod';
 import { falconProject } from '../../models/falconFacade/helpers/falconProject.model.js';
-// import { falconProject } from '../../../models/falconFacade/helpers/falconProject.model.js';
-
-// 
 
 
 
@@ -26,10 +23,10 @@ const sendResponse = (res, response) => {
 };
 
 const sanitizeFilename = (filename) => {
-    return filename.replace(/[^a-zA-Z0-9.-]/g, '_'); // Replace spaces and special chars with underscores
+    return filename.replace(/[^a-zA-Z0-9.-]/g, '_'); 
 };
 
-// Create a work order
+
 const createFalconWorkOrder = asyncHandler(async (req, res) => {
     try {
         // 1. Validation schema
@@ -277,6 +274,7 @@ const createFalconWorkOrder = asyncHandler(async (req, res) => {
         });
     }
 });
+
 const getFalconWorkOrders = asyncHandler(async (req, res) => {
 
     const workOrders = await falconWorkOrder
@@ -314,40 +312,6 @@ const getFalconWorkOrders = asyncHandler(async (req, res) => {
         new ApiResponse(200, formattedWorkOrders, 'Work orders fetched successfully.')
     );
 });
-
-
-const updateWorkOrder = asyncHandler(async (req, res) => {
-    try {
-
-    } catch (error) {
-        if (error instanceof z.ZodError) {
-            return res.status(400).json({
-                success: false,
-                errors: error.errors.map((err) => ({
-                    field: err.path.join('.'),
-                    message: err.message,
-                })),
-            });
-        }
-
-        if (error.name === 'ValidationError') {
-            const formattedErrors = Object.values(error.errors).map((err) => ({
-                field: err.path,
-                message: err.message,
-            }));
-            return res.status(400).json({
-                success: false,
-                errors: formattedErrors,
-            });
-        }
-
-        console.error('Error creating WorkOrder:', error);
-        res.status(500).json({
-            success: false,
-            message: error.message || 'Internal Server Error',
-        });
-    }
-})
 
 const updateFalconWorkOrder = asyncHandler(async (req, res) => {
     const { id } = req.params;
@@ -585,7 +549,7 @@ const getFalconWorkOrderById = asyncHandler(async (req, res) => {
 
     const workOrder = await falconWorkOrder
         .findById(id)
-        .select('work_order_number client_id project_id products createdAt updatedAt')
+        .select('work_order_number client_id project_id products files date remarks createdAt updatedAt')
         .populate({
             path: 'client_id',
             select: 'name address',
