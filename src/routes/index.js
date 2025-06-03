@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import userRouter from './user.routes.js';
+import employeeRouter from './emplyee.routes.js';
 import clientRouter from './client.routes.js';
 import plantRouter from './plant.routes.js';
 import machineRouter from './machine.routes.js';
@@ -19,6 +20,7 @@ const router = Router();
 
 // Register routes
 router.use('/users', userRouter);
+router.use('/users', employeeRouter);
 router.use('/dropdown', dropdownRouter);
 
 //the routes should be a/c to the company type, so that multiple companies can be added.
@@ -46,6 +48,7 @@ import falconSystemRouter from './falconFacadeRoutes/system.routes.js';
 import falconProductSystemRouter from './falconFacadeRoutes/productsystem.routes.js';
 import falconProductRouter from './falconFacadeRoutes/product.routes.js';
 import falconWorkOrderRouter from './falconFacadeRoutes/workorder.routes.js';
+import falconJobOrderRouter from './falconFacadeRoutes/joborder.routes.js';
 
 router.use('/falconFacade', falconClientRouter);
 router.use('/falconFacade', falconProjectRouter);
@@ -53,6 +56,7 @@ router.use('/falconFacade', falconSystemRouter);
 router.use('/falconFacade', falconProductSystemRouter);
 router.use('/falconFacade', falconProductRouter);
 router.use('/falconFacade', falconWorkOrderRouter);
+router.use('/falconFacade', falconJobOrderRouter);
 
 
 //routes a/c to the employee permissions. 
