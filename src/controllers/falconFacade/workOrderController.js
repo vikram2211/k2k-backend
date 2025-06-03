@@ -283,6 +283,11 @@ const getFalconWorkOrders = asyncHandler(async (req, res) => {
         .find()
         .select('_id work_order_number client_id project_id remarks createdAt updatedAt status date')
         .populate({
+            path: 'created_by',
+            select: 'username',
+            // match: { isDeleted: false },
+        })
+        .populate({
             path: 'client_id',
             select: 'name address',
             match: { isDeleted: false },
