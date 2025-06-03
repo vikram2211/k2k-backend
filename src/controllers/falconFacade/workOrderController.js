@@ -346,7 +346,7 @@ const updateWorkOrder = asyncHandler(async (req, res) => {
 
 const updateFalconWorkOrder = asyncHandler(async (req, res) => {
     const { id } = req.params;
-    console.log("id",id);
+    console.log("id", id);
 
     if (!mongoose.Types.ObjectId.isValid(id)) {
         throw new ApiError(400, `Invalid work order ID: ${id}`);
@@ -531,7 +531,7 @@ const updateFalconWorkOrder = asyncHandler(async (req, res) => {
     // 8. Find and update work order
     const workOrder = await falconWorkOrder
         .findOneAndUpdate(
-            { _id: id},
+            { _id: id },
             { $set: value },
             { new: true, runValidators: true }
         )
@@ -620,6 +620,45 @@ const getFalconWorkOrderById = asyncHandler(async (req, res) => {
     );
 });
 
+const deleteFalconWorkOrder = asyncHandler(async (req, res) => {
+    let ids = req.body.ids;
+    console.log('ids', ids);
+
+    // Validate input
+    if (!ids) {
+        return res.status(400).json(new ApiResponse(400, null, 'No IDs provided'));
+    }
+
+    // Convert single ID to array if needed
+    if (!Array.isArray(ids)) {
+        ids = [ids];
+    }
+
+    // Check for empty array
+    if (ids.length === 0) {
+        return res.status(400).json(new ApiResponse(400, null, 'IDs array cannot be empty'));
+    }
+
+    // Validate MongoDB ObjectIds
+    const invalidIds = ids.filter(id => !mongoose.Types.ObjectId.isValid(id));
+    if (invalidIds.length > 0) {
+        return res.status(400).json(new ApiResponse(400, null, `Invalid ID(s): ${invalidIds.join(', ')}`));
+    }
+
+    // Permanent deletion
+    // const result = await WorkOrder.deleteMany({ _id: { $in: ids } });
+    const result = await falconWorkOrder.deleteMany({ _id: { $in: ids } });
+
+    if (result.deletedCount === 0) {
+        return res.status(404).json(new ApiResponse(404, null, 'No work orders found to delete'));
+    }
+
+    return res.status(200).json(new ApiResponse(200, {
+        deletedCount: result.deletedCount,
+        deletedIds: ids
+    }, `${result.deletedCount} work order(s) deleted successfully`));
+});
+
 const getFalconProjectBasedOnClient = async (req, res, next) => {
     try {
         console.log("came in get projects");
@@ -665,4 +704,4 @@ const getFalconProjectBasedOnClient = async (req, res, next) => {
     }
 }
 
-export { createFalconWorkOrder, getFalconWorkOrders, getFalconWorkOrderById, getFalconProjectBasedOnClient, updateFalconWorkOrder };
+export { createFalconWorkOrder, getFalconWorkOrders, getFalconWorkOrderById, getFalconProjectBasedOnClient, updateFalconWorkOrder, deleteFalconWorkOrder };

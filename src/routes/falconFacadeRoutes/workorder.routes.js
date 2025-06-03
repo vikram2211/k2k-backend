@@ -8,7 +8,7 @@ import {
     getFalconWorkOrderById,
     getFalconProjectBasedOnClient,
     // getPlantBasedOnProduct,
-    // deleteWorkOrder,
+    deleteFalconWorkOrder,
     updateFalconWorkOrder
 } from '../../controllers/falconFacade/workOrderController.js';
 
@@ -22,7 +22,7 @@ router.route('/workorders/:id').get(getFalconWorkOrderById).put(upload.array('fi
 // 
 router.route('/workorders-getProject').get(getFalconProjectBasedOnClient);
 // router.route('/workorders-getPlant').get(getPlantBasedOnProduct);
-// router.route('/workorders-delete').delete(deleteWorkOrder);
+router.route('/workorders/delete').delete(deleteFalconWorkOrder);
 // .put(updateClient);
 
 export default router;
