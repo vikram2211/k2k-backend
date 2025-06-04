@@ -367,6 +367,88 @@ const getFalconJobOrders = asyncHandler(async (req, res) => {
 
     return sendResponse(res, new ApiResponse(200, formattedJobOrders, 'Job orders fetched successfully'));
 });
+
+const getFalconJobOrderById = asyncHandler(async (req, res) => {
+    // 1. Get job order ID from params
+    const { id } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      throw new ApiError(400, `Invalid job order ID: ${id}`);
+    }
+  
+    // 2. Fetch job order with populated fields
+    const jobOrder = await falconJobOrder
+      .findById(id)
+      .populate({
+        path: 'client_id',
+        select: 'name address',
+        match: { isDeleted: false },
+      })
+      .populate({
+        path: 'project_id',
+        select: 'name',
+        match: { isDeleted: false },
+      })
+      .populate({
+        path: 'products.product',
+        select: 'name',
+        match: { isDeleted: false },
+      })
+      .populate({
+        path: 'prod_issued_approved_by',
+        select: 'name',
+        // match: { isDeleted: false },
+      })
+      .populate({
+        path: 'prod_recieved_by',
+        select: 'name',
+        // match: { isDeleted: false },
+      })
+      .populate('created_by', 'username email')
+      .populate('updated_by', 'username email')
+      .lean();
+  
+    if (!jobOrder) {
+      throw new ApiError(404, `Job order not found with ID: ${id}`);
+    }
+  
+    // 3. Format the response
+    const formattedJobOrder = {
+      clientProjectDetails: {
+        clientName: jobOrder.client_id?.name || 'N/A',
+        address: jobOrder.client_id?.address || 'N/A',
+        projectName: jobOrder.project_id?.name || 'N/A',
+      },
+      workOrderDetails: {
+        workOrderNumber: jobOrder.work_order_number,
+        productionRequestDate: formatDateOnly(jobOrder.prod_requset_date),
+        productionRequirementDate: formatDateOnly(jobOrder.prod_requirement_date),
+        approvedBy: jobOrder.prod_issued_approved_by?.name || 'N/A',
+        receivedBy: jobOrder.prod_recieved_by?.name || 'N/A',
+        workOrderDate: formatDateOnly(jobOrder.date),
+        file: jobOrder.files.length > 0 ? jobOrder.files[0].file_url : null,
+        createdAt: formatDateToIST({ createdAt: jobOrder.createdAt }).createdAt.split(' ')[0], // Only date part
+        createdBy: jobOrder.created_by?.username || 'N/A',
+      },
+      jobOrderDetails: {
+        jobOrderNumber: jobOrder.job_order_id,
+        createdAt: formatDateToIST({ createdAt: jobOrder.createdAt }).createdAt.split(' ')[0], // Only date part
+        createdBy: jobOrder.created_by?.username || 'N/A',
+        status: jobOrder.status,
+      },
+      productsDetails: jobOrder.products.map(product => ({
+        productName: product.product?.name || 'N/A',
+        uom: product.uom,
+        code: product.code,
+        colorCode: product.color_code,
+        height: product.height,
+        width: product.width,
+        poQuantity: product.po_quantity,
+        deliveryDate: formatDateOnly(jobOrder.prod_requirement_date),
+      })),
+    };
+  
+    return sendResponse(res, new ApiResponse(200, formattedJobOrder, 'Job order fetched successfully'));
+  });
 const getFalconJobOrderss = asyncHandler(async (req, res) => {
     const jobOrders = await falconJobOrder
         .find()
@@ -518,12 +600,12 @@ const updateFalconJobOrder = asyncHandler(async (req, res) => {
             .valid('Pending', 'Approved', 'Rejected', 'In Progress')
             .optional()
             .messages({ 'any.only': 'Status must be Pending, Approved, Rejected, or In Progress' }),
-            updated_by: Joi.string().optional().custom((value, helpers) => {
-                if (!mongoose.Types.ObjectId.isValid(value)) {
-                    return helpers.error('any.invalid', { message: `Updated by ID (${value}) is not a valid ObjectId` });
-                }
-                return value;
-            }, 'ObjectId validation'),
+        updated_by: Joi.string().optional().custom((value, helpers) => {
+            if (!mongoose.Types.ObjectId.isValid(value)) {
+                return helpers.error('any.invalid', { message: `Updated by ID (${value}) is not a valid ObjectId` });
+            }
+            return value;
+        }, 'ObjectId validation'),
     });
 
     // 3. Parse form-data
@@ -722,39 +804,39 @@ const updateFalconJobOrder = asyncHandler(async (req, res) => {
 const deleteFalconJobOrder = asyncHandler(async (req, res) => {
     let ids = req.body.ids;
     console.log('ids', ids);
-  
+
     // Validate input
     if (!ids) {
-      return sendResponse(res, new ApiResponse(400, null, 'No IDs provided'));
+        return sendResponse(res, new ApiResponse(400, null, 'No IDs provided'));
     }
-  
+
     // Convert single ID to array if needed
     if (!Array.isArray(ids)) {
-      ids = [ids];
+        ids = [ids];
     }
-  
+
     // Check for empty array
     if (ids.length === 0) {
-      return sendResponse(res, new ApiResponse(400, null, 'IDs array cannot be empty'));
+        return sendResponse(res, new ApiResponse(400, null, 'IDs array cannot be empty'));
     }
-  
+
     // Validate MongoDB ObjectIds
     const invalidIds = ids.filter(id => !mongoose.Types.ObjectId.isValid(id));
     if (invalidIds.length > 0) {
-      return sendResponse(res, new ApiResponse(400, null, `Invalid ID(s): ${invalidIds.join(', ')}`));
+        return sendResponse(res, new ApiResponse(400, null, `Invalid ID(s): ${invalidIds.join(', ')}`));
     }
-  
+
     // Permanent deletion
     const result = await falconJobOrder.deleteMany({ _id: { $in: ids } });
-  
-    if (result.deletedCount === 0) {
-      return sendResponse(res, new ApiResponse(404, null, 'No job orders found to delete'));
-    }
-  
-    return sendResponse(res, new ApiResponse(200, {
-      deletedCount: result.deletedCount,
-      deletedIds: ids
-    }, `${result.deletedCount} job order(s) deleted successfully`));
-  });
 
-export { createFalconJobOrder, getFalconJobOrders, updateFalconJobOrder, deleteFalconJobOrder};
+    if (result.deletedCount === 0) {
+        return sendResponse(res, new ApiResponse(404, null, 'No job orders found to delete'));
+    }
+
+    return sendResponse(res, new ApiResponse(200, {
+        deletedCount: result.deletedCount,
+        deletedIds: ids
+    }, `${result.deletedCount} job order(s) deleted successfully`));
+});
+
+export { createFalconJobOrder, getFalconJobOrders, updateFalconJobOrder, deleteFalconJobOrder, getFalconJobOrderById };
