@@ -6,7 +6,7 @@ export const putObject = async (file, fileName) => {
         if (!file || !file.data) {
             throw new Error("File data is missing or empty");
         }
-        console.log("bucket",process.env.AWS_S3_BUCKET);
+        console.log("bucket", process.env.AWS_S3_BUCKET);
 
         const params = {
             Bucket: process.env.AWS_S3_BUCKET,
@@ -15,7 +15,7 @@ export const putObject = async (file, fileName) => {
             ContentType: file.mimetype || "application/octet-stream", // Ensure ContentType is valid
         };
 
-        console.log("Uploading file with params:", params);
+        // console.log("Uploading file with params:", params);
 
         const command = new PutObjectCommand(params);
         const data = await s3Client.send(command);
@@ -25,7 +25,7 @@ export const putObject = async (file, fileName) => {
         }
 
         const url = `https://${process.env.AWS_S3_BUCKET}.s3.${process.env.AWS_REGION}.amazonaws.com/${params.Key}`;
-        console.log("Uploaded file URL:", url);
+        // console.log("Uploaded file URL:", url);
 
         return { url, key: params.Key };
     } catch (err) {

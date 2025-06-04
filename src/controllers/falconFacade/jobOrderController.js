@@ -719,4 +719,42 @@ const updateFalconJobOrder = asyncHandler(async (req, res) => {
     return sendResponse(res, new ApiResponse(200, formattedJobOrder, 'Job order updated successfully'));
 });
 
-export { createFalconJobOrder, getFalconJobOrders, updateFalconJobOrder };
+const deleteFalconJobOrder = asyncHandler(async (req, res) => {
+    let ids = req.body.ids;
+    console.log('ids', ids);
+  
+    // Validate input
+    if (!ids) {
+      return sendResponse(res, new ApiResponse(400, null, 'No IDs provided'));
+    }
+  
+    // Convert single ID to array if needed
+    if (!Array.isArray(ids)) {
+      ids = [ids];
+    }
+  
+    // Check for empty array
+    if (ids.length === 0) {
+      return sendResponse(res, new ApiResponse(400, null, 'IDs array cannot be empty'));
+    }
+  
+    // Validate MongoDB ObjectIds
+    const invalidIds = ids.filter(id => !mongoose.Types.ObjectId.isValid(id));
+    if (invalidIds.length > 0) {
+      return sendResponse(res, new ApiResponse(400, null, `Invalid ID(s): ${invalidIds.join(', ')}`));
+    }
+  
+    // Permanent deletion
+    const result = await falconJobOrder.deleteMany({ _id: { $in: ids } });
+  
+    if (result.deletedCount === 0) {
+      return sendResponse(res, new ApiResponse(404, null, 'No job orders found to delete'));
+    }
+  
+    return sendResponse(res, new ApiResponse(200, {
+      deletedCount: result.deletedCount,
+      deletedIds: ids
+    }, `${result.deletedCount} job order(s) deleted successfully`));
+  });
+
+export { createFalconJobOrder, getFalconJobOrders, updateFalconJobOrder, deleteFalconJobOrder};
