@@ -337,16 +337,17 @@ const getFalconJobOrders = asyncHandler(async (req, res) => {
     if (!jobOrders?.length) {
         return sendResponse(res, new ApiResponse(200, [], 'No job orders found'));
     }
-    
-    let createdAtNew = jobOrders.map((jobOrder, index) => { return jobOrder.createdAt});
-    let newCreated = createdAtNew;
-    console.log("newCreated",newCreated);
-    console.log(formatDateToIST(newCreated))
+
+    // let createdAtNew = jobOrders.map((jobOrder, index) => { return jobOrder.createdAt });
+    // let newCreated = createdAtNew;
+    // console.log("newCreated", newCreated);
+    // console.log(formatDateToIST(newCreated))
 
     // Add srNo and format response
     const formattedJobOrders = jobOrders.map((jobOrder, index) => {
         const formatted = {
             srNo: index + 1,
+            id: jobOrder._id,
             jobOrderNumber: jobOrder.job_order_id,
             clientDetails: jobOrder.client_id,
             projectDetails: jobOrder.project_id,
@@ -433,4 +434,289 @@ const getFalconJobOrderss = asyncHandler(async (req, res) => {
     return sendResponse(res, new ApiResponse(200, formattedJobOrders, 'Job orders fetched successfully'));
 });
 
-export { createFalconJobOrder, getFalconJobOrders };
+const updateFalconJobOrder = asyncHandler(async (req, res) => {
+    // 1. Get job order ID from params
+    const { id } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+        throw new ApiError(400, `Invalid job order ID: ${id}`);
+    }
+
+    // 2. Validation schema
+    const productSchema = Joi.object({
+        product: Joi.string()
+            .required()
+            .custom((value, helpers) => {
+                if (!mongoose.Types.ObjectId.isValid(value)) {
+                    return helpers.error('any.invalid', { message: `Product ID (${value}) is not a valid ObjectId` });
+                }
+                return value;
+            }, 'ObjectId validation'),
+        code: Joi.string().required().messages({ 'string.empty': 'Product code is required' }),
+        uom: Joi.string().required().messages({ 'string.empty': 'UOM is required' }),
+        po_quantity: Joi.number().min(0).required().messages({
+            'number.base': 'PO quantity must be a number',
+            'number.min': 'PO quantity must be non-negative',
+        }),
+        color_code: Joi.string().required().messages({ 'string.empty': 'Color code is required' }),
+        width: Joi.number().min(0).required().messages({
+            'number.base': 'Width must be a number',
+            'number.min': 'Width must be non-negative',
+        }),
+        height: Joi.number().min(0).required().messages({
+            'number.base': 'Height must be a number',
+            'number.min': 'Height must be non-negative',
+        }),
+    });
+
+    const fileSchema = Joi.object({
+        file_name: Joi.string().required().messages({ 'string.empty': 'File name is required' }),
+        file_url: Joi.string().uri().required().messages({ 'string.uri': 'File URL must be a valid URL' }),
+        uploaded_at: Joi.date().optional(),
+    });
+
+    const updateJobOrderSchema = Joi.object({
+        client_id: Joi.string().optional()
+            .custom((value, helpers) => {
+                if (!mongoose.Types.ObjectId.isValid(value)) {
+                    return helpers.error('any.invalid', { message: `Client ID (${value}) is not a valid ObjectId` });
+                }
+                return value;
+            }, 'ObjectId validation'),
+        project_id: Joi.string().optional()
+            .custom((value, helpers) => {
+                if (!mongoose.Types.ObjectId.isValid(value)) {
+                    return helpers.error('any.invalid', { message: `Project ID (${value}) is not a valid ObjectId` });
+                }
+                return value;
+            }, 'ObjectId validation'),
+        work_order_number: Joi.string().optional().messages({ 'string.empty': 'Work order number cannot be empty' }),
+        prod_issued_approved_by: Joi.string()
+            .optional()
+            .custom((value, helpers) => {
+                if (!mongoose.Types.ObjectId.isValid(value)) {
+                    return helpers.error('any.invalid', { message: `Product issued approved by ID (${value}) is not a valid ObjectId` });
+                }
+                return value;
+            }, 'ObjectId validation'),
+        prod_recieved_by: Joi.string()
+            .optional()
+            .custom((value, helpers) => {
+                if (!mongoose.Types.ObjectId.isValid(value)) {
+                    return helpers.error('any.invalid', { message: `Product received by ID (${value}) is not a valid ObjectId` });
+                }
+                return value;
+            }, 'ObjectId validation'),
+        date: Joi.date().optional(),
+        prod_requset_date: Joi.date().optional().messages({ 'date.base': 'Product request date must be a valid date' }),
+        prod_requirement_date: Joi.date().optional().messages({ 'date.base': 'Product requirement date must be a valid date' }),
+        remarks: Joi.string().optional().messages({ 'string.empty': 'Remarks cannot be empty' }),
+        products: Joi.array().items(productSchema).min(1).optional().messages({
+            'array.min': 'At least one product is required if products are provided',
+        }),
+        files: Joi.array().items(fileSchema).optional(),
+        status: Joi.string()
+            .valid('Pending', 'Approved', 'Rejected', 'In Progress')
+            .optional()
+            .messages({ 'any.only': 'Status must be Pending, Approved, Rejected, or In Progress' }),
+            updated_by: Joi.string().optional().custom((value, helpers) => {
+                if (!mongoose.Types.ObjectId.isValid(value)) {
+                    return helpers.error('any.invalid', { message: `Updated by ID (${value}) is not a valid ObjectId` });
+                }
+                return value;
+            }, 'ObjectId validation'),
+    });
+
+    // 3. Parse form-data
+    const bodyData = req.body;
+    // console.log('bodyData', bodyData);
+    const userId = req.user?._id?.toString();
+    // console.log('userId', userId);
+
+    // Validate userId
+    if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
+        throw new ApiError(400, 'Invalid or missing user ID in request');
+    }
+
+    // 4. Parse stringified fields if needed
+    if (typeof bodyData.products === 'string' && bodyData.products) {
+        try {
+            bodyData.products = JSON.parse(bodyData.products);
+        } catch (error) {
+            throw new ApiError(400, 'Invalid products JSON format');
+        }
+    }
+
+    // 5. Handle file uploads
+    const uploadedFiles = [];
+    if (req.files && req.files.length > 0) {
+        try {
+            for (const file of req.files) {
+                const tempFilePath = path.join('./public/temp', file.filename);
+                const fileBuffer = fs.readFileSync(tempFilePath);
+                const sanitizedFilename = sanitizeFilename(file.originalname);
+                console.log('filename', file.originalname);
+                console.log('sanitizedFilename', sanitizedFilename);
+
+                // Upload to S3
+                const { url } = await putObject(
+                    { data: fileBuffer, mimetype: file.mimetype },
+                    `falcon-job-orders/${Date.now()}-${sanitizedFilename}`
+                );
+
+                // Delete temp file
+                fs.unlinkSync(tempFilePath);
+
+                uploadedFiles.push({
+                    file_name: file.originalname,
+                    file_url: url,
+                    uploaded_at: new Date(),
+                });
+            }
+        } catch (error) {
+            // Cleanup temp files on upload error
+            if (req.files) {
+                req.files.forEach((file) => {
+                    const tempFilePath = path.join('./public/temp', file.filename);
+                    if (fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath);
+                });
+            }
+            throw new ApiError(500, `File upload failed: ${error.message}`);
+        }
+    }
+
+    // 6. Prepare job order data for validation
+    const jobOrderData = {
+        ...(bodyData.client_id && { client_id: bodyData.client_id }),
+        ...(bodyData.project_id && { project_id: bodyData.project_id }),
+        ...(bodyData.work_order_number && { work_order_number: bodyData.work_order_number }),
+        ...(bodyData.prod_issued_approved_by && { prod_issued_approved_by: bodyData.prod_issued_approved_by }),
+        ...(bodyData.prod_recieved_by && { prod_recieved_by: bodyData.prod_recieved_by }),
+        ...(bodyData.date && { date: new Date(bodyData.date) }),
+        ...(bodyData.prod_requset_date && { prod_requset_date: new Date(bodyData.prod_requset_date) }),
+        ...(bodyData.prod_requirement_date && { prod_requirement_date: new Date(bodyData.prod_requirement_date) }),
+        ...(bodyData.remarks && { remarks: bodyData.remarks }),
+        ...(bodyData.products && { products: bodyData.products }),
+        ...(bodyData.status && { status: bodyData.status }),
+        updated_by: userId,
+    };
+
+    // 7. Validate with Joi
+    const { error, value } = updateJobOrderSchema.validate(
+        { ...jobOrderData, files: uploadedFiles },
+        { abortEarly: false }
+    );
+    if (error) {
+        // Cleanup temp files
+        if (req.files) {
+            req.files.forEach((file) => {
+                const tempFilePath = path.join('./public/temp', file.filename);
+                if (fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath);
+            });
+        }
+        throw new ApiError(400, 'Validation failed for job order update', error.details);
+    }
+
+    // 8. Validate referenced documents if provided
+    const validationPromises = [];
+    if (value.client_id) {
+        validationPromises.push(mongoose.model('falconClient').findById(value.client_id));
+    }
+    if (value.project_id) {
+        validationPromises.push(mongoose.model('falconProject').findById(value.project_id));
+    }
+    if (value.prod_issued_approved_by) {
+        validationPromises.push(mongoose.model('Employee').findById(value.prod_issued_approved_by));
+    }
+    if (value.prod_recieved_by) {
+        validationPromises.push(mongoose.model('Employee').findById(value.prod_recieved_by));
+    }
+    if (value.products) {
+        validationPromises.push(
+            Promise.all(value.products.map((p) => mongoose.model('falconProduct').findById(p.product)))
+        );
+    }
+
+    const [client, project, approvedByEmployee, receivedByEmployee, products] = await Promise.all(validationPromises);
+
+    if (value.client_id && !client) throw new ApiError(400, `Client not found with ID: ${value.client_id}`);
+    if (value.project_id && !project) throw new ApiError(400, `Project not found with ID: ${value.project_id}`);
+    if (value.prod_issued_approved_by && !approvedByEmployee) {
+        throw new ApiError(404, `Employee not found for prod_issued_approved_by ID: ${value.prod_issued_approved_by}`);
+    }
+    if (value.prod_recieved_by && !receivedByEmployee) {
+        throw new ApiError(404, `Employee not found for prod_rec_by_id ID: ${value.prod_recieved_by}`);
+    }
+    if (value.products) {
+        const invalidProduct = products.findIndex((p) => !p);
+        if (invalidProduct !== -1) {
+            throw new ApiError(400, `Product not found with ID: ${value.products[invalidProduct].product}`);
+        }
+    }
+
+    // 9. Prepare MongoDB update
+    const updateData = { $set: value };
+    if (uploadedFiles.length > 0) {
+        updateData.$push = { files: { $each: uploadedFiles } };
+    }
+    delete updateData.$set.files; // Avoid overwriting files array
+
+    const jobOrder = await falconJobOrder.findByIdAndUpdate(
+        id,
+        updateData,
+        { new: true, runValidators: true }
+    );
+
+    if (!jobOrder) {
+        // Cleanup temp files
+        if (req.files) {
+            req.files.forEach((file) => {
+                const tempFilePath = path.join('./public/temp', file.filename);
+                if (fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath);
+            });
+        }
+        throw new ApiError(404, `Job order not found with ID: ${id}`);
+    }
+
+    // 10. Populate and format response
+    const populatedJobOrder = await falconJobOrder
+        .findById(jobOrder._id)
+        .populate({
+            path: 'client_id',
+            select: 'name address',
+            match: { isDeleted: false },
+        })
+        .populate({
+            path: 'project_id',
+            select: 'name',
+            match: { isDeleted: false },
+        })
+        .populate({
+            path: 'products.product',
+            select: 'name',
+            match: { is_deleted: false },
+        })
+        .populate({
+            path: 'prod_issued_approved_by',
+            select: 'name email',
+            match: { isDeleted: false },
+        })
+        .populate({
+            path: 'prod_recieved_by',
+            select: 'name email',
+            match: { isDeleted: false },
+        })
+        .populate('created_by', 'username email')
+        .populate('updated_by', 'username email')
+        .lean();
+
+    if (!populatedJobOrder) {
+        throw new ApiError(404, 'Failed to retrieve updated job order');
+    }
+
+    // Convert timestamps to IST
+    const formattedJobOrder = formatDateToIST(populatedJobOrder);
+
+    return sendResponse(res, new ApiResponse(200, formattedJobOrder, 'Job order updated successfully'));
+});
+
+export { createFalconJobOrder, getFalconJobOrders, updateFalconJobOrder };

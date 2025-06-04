@@ -10,6 +10,7 @@ import { formatDateToIST } from '../../utils/formatDate.js';
 import { putObject } from '../../../util/putObject.js';
 import { z } from 'zod';
 import { falconProject } from '../../models/falconFacade/helpers/falconProject.model.js';
+import { deleteObject } from '../../../util/deleteObject.js';
 
 
 
@@ -23,7 +24,7 @@ const sendResponse = (res, response) => {
 };
 
 const sanitizeFilename = (filename) => {
-    return filename.replace(/[^a-zA-Z0-9.-]/g, '_'); 
+    return filename.replace(/[^a-zA-Z0-9.-]/g, '_');
 };
 
 
@@ -398,6 +399,23 @@ const updateFalconWorkOrder = asyncHandler(async (req, res) => {
             throw new ApiError(400, 'Invalid products JSON format');
         }
     }
+
+
+
+    const existingWorkOrder = await falconWorkOrder.findById(id).lean();
+    if (!existingWorkOrder) {
+        throw new ApiError(404, `Work order with ID ${id} not found`);
+    }
+
+    // Delete old files from S3 if new files are being uploaded
+    if (req.files && req.files.length > 0 && existingWorkOrder.files?.length) {
+        for (const file of existingWorkOrder.files) {
+            const urlParts = file.file_url.split('/');
+            const key = urlParts.slice(3).join('/'); // remove https://s3-region.amazonaws.com/bucket-name/
+            await deleteObject(key);
+        }
+    }
+
 
     // 4. Handle file uploads
     const uploadedFiles = [];
