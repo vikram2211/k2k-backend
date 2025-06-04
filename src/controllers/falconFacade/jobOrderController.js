@@ -347,7 +347,7 @@ const getFalconJobOrders = asyncHandler(async (req, res) => {
     const formattedJobOrders = jobOrders.map((jobOrder, index) => {
         const formatted = {
             srNo: index + 1,
-            id: jobOrder._id,
+            _id: jobOrder._id,
             jobOrderNumber: jobOrder.job_order_id,
             clientDetails: jobOrder.client_id,
             projectDetails: jobOrder.project_id,
