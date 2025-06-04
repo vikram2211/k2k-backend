@@ -308,7 +308,7 @@ const formatDateOnly = (date) => {
 const getFalconJobOrders = asyncHandler(async (req, res) => {
     const jobOrders = await falconJobOrder
         .find()
-        .select('_id job_order_id client_id project_id prod_issued_approved_by prod_recieved_by prod_requset_date prod_requirement_date remarks createdAt updatedAt status date')
+        .select('_id job_order_id client_id project_id prod_issued_approved_by prod_recieved_by prod_requset_date prod_requirement_date remarks createdAt updatedAt status date files')
         .populate({
             path: 'client_id',
             select: 'name address',
@@ -333,6 +333,7 @@ const getFalconJobOrders = asyncHandler(async (req, res) => {
         .lean();
 
     // console.log('jobOrders', jobOrders);
+    // jobOrders.map((jobOrder, index) => {console.log("fileData",jobOrder.files)})
 
     if (!jobOrders?.length) {
         return sendResponse(res, new ApiResponse(200, [], 'No job orders found'));
@@ -372,88 +373,93 @@ const getFalconJobOrderById = asyncHandler(async (req, res) => {
     // 1. Get job order ID from params
     const { id } = req.params;
     if (!mongoose.Types.ObjectId.isValid(id)) {
-      throw new ApiError(400, `Invalid job order ID: ${id}`);
+        throw new ApiError(400, `Invalid job order ID: ${id}`);
     }
-  
+
     // 2. Fetch job order with populated fields
     const jobOrder = await falconJobOrder
-      .findById(id)
-      .populate({
-        path: 'client_id',
-        select: 'name address',
-        match: { isDeleted: false },
-      })
-      .populate({
-        path: 'project_id',
-        select: 'name',
-        match: { isDeleted: false },
-      })
-      .populate({
-        path: 'products.product',
-        select: 'name',
-        match: { isDeleted: false },
-      })
-      .populate({
-        path: 'prod_issued_approved_by',
-        select: 'name',
-        // match: { isDeleted: false },
-      })
-      .populate({
-        path: 'prod_recieved_by',
-        select: 'name',
-        // match: { isDeleted: false },
-      })
-      .populate('created_by', 'username email')
-      .populate('updated_by', 'username email')
-      .lean();
-  
+        .findById(id)
+        .populate({
+            path: 'client_id',
+            select: 'name address',
+            match: { isDeleted: false },
+        })
+        .populate({
+            path: 'project_id',
+            select: 'name',
+            match: { isDeleted: false },
+        })
+        .populate({
+            path: 'products.product',
+            select: 'name',
+            match: { isDeleted: false },
+        })
+        .populate({
+            path: 'prod_issued_approved_by',
+            select: 'name',
+            // match: { isDeleted: false },
+        })
+        .populate({
+            path: 'prod_recieved_by',
+            select: 'name',
+            // match: { isDeleted: false },
+        })
+        .populate('created_by', 'username email')
+        .populate('updated_by', 'username email')
+        .lean();
+
     if (!jobOrder) {
-      throw new ApiError(404, `Job order not found with ID: ${id}`);
+        throw new ApiError(404, `Job order not found with ID: ${id}`);
     }
-  
+
     // 3. Format the response
     const formattedJobOrder = {
-      clientProjectDetails: {
-        clientName: jobOrder.client_id?.name || 'N/A',
-        clientId: jobOrder.client_id?._id?.toString() || null,
-        address: jobOrder.client_id?.address || 'N/A',
-        projectName: jobOrder.project_id?.name || 'N/A',
-        projectId: jobOrder.project_id?._id?.toString() || null,
-      },
-      workOrderDetails: {
-        workOrderNumber: jobOrder.work_order_number,
-        productionRequestDate: formatDateOnly(jobOrder.prod_requset_date),
-        productionRequirementDate: formatDateOnly(jobOrder.prod_requirement_date),
-        approvedBy: jobOrder.prod_issued_approved_by?.name || 'N/A',
-        approvedById: jobOrder.prod_issued_approved_by?._id?.toString() || null,
-        receivedBy: jobOrder.prod_recieved_by?.name || 'N/A',
-        receivedById: jobOrder.prod_recieved_by?._id?.toString() || null,
-        workOrderDate: formatDateOnly(jobOrder.date),
-        file: jobOrder.files.length > 0 ? jobOrder.files[0].file_url : null,
-        createdAt: formatDateToIST({ createdAt: jobOrder.createdAt }).createdAt.split(' ')[0], // Only date part
-        createdBy: jobOrder.created_by?.username || 'N/A',
-      },
-      jobOrderDetails: {
-        jobOrderNumber: jobOrder.job_order_id,
-        createdAt: formatDateToIST({ createdAt: jobOrder.createdAt }).createdAt.split(' ')[0], // Only date part
-        createdBy: jobOrder.created_by?.username || 'N/A',
-        status: jobOrder.status,
-      },
-      productsDetails: jobOrder.products.map(product => ({
-        productName: product.product?.name || 'N/A',
-        productId: product.product?._id?.toString() || null,
-        uom: product.uom,
-        code: product.code,
-        colorCode: product.color_code,
-        height: product.height,
-        width: product.width,
-        poQuantity: product.po_quantity,
-        deliveryDate: formatDateOnly(jobOrder.prod_requirement_date),
-      })),
+        clientProjectDetails: {
+            clientName: jobOrder.client_id?.name || 'N/A',
+            clientId: jobOrder.client_id?._id?.toString() || null,
+            address: jobOrder.client_id?.address || 'N/A',
+            projectName: jobOrder.project_id?.name || 'N/A',
+            projectId: jobOrder.project_id?._id?.toString() || null,
+        },
+        workOrderDetails: {
+            workOrderNumber: jobOrder.work_order_number,
+            productionRequestDate: formatDateOnly(jobOrder.prod_requset_date),
+            productionRequirementDate: formatDateOnly(jobOrder.prod_requirement_date),
+            approvedBy: jobOrder.prod_issued_approved_by?.name || 'N/A',
+            approvedById: jobOrder.prod_issued_approved_by?._id?.toString() || null,
+            receivedBy: jobOrder.prod_recieved_by?.name || 'N/A',
+            receivedById: jobOrder.prod_recieved_by?._id?.toString() || null,
+            workOrderDate: formatDateOnly(jobOrder.date),
+            file: jobOrder.files.map(file => ({
+                file_name: file.file_name,
+                file_url: file.file_url,
+                uploaded_at: file.uploaded_at,
+                _id: file._id?.toString(),
+            })),
+            createdAt: formatDateToIST({ createdAt: jobOrder.createdAt }).createdAt.split(' ')[0], // Only date part
+            createdBy: jobOrder.created_by?.username || 'N/A',
+        },
+        jobOrderDetails: {
+            jobOrderNumber: jobOrder.job_order_id,
+            createdAt: formatDateToIST({ createdAt: jobOrder.createdAt }).createdAt.split(' ')[0], // Only date part
+            createdBy: jobOrder.created_by?.username || 'N/A',
+            status: jobOrder.status,
+        },
+        productsDetails: jobOrder.products.map(product => ({
+            productName: product.product?.name || 'N/A',
+            productId: product.product?._id?.toString() || null,
+            uom: product.uom,
+            code: product.code,
+            colorCode: product.color_code,
+            height: product.height,
+            width: product.width,
+            poQuantity: product.po_quantity,
+            deliveryDate: formatDateOnly(jobOrder.prod_requirement_date),
+        })),
     };
-  
+
     return sendResponse(res, new ApiResponse(200, formattedJobOrder, 'Job order fetched successfully'));
-  });
+});
 
 
 const updateFalconJobOrder = asyncHandler(async (req, res) => {
