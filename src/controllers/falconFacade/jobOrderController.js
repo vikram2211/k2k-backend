@@ -415,15 +415,19 @@ const getFalconJobOrderById = asyncHandler(async (req, res) => {
     const formattedJobOrder = {
       clientProjectDetails: {
         clientName: jobOrder.client_id?.name || 'N/A',
+        clientId: jobOrder.client_id?._id?.toString() || null,
         address: jobOrder.client_id?.address || 'N/A',
         projectName: jobOrder.project_id?.name || 'N/A',
+        projectId: jobOrder.project_id?._id?.toString() || null,
       },
       workOrderDetails: {
         workOrderNumber: jobOrder.work_order_number,
         productionRequestDate: formatDateOnly(jobOrder.prod_requset_date),
         productionRequirementDate: formatDateOnly(jobOrder.prod_requirement_date),
         approvedBy: jobOrder.prod_issued_approved_by?.name || 'N/A',
+        approvedById: jobOrder.prod_issued_approved_by?._id?.toString() || null,
         receivedBy: jobOrder.prod_recieved_by?.name || 'N/A',
+        receivedById: jobOrder.prod_recieved_by?._id?.toString() || null,
         workOrderDate: formatDateOnly(jobOrder.date),
         file: jobOrder.files.length > 0 ? jobOrder.files[0].file_url : null,
         createdAt: formatDateToIST({ createdAt: jobOrder.createdAt }).createdAt.split(' ')[0], // Only date part
@@ -437,6 +441,7 @@ const getFalconJobOrderById = asyncHandler(async (req, res) => {
       },
       productsDetails: jobOrder.products.map(product => ({
         productName: product.product?.name || 'N/A',
+        productId: product.product?._id?.toString() || null,
         uom: product.uom,
         code: product.code,
         colorCode: product.color_code,
@@ -449,72 +454,7 @@ const getFalconJobOrderById = asyncHandler(async (req, res) => {
   
     return sendResponse(res, new ApiResponse(200, formattedJobOrder, 'Job order fetched successfully'));
   });
-const getFalconJobOrderss = asyncHandler(async (req, res) => {
-    const jobOrders = await falconJobOrder
-        .find()
-        .select('job_order_id client_id project_id prod_issued_approved_by prod_recieved_by prod_requset_date prod_requirement_date remarks createdAt updatedAt status date')
-        .populate({
-            path: 'client_id',
-            select: 'name address',
-            match: { isDeleted: false },
-        })
-        .populate({
-            path: 'project_id',
-            select: 'name',
-            match: { isDeleted: false },
-        })
-        .populate({
-            path: 'prod_issued_approved_by',
-            select: 'name',
-            // match: { isDeleted: false },
-        })
-        .populate({
-            path: 'prod_recieved_by',
-            select: 'name',
-            // match: { isDeleted: false },
-        })
-        .sort({ createdAt: -1 })
-        .lean();
 
-    if (!jobOrders?.length) {
-        return sendResponse(res, new ApiResponse(200, [], 'No job orders found'));
-    }
-    console.log("jobOrders", jobOrders);
-
-    // Add srNo and format response
-    const formattedJobOrders = jobOrders.map((jobOrder, index) => {
-        const formatted = formatDateToIST({
-            srNo: index + 1,
-            jobOrderNumber: jobOrder.job_order_id,
-            clientDetails: jobOrder.client_id,
-            projectDetails: jobOrder.project_id,
-            approvedBy: jobOrder.prod_issued_approved_by?.name || 'N/A',
-            receivedBy: jobOrder.prod_recieved_by?.name || 'N/A',
-            productionRequestDate: jobOrder.prod_requset_date,
-            productionRequirementDate: jobOrder.prod_requirement_date,
-            remarks: jobOrder.remarks,
-            createdAt: jobOrder.createdAt,
-            updatedAt: jobOrder.updatedAt,
-            status: jobOrder.status,
-            workOrderDate: jobOrder.date,
-        });
-
-        // Format individual date fields to IST string
-        formatted.productionRequestDate = formatted.productionRequestDate
-            ? formatDateToIST(formatted.productionRequestDate, true)
-            : null;
-        formatted.productionRequirementDate = formatted.productionRequirementDate
-            ? formatDateToIST(formatted.productionRequirementDate, true)
-            : null;
-        formatted.workOrderDate = formatted.workOrderDate
-            ? formatDateToIST(formatted.workOrderDate, true)
-            : null;
-
-        return formatted;
-    });
-
-    return sendResponse(res, new ApiResponse(200, formattedJobOrders, 'Job orders fetched successfully'));
-});
 
 const updateFalconJobOrder = asyncHandler(async (req, res) => {
     // 1. Get job order ID from params
