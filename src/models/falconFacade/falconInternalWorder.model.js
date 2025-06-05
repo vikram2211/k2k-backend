@@ -1,119 +1,118 @@
 import mongoose from 'mongoose';
 
-const falconInternalWOSchema = new mongoose.Schema(
+const processSchema = new mongoose.Schema({
+    name: {
+        type: String,
+        required: true,
+        trim: true,
+    },
+    file_url: {
+        type: String,
+        required: true,
+    },
+    remarks: {
+        type: String,
+        required: true,
+        trim: true,
+    },
+});
+
+const semifinishedDetailSchema = new mongoose.Schema({
+    semifinished_id: {
+        type: String,
+        required: true,
+        trim: true,
+    },
+    file_url: {
+        type: String,
+        required: true,
+    },
+    remarks: {
+        type: String,
+        required: true,
+        trim: true,
+    },
+    processes: [processSchema],
+});
+
+const productSchema = new mongoose.Schema({
+    product: {
+        type: mongoose.Schema.Types.ObjectId,
+        required: true,
+    },
+    system: {
+        type: mongoose.Schema.Types.ObjectId,
+        required: true,
+    },
+    product_system: {
+        type: mongoose.Schema.Types.ObjectId,
+        required: true,
+    },
+    code: {
+        type: String,
+        required: true,
+        trim: true,
+    },
+    po_quantity: {
+        type: Number,
+        required: true,
+        min: 0,
+    },
+    color_code: {
+        type: String,
+        required: true,
+        trim: true,
+    },
+    width: {
+        type: Number,
+        required: true,
+        min: 0,
+    },
+    height: {
+        type: Number,
+        required: true,
+        min: 0,
+    },
+    semifinished_details: [semifinishedDetailSchema],
+});
+
+const dateRangeSchema = new mongoose.Schema({
+    from: {
+        type: Date,
+        required: true,
+    },
+    to: {
+        type: Date,
+        required: true,
+    },
+});
+
+const falconInternalWorkOrderSchema = new mongoose.Schema(
     {
         job_order_id: {
             type: String,
             required: true,
-            unique: true,
         },
-        client_id: {
-            type: mongoose.Schema.Types.ObjectId,
-            ref: "falconClient",
-            required: true
-        },
-        project_id: {
-            type: mongoose.Schema.Types.ObjectId,
-            ref: "falconProject",
-            required: true
-        },
-        work_order_number: {
+        sales_order_no: {
             type: String,
             required: true,
-            unique: true, // Ensures each work order number is unique
+            trim: true,
         },
-        prod_issued_approved_by: {
-            type: mongoose.Schema.Types.ObjectId,
-            ref: "Employee",
-            required: true
+        production_requirement_date: {
+            type: Date,
+            required: true,
         },
-        prod_recieved_by: {
-            type: mongoose.Schema.Types.ObjectId,
-            ref: "Employee",
-            required: true
+        production_request_date: {
+            type: Date,
+            required: true,
         },
         date: {
-            type: Date,
-            required: true
-        },
-        prod_requset_date: {
-            type: Date,
-            required: true
-        },
-        prod_requirement_date: {
-            type: Date,
-            required: true
-        },
-        remarks: {
-            type: String,
-            required: true
-        },
-        products: [
-            {
-                product: {
-                    type: mongoose.Schema.Types.ObjectId,
-                    ref: 'falconProduct',
-                    required: true,
-                },
-                code: {
-                    type: String,
-                    required: true,
-                },
-                uom: {
-                    type: String,
-                    required: true,
-                },
-                po_quantity: {
-                    type: Number,
-                    required: true,
-                },
-                color_code: {
-                    type: String,
-                    required: true,
-                },
-                width: {
-                    type: Number,
-                    required: true,
-                },
-                height: {
-                    type: Number,
-                    required: true,
-                },
-            },
-        ],
-        files: [
-            {
-                file_name: {
-                    type: String,
-                    required: true,
-                },
-                file_url: {
-                    type: String,
-                    required: true,
-                },
-                uploaded_at: {
-                    type: Date,
-                    default: Date.now,
-                },
-            },
-        ],
-        created_by: {
-            type: mongoose.Schema.Types.ObjectId,
-            ref: 'User',
+            type: dateRangeSchema,
             required: true,
         },
-        updated_by: {
-            type: mongoose.Schema.Types.ObjectId,
-            ref: 'User',
-            required: true,
-        },
-        status: {
-            type: String,
-            enum: ['Pending', 'Approved', 'Rejected', 'In Progress'],
-            default: 'Pending',
-        },
+        products: [productSchema],
     },
-    { timestamps: true },
+    { timestamps: true }
 );
 
-export const falconInternalWorkOrder = mongoose.model('falconInternalWorkOrder', falconInternalWOSchema);
+export const falconInternalWorkOrder = mongoose.model('falconInternalWorkOrder', falconInternalWorkOrderSchema);

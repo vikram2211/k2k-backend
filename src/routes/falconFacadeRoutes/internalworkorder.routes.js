@@ -3,15 +3,13 @@ import { Router } from 'express';
 import { verifyJWT } from '../../middlewares/auth.middleware.js';
 import { upload } from '../../middlewares/multer.middleware.js';
 import {
-    // createFalconJobOrder, getFalconJobOrders, updateFalconJobOrder,deleteFalconJobOrder,getFalconJobOrderById
-    getJobOrderAutoFetch,getJobOrderProductDetails,getJobOrderTotalProductDetail,getProductSystem
+    getJobOrderAutoFetch,getJobOrderProductDetails,getJobOrderTotalProductDetail,getProductSystem,createInternalWorkOrder
 } from '../../controllers/falconFacade/internalWorkOrderController.js';
 
 const router = Router();
-// console.log("coming to projects router")
 
 router.use(verifyJWT);
-// router.route('/joborder/create').post(upload.array('files'), createFalconJobOrder);
+router.post('/internal-workorder/create', upload.any(), createInternalWorkOrder);
 // router.route('/joborders').get(getFalconJobOrders);
 router.route('/client-product/details').get(getJobOrderAutoFetch);
 router.route('/product/details').get(getJobOrderProductDetails);

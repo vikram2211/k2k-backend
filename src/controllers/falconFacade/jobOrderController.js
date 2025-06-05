@@ -145,6 +145,7 @@ const createFalconJobOrder = asyncHandler(async (req, res) => {
     if (typeof bodyData.products === 'string') {
         try {
             bodyData.products = JSON.parse(bodyData.products);
+            console.log("products",bodyData.products);
         } catch (err) {
             throw new ApiError(400, 'Invalid products JSON format');
         }
