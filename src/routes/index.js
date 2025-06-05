@@ -49,6 +49,7 @@ import falconProductSystemRouter from './falconFacadeRoutes/productsystem.routes
 import falconProductRouter from './falconFacadeRoutes/product.routes.js';
 import falconWorkOrderRouter from './falconFacadeRoutes/workorder.routes.js';
 import falconJobOrderRouter from './falconFacadeRoutes/joborder.routes.js';
+import internalWorkOrderRouter from './falconFacadeRoutes/internalworkorder.routes.js';
 
 router.use('/falconFacade', falconClientRouter);
 router.use('/falconFacade', falconProjectRouter);
@@ -57,6 +58,7 @@ router.use('/falconFacade', falconProductSystemRouter);
 router.use('/falconFacade', falconProductRouter);
 router.use('/falconFacade', falconWorkOrderRouter);
 router.use('/falconFacade', falconJobOrderRouter);
+router.use('/falconFacade', internalWorkOrderRouter);
 
 
 //routes a/c to the employee permissions. 
