@@ -173,13 +173,13 @@ const getJobOrderTotalProductDetail = asyncHandler(async (req, res) => {
     }
 
     const jobOrder = await falconJobOrder
-    .findOne({ _id: joId })
-    .populate({
-        path: 'products.product',
-        select: 'name',
-        match: { isDeleted: false },
-    })
-    .lean();
+        .findOne({ _id: joId })
+        .populate({
+            path: 'products.product',
+            select: 'name',
+            match: { isDeleted: false },
+        })
+        .lean();
 
     // Check if job order exists
     if (!jobOrder) {
@@ -213,7 +213,6 @@ const getJobOrderTotalProductDetail = asyncHandler(async (req, res) => {
 });
 
 
-
 const getProductSystem = asyncHandler(async (req, res) => {
     const { systemId } = req.query;
 
@@ -241,6 +240,7 @@ const getProductSystem = asyncHandler(async (req, res) => {
             match: { isDeleted: false, status: 'Active' },
         })
         .lean();
+        
 
     // Check if any product systems exist and have a valid (populated) system
     const validProductSystems = productSystems.filter(ps => ps.system); // Filter out entries where system didn't match criteria
@@ -267,4 +267,49 @@ const getProductSystem = asyncHandler(async (req, res) => {
         data: formattedResponse,
     });
 });
-export { getJobOrderAutoFetch, getJobOrderProductDetails ,getJobOrderTotalProductDetail,getProductSystem};
+
+const createInternalWorkOrder = asyncHandler(async(req,res)=>{
+    try {
+        
+    } catch (error) {
+        // Cleanup: Delete temp files on error
+        console.log("error", error);
+        if (req.files) {
+            req.files.forEach((file) => {
+                const tempFilePath = path.join('./public/temp', file.filename);
+                if (fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath);
+            });
+        }
+
+        // Handle different error types
+        if (error instanceof z.ZodError) {
+            return res.status(400).json({
+                success: false,
+                errors: error.errors.map((err) => ({
+                    field: err.path.join('.'),
+                    message: err.message,
+                })),
+            });
+        }
+
+        if (error.name === 'ValidationError') {
+            const formattedErrors = Object.values(error.errors).map((err) => ({
+                field: err.path,
+                message: err.message,
+            }));
+            return res.status(400).json({
+                success: false,
+                errors: formattedErrors,
+            });
+        }
+
+        console.error('Error creating WorkOrder:', error);
+        res.status(500).json({
+            success: false,
+            message: error.message || 'Internal Server Error',
+        });
+    }
+})
+
+
+export { getJobOrderAutoFetch, getJobOrderProductDetails, getJobOrderTotalProductDetail, getProductSystem };
