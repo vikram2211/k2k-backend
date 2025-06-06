@@ -5,12 +5,12 @@ import { DeleteObjectCommand } from "@aws-sdk/client-s3";
 
 export const deleteObject = async(key) =>{
     try{
-        console.log("key to be deleted",key);
+        // console.log("key to be deleted",key);
         const params = {
             Bucket: process.env.AWS_S3_BUCKET,
             Key:key
         }
-        console.log("params",params);
+        // console.log("params",params);
         const command = new DeleteObjectCommand(params);
         const data = await s3Client.send(command);
 

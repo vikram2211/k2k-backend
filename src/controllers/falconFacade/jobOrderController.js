@@ -10,6 +10,7 @@ import { ApiResponse } from '../../utils/ApiResponse.js';
 import { falconJobOrder } from '../../models/falconFacade/falconJobOrder.model.js';
 import { formatDateToIST } from '../../utils/formatDate.js';
 import { putObject } from '../../../util/putObject.js';
+import { deleteObject } from '../../../util/deleteObject.js';
 import { z } from 'zod';
 
 
@@ -145,7 +146,7 @@ const createFalconJobOrder = asyncHandler(async (req, res) => {
     if (typeof bodyData.products === 'string') {
         try {
             bodyData.products = JSON.parse(bodyData.products);
-            console.log("products",bodyData.products);
+            console.log("products", bodyData.products);
         } catch (err) {
             throw new ApiError(400, 'Invalid products JSON format');
         }
@@ -612,6 +613,10 @@ const updateFalconJobOrder = asyncHandler(async (req, res) => {
             throw new ApiError(500, `File upload failed: ${error.message}`);
         }
     }
+    const existingJobOrder = await falconJobOrder.findById(id);
+    if (!existingJobOrder) {
+        throw new ApiError(404, `Job order not found with ID: ${id}`);
+    }
 
     // 6. Prepare job order data for validation
     const jobOrderData = {
@@ -706,6 +711,13 @@ const updateFalconJobOrder = asyncHandler(async (req, res) => {
         throw new ApiError(404, `Job order not found with ID: ${id}`);
     }
 
+    if (uploadedFiles.length > 0 && existingJobOrder.files && existingJobOrder.files.length > 0) {
+        await Promise.all(existingJobOrder.files.map(async (file) => {
+            const fileKey = file.file_url.split('/').slice(3).join('/');
+            await deleteObject(fileKey);
+        }));
+    }
+
     // 10. Populate and format response
     const populatedJobOrder = await falconJobOrder
         .findById(jobOrder._id)
@@ -772,18 +784,36 @@ const deleteFalconJobOrder = asyncHandler(async (req, res) => {
     if (invalidIds.length > 0) {
         return sendResponse(res, new ApiResponse(400, null, `Invalid ID(s): ${invalidIds.join(', ')}`));
     }
+    try {
 
-    // Permanent deletion
-    const result = await falconJobOrder.deleteMany({ _id: { $in: ids } });
+        const jobOrders = await falconJobOrder.find({ _id: { $in: ids } });
 
-    if (result.deletedCount === 0) {
-        return sendResponse(res, new ApiResponse(404, null, 'No job orders found to delete'));
+        // Collect all file URLs to delete from S3
+        const fileKeys = jobOrders.flatMap(jobOrder =>
+            jobOrder.files.map(file => {
+                const urlParts = file.file_url.split('/');
+                return urlParts.slice(3).join('/'); // Extract the key part after the bucket name
+            })
+        );
+
+        // Delete files from S3
+        await Promise.all(fileKeys.map(key => deleteObject(key)));
+
+        // Permanent deletion
+        const result = await falconJobOrder.deleteMany({ _id: { $in: ids } });
+
+        if (result.deletedCount === 0) {
+            return sendResponse(res, new ApiResponse(404, null, 'No job orders found to delete'));
+        }
+
+        return sendResponse(res, new ApiResponse(200, {
+            deletedCount: result.deletedCount,
+            deletedIds: ids
+        }, `${result.deletedCount} job order(s) deleted successfully`));
+    } catch {
+        console.log('Error:', error);
+        return sendResponse(res, new ApiResponse(500, null, 'Error deleting job orders: ' + error.message));
     }
-
-    return sendResponse(res, new ApiResponse(200, {
-        deletedCount: result.deletedCount,
-        deletedIds: ids
-    }, `${result.deletedCount} job order(s) deleted successfully`));
 });
 
 export { createFalconJobOrder, getFalconJobOrders, updateFalconJobOrder, deleteFalconJobOrder, getFalconJobOrderById };

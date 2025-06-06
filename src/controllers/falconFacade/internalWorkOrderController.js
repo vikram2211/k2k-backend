@@ -813,7 +813,7 @@ const updateInternalWorkOrder = asyncHandler(async (req, res) => {
 
 const deleteInternalWorkOrder = asyncHandler(async (req, res) => {
     let ids = req.body.ids;
-    console.log('ids', ids);
+    // console.log('ids', ids);
 
     // Validate input
     if (!ids) {
@@ -860,9 +860,9 @@ const deleteInternalWorkOrder = asyncHandler(async (req, res) => {
                         // fileKeys.push(fileKey);
 
                         const urlParts = semifinished.file_url.split('/');
-                        console.log("urlParts",urlParts);
+                        // console.log("urlParts",urlParts);
                         const key = urlParts.slice(3).join('/'); // Extract the key part after the bucket name
-                        console.log("key",key);
+                        // console.log("key",key);
 
                         fileKeys.push(key);
                     }
@@ -874,10 +874,10 @@ const deleteInternalWorkOrder = asyncHandler(async (req, res) => {
                             // fileKeys.push(fileKey);
 
                             const urlParts = process.file_url.split('/');
-                            console.log("urlParts",urlParts);
+                            // console.log("urlParts",urlParts);
 
                             const key = urlParts.slice(3).join('/'); // Extract the key part after the bucket name
-                            console.log("key",key);
+                            // console.log("key",key);
                             fileKeys.push(key);
                         }
                     });
