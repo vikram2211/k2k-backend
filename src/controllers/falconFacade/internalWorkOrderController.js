@@ -5,6 +5,7 @@ import mongoose from "mongoose";
 import fs from 'fs';
 import path from 'path';
 import { putObject } from "../../../util/putObject.js";
+import { deleteObject } from "../../../util/deleteObject.js";
 import { falconInternalWorkOrder } from "../../models/falconFacade/falconInternalWorder.model.js";
 import { falconProject } from '../../models/falconFacade/helpers/falconProject.model.js';
 import { falconClient } from '../../models/falconFacade/helpers/falconClient.model.js';
@@ -740,6 +741,11 @@ const updateInternalWorkOrder = asyncHandler(async (req, res) => {
                         let sfFileUrl = sfDetail.file_url || (internalWorkOrder.products[productIndex]?.semifinished_details[sfIndex]?.file_url);
                         if (sfFile) {
                             // console.log("came for sf file");
+                            if (sfFileUrl) {
+                                const oldFileKey = sfFileUrl.split('/').slice(3).join('/');
+                                await deleteObject(oldFileKey);
+                            }
+
                             const sfFileName = `internal-work-orders/semifinished/${Date.now()}-${sanitizeFilename(sfFile.originalname)}`;
                             const sfFileData = { data: fs.readFileSync(sfFile.path), mimetype: sfFile.mimetype };
                             const sfUploadResult = await putObject(sfFileData, sfFileName);
@@ -762,6 +768,10 @@ const updateInternalWorkOrder = asyncHandler(async (req, res) => {
                                 let processFileUrl = process.file_url || (internalWorkOrder.products[productIndex]?.semifinished_details[sfIndex]?.processes[processIndex]?.file_url);
                                 if (processFile) {
                                     // console.log("came for process file");
+                                    if (processFileUrl) {
+                                        const oldFileKey = processFileUrl.split('/').slice(3).join('/');
+                                        await deleteObject(oldFileKey);
+                                    }
 
                                     const processFileName = `internal-work-orders/processes/${Date.now()}-${sanitizeFilename(processFile.originalname)}`;
                                     const processFileData = { data: fs.readFileSync(processFile.path), mimetype: processFile.mimetype };
@@ -801,6 +811,109 @@ const updateInternalWorkOrder = asyncHandler(async (req, res) => {
 });
 
 
+const deleteInternalWorkOrder = asyncHandler(async (req, res) => {
+    let ids = req.body.ids;
+    console.log('ids', ids);
+
+    // Validate input
+    if (!ids) {
+        return res.status(400).json({
+            success: false,
+            message: 'No IDs provided',
+        });
+    }
+
+    // Convert single ID to array if needed
+    if (!Array.isArray(ids)) {
+        ids = [ids];
+    }
+
+    // Check for empty array
+    if (ids.length === 0) {
+        return res.status(400).json({
+            success: false,
+            message: 'IDs array cannot be empty',
+        });
+    }
+
+    // Validate MongoDB ObjectIds
+    const invalidIds = ids.filter(id => !mongoose.Types.ObjectId.isValid(id));
+    if (invalidIds.length > 0) {
+        return res.status(400).json({
+            success: false,
+            message: `Invalid ID(s): ${invalidIds.join(', ')}`,
+        });
+    }
+
+    try {
+        // Fetch internal work orders to get file URLs before deletion
+        const internalWorkOrders = await falconInternalWorkOrder.find({ _id: { $in: ids } });
+
+        // Collect all file URLs to delete from S3
+        const fileKeys = [];
+        internalWorkOrders.forEach(workOrder => {
+            workOrder.products.forEach(product => {
+                product.semifinished_details.forEach(semifinished => {
+                    // Add semifinished file URL
+                    if (semifinished.file_url) {
+                        // const fileKey = semifinished.file_url.split('/').pop();
+                        // fileKeys.push(fileKey);
+
+                        const urlParts = semifinished.file_url.split('/');
+                        console.log("urlParts",urlParts);
+                        const key = urlParts.slice(3).join('/'); // Extract the key part after the bucket name
+                        console.log("key",key);
+
+                        fileKeys.push(key);
+                    }
+
+                    // Add process file URLs
+                    semifinished.processes.forEach(process => {
+                        if (process.file_url) {
+                            // const fileKey = process.file_url.split('/').pop();
+                            // fileKeys.push(fileKey);
+
+                            const urlParts = process.file_url.split('/');
+                            console.log("urlParts",urlParts);
+
+                            const key = urlParts.slice(3).join('/'); // Extract the key part after the bucket name
+                            console.log("key",key);
+                            fileKeys.push(key);
+                        }
+                    });
+                });
+            });
+        });
+
+        // Delete files from S3
+        await Promise.all(fileKeys.map(key => deleteObject(key)));
+
+        // Permanent deletion of internal work orders
+        const result = await falconInternalWorkOrder.deleteMany({ _id: { $in: ids } });
+
+        if (result.deletedCount === 0) {
+            return res.status(404).json({
+                success: false,
+                message: 'No internal work orders found to delete',
+            });
+        }
+
+        return res.status(200).json({
+            success: true,
+            message: `${result.deletedCount} internal work order(s) deleted successfully`,
+            data: {
+                deletedCount: result.deletedCount,
+                deletedIds: ids,
+            },
+        });
+    } catch (error) {
+        console.log('Error:', error);
+        return res.status(500).json({
+            success: false,
+            message: 'Error deleting internal work orders: ' + error.message,
+        });
+    }
+});
 
 
 
@@ -808,7 +921,8 @@ const updateInternalWorkOrder = asyncHandler(async (req, res) => {
 
 
 
-export { getJobOrderAutoFetch, getJobOrderProductDetails, getJobOrderTotalProductDetail, getProductSystem, createInternalWorkOrder, getInternalWorkOrderDetails, getInternalWorkOrderById,updateInternalWorkOrder };
+
+export { getJobOrderAutoFetch, getJobOrderProductDetails, getJobOrderTotalProductDetail, getProductSystem, createInternalWorkOrder, getInternalWorkOrderDetails, getInternalWorkOrderById, updateInternalWorkOrder, deleteInternalWorkOrder};
 
 
 
