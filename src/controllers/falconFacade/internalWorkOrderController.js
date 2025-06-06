@@ -6,9 +6,9 @@ import fs from 'fs';
 import path from 'path';
 import { putObject } from "../../../util/putObject.js";
 import { falconInternalWorkOrder } from "../../models/falconFacade/falconInternalWorder.model.js";
-import {falconProject} from '../../models/falconFacade/helpers/falconProject.model.js';
-import {falconClient} from '../../models/falconFacade/helpers/falconClient.model.js';
-import {falconProduct} from '../../models/falconFacade/helpers/falconProduct.model.js';
+import { falconProject } from '../../models/falconFacade/helpers/falconProject.model.js';
+import { falconClient } from '../../models/falconFacade/helpers/falconClient.model.js';
+import { falconProduct } from '../../models/falconFacade/helpers/falconProduct.model.js';
 import { Employee } from "../../models/employee.model.js";
 
 // Helper function to format date to DD-MM-YYYY
@@ -360,6 +360,16 @@ const createInternalWorkOrder = asyncHandler(async (req, res) => {
         filesMap[fieldName] = file;
     });
 
+
+    // bodyData.products.map((product) => { console.log("product", product) });
+
+    // bodyData.products.forEach(product => {
+
+    //     product.semifinished_details.forEach(semifinished => {
+    //         console.log(`Semifinished ID: ${semifinished.semifinished_id}`);
+    //         console.log("process", semifinished.processes);
+    //     });
+    // });
     // 7. Construct the job order data
     const jobOrderData = {
         job_order_id: bodyData.job_order_id,
@@ -478,16 +488,16 @@ const getInternalWorkOrderDetailsss = asyncHandler(async (req, res) => {
 
                     return {
                         job_order_id: jobOrder.job_order_id,
-                        from_date: formatDateOnly(internalOrder.date.from), 
-                        to_date: formatDateOnly(internalOrder.date.to), 
+                        from_date: formatDateOnly(internalOrder.date.from),
+                        to_date: formatDateOnly(internalOrder.date.to),
                         work_order_number: jobOrder.work_order_number,
-                        project_name: project ? project.name : null, 
+                        project_name: project ? project.name : null,
                     };
                 } else {
                     return {
                         job_order_id: null,
-                        from_date: formatDateOnly(internalOrder.date.from), 
-                        to_date: formatDateOnly(internalOrder.date.to), 
+                        from_date: formatDateOnly(internalOrder.date.from),
+                        to_date: formatDateOnly(internalOrder.date.to),
                         work_order_number: null,
                         project_name: null,
                     };
@@ -662,13 +672,143 @@ const getInternalWorkOrderById = asyncHandler(async (req, res) => {
 });
 
 
+const updateInternalWorkOrder = asyncHandler(async (req, res) => {
+    const { id } = req.params; // Internal work order ID
+
+    try {
+        // Fetch the existing internal work order
+        let internalWorkOrder = await falconInternalWorkOrder.findById(id);
+        if (!internalWorkOrder) {
+            return res.status(404).json({
+                success: false,
+                message: 'Internal work order not found',
+            });
+        }
+
+        // Parse the form-data body
+        const bodyData = req.body;
+
+        // Map files to their respective fields
+        const filesMap = {};
+        req.files.forEach(file => {
+            const fieldName = file.fieldname;
+            filesMap[fieldName] = file;
+        });
+
+        // Update fields only if they are provided in the request
+        if (bodyData.sales_order_no) {
+            internalWorkOrder.sales_order_no = bodyData.sales_order_no;
+        }
+
+        if (bodyData.date) {
+            const parsedDateFrom = bodyData.date.from ? parseDate(bodyData.date.from, 'date.from') : internalWorkOrder.date.from;
+            const parsedDateTo = bodyData.date.to ? parseDate(bodyData.date.to, 'date.to') : internalWorkOrder.date.to;
+
+            internalWorkOrder.date.from = parsedDateFrom;
+            internalWorkOrder.date.to = parsedDateTo;
+        }
+
+        if (bodyData.products) {
+            // Parse stringified products field if needed
+            if (typeof bodyData.products === 'string') {
+                bodyData.products = JSON.parse(bodyData.products);
+            }
+
+            internalWorkOrder.products = await Promise.all(bodyData.products.map(async (product, productIndex) => {
+                // console.log("product",product);
+
+                // Validate product fields
+                if (!product.product || !product.system || !product.product_system || !product.po_quantity) {
+                    throw new Error(`Missing required product fields at index ${productIndex}`);
+                }
+
+                return {
+                    product: product.product,
+                    system: product.system,
+                    product_system: product.product_system,
+                    po_quantity: parseInt(product.po_quantity),
+                    semifinished_details: await Promise.all(product.semifinished_details.map(async (sfDetail, sfIndex) => {
+                        // Validate semifinished detail fields
+                        // console.log("sfDetail",sfDetail);
+                        if (!sfDetail.semifinished_id || !sfDetail.remarks) {
+                            throw new Error(`Missing required semifinished detail fields at index ${sfIndex} in product ${productIndex}`);
+                        }
+
+                        const sfFileField = `products[${productIndex}][semifinished_details][${sfIndex}][file]`;
+                        const sfFile = filesMap[sfFileField];
+
+                        let sfFileUrl = sfDetail.file_url || (internalWorkOrder.products[productIndex]?.semifinished_details[sfIndex]?.file_url);
+                        if (sfFile) {
+                            // console.log("came for sf file");
+                            const sfFileName = `internal-work-orders/semifinished/${Date.now()}-${sanitizeFilename(sfFile.originalname)}`;
+                            const sfFileData = { data: fs.readFileSync(sfFile.path), mimetype: sfFile.mimetype };
+                            const sfUploadResult = await putObject(sfFileData, sfFileName);
+                            sfFileUrl = sfUploadResult.url;
+                            // console.log("sfFileUrl",sfFileUrl);
+                        }
+
+                        return {
+                            semifinished_id: sfDetail.semifinished_id,
+                            file_url: sfFileUrl,
+                            remarks: sfDetail.remarks,
+                            processes: await Promise.all(sfDetail.processes.map(async (process, processIndex) => {
+                                if (!process.name || !process.remarks) {
+                                    throw new Error(`Missing required process fields at index ${processIndex} in semifinished_details ${sfIndex}, product ${productIndex}`);
+                                }
+
+                                const processFileField = `products[${productIndex}][semifinished_details][${sfIndex}][processes][${processIndex}][file]`;
+                                const processFile = filesMap[processFileField];
+
+                                let processFileUrl = process.file_url || (internalWorkOrder.products[productIndex]?.semifinished_details[sfIndex]?.processes[processIndex]?.file_url);
+                                if (processFile) {
+                                    // console.log("came for process file");
+
+                                    const processFileName = `internal-work-orders/processes/${Date.now()}-${sanitizeFilename(processFile.originalname)}`;
+                                    const processFileData = { data: fs.readFileSync(processFile.path), mimetype: processFile.mimetype };
+                                    const processUploadResult = await putObject(processFileData, processFileName);
+                                    processFileUrl = processUploadResult.url;
+                                    // console.log("processFileUrl",processFileUrl);
+                                }
+
+                                return {
+                                    name: process.name,
+                                    file_url: processFileUrl,
+                                    remarks: process.remarks,
+                                };
+                            })),
+                        };
+                    })),
+                };
+            }));
+        }
+
+        // Save the updated internal work order
+        await internalWorkOrder.save();
+
+        return res.status(200).json({
+            success: true,
+            message: 'Internal work order updated successfully',
+            data: internalWorkOrder,
+        });
+
+    } catch (error) {
+        console.log('Error:', error);
+        return res.status(500).json({
+            success: false,
+            message: 'Error updating internal work order: ' + error.message,
+        });
+    }
+});
 
 
 
 
 
 
-export { getJobOrderAutoFetch, getJobOrderProductDetails, getJobOrderTotalProductDetail, getProductSystem, createInternalWorkOrder, getInternalWorkOrderDetails, getInternalWorkOrderById};
+
+
+
+export { getJobOrderAutoFetch, getJobOrderProductDetails, getJobOrderTotalProductDetail, getProductSystem, createInternalWorkOrder, getInternalWorkOrderDetails, getInternalWorkOrderById,updateInternalWorkOrder };
 
 
 
