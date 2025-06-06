@@ -390,12 +390,12 @@ const createInternalWorkOrder = asyncHandler(async (req, res) => {
     if (!bodyData.sales_order_no) {
         throw new Error('Sales order number is required');
     }
-    if (!bodyData.production_requirement_date) {
-        throw new Error('Production requirement date is required');
-    }
-    if (!bodyData.production_request_date) {
-        throw new Error('Production request date is required');
-    }
+    // if (!bodyData.production_requirement_date) {  /////////
+    //     throw new Error('Production requirement date is required');
+    // }
+    // if (!bodyData.production_request_date) { ////////////
+    //     throw new Error('Production request date is required');
+    // }
 
     // 4. Extract and validate date fields
     let dateFrom, dateTo;
@@ -412,8 +412,8 @@ const createInternalWorkOrder = asyncHandler(async (req, res) => {
     }
 
     // 5. Parse and validate dates
-    const productionRequirementDate = parseDate(bodyData.production_requirement_date, 'production_requirement_date');
-    const productionRequestDate = parseDate(bodyData.production_request_date, 'production_request_date');
+    // const productionRequirementDate = parseDate(bodyData.production_requirement_date, 'production_requirement_date'); /////
+    // const productionRequestDate = parseDate(bodyData.production_request_date, 'production_request_date');//////
     const parsedDateFrom = parseDate(dateFrom, 'date.from');
     const parsedDateTo = parseDate(dateTo, 'date.to');
 
@@ -428,8 +428,8 @@ const createInternalWorkOrder = asyncHandler(async (req, res) => {
     const jobOrderData = {
         job_order_id: bodyData.job_order_id,
         sales_order_no: bodyData.sales_order_no,
-        production_requirement_date: productionRequirementDate,
-        production_request_date: productionRequestDate,
+        // production_requirement_date: productionRequirementDate,  ////
+        // production_request_date: productionRequestDate, ////
         date: {
             from: parsedDateFrom,
             to: parsedDateTo,
@@ -439,11 +439,11 @@ const createInternalWorkOrder = asyncHandler(async (req, res) => {
             if (!product.product) throw new Error(`Product ID is required for product at index ${productIndex}`);
             if (!product.system) throw new Error(`System is required for product at index ${productIndex}`);
             if (!product.product_system) throw new Error(`Product system is required for product at index ${productIndex}`);
-            if (!product.code) throw new Error(`Code is required for product at index ${productIndex}`);
-            if (!product.po_quantity) throw new Error(`PO quantity is required for product at index ${productIndex}`);
-            if (!product.color_code) throw new Error(`Color code is required for product at index ${productIndex}`);
-            if (!product.width) throw new Error(`Width is required for product at index ${productIndex}`);
-            if (!product.height) throw new Error(`Height is required for product at index ${productIndex}`);
+            // if (!product.code) throw new Error(`Code is required for product at index ${productIndex}`);   /////////
+            if (!product.po_quantity) throw new Error(`PO quantity is required for product at index ${productIndex}`); 
+            // if (!product.color_code) throw new Error(`Color code is required for product at index ${productIndex}`); ///////
+            // if (!product.width) throw new Error(`Width is required for product at index ${productIndex}`); ////////
+            // if (!product.height) throw new Error(`Height is required for product at index ${productIndex}`); ////////////
 
             // Validate ObjectId for product, system, and product_system
             validateObjectId(product.product, `product at index ${productIndex}`);
@@ -454,11 +454,11 @@ const createInternalWorkOrder = asyncHandler(async (req, res) => {
                 product: product.product,
                 system: product.system,
                 product_system: product.product_system,
-                code: product.code,
+                // code: product.code,  ////
                 po_quantity: parseInt(product.po_quantity),
-                color_code: product.color_code,
-                width: parseFloat(product.width),
-                height: parseFloat(product.height),
+                // color_code: product.color_code,////
+                // width: parseFloat(product.width),////
+                // height: parseFloat(product.height),////
                 semifinished_details: await Promise.all(product.semifinished_details.map(async (sfDetail, sfIndex) => {
                     // Validate semifinished detail fields
                     if (!sfDetail.semifinished_id) throw new Error(`Semifinished ID is required for semifinished_details at index ${sfIndex} in product ${productIndex}`);
@@ -536,8 +536,60 @@ const createInternalWorkOrder = asyncHandler(async (req, res) => {
     }
 });
 
+const getJInternalWorkOrderDetails = asyncHandler(async (req, res) => {
+    const { jobOrderId } = req.query;
 
-export { getJobOrderAutoFetch, getJobOrderProductDetails, getJobOrderTotalProductDetail, getProductSystem, createInternalWorkOrder };
+    // 1. Validate job_order_id
+    if (!jobOrderId) {
+        return res.status(400).json({
+            success: false,
+            message: 'Job order ID is required in query parameters',
+        });
+    }
+
+    // 2. Find the internal work order to ensure it exists
+    const internalWorkOrder = await falconInternalWorkOrder.findOne({ }).lean();
+    if (!internalWorkOrder) {
+        return res.status(404).json({
+            success: false,
+            message: `Internal work order not found with job order ID: ${jobOrderId}`,
+        });
+    }
+
+    // 3. Fetch job order details from falconJobOrder
+    const jobOrder = await falconJobOrder.findOne({ job_order_id: jobOrderId }).lean();
+    if (!jobOrder) {
+        return res.status(404).json({
+            success: false,
+            message: `Job order not found with job order ID: ${jobOrderId}`,
+        });
+    }
+
+    // 4. Fetch project details from falconProjects
+    const project = await falconProjects.findOne({ job_order_id: jobOrderId }).lean();
+    if (!project) {
+        return res.status(404).json({
+            success: false,
+            message: `Project not found with job order ID: ${jobOrderId}`,
+        });
+    }
+
+    // 5. Format the response
+    const responseData = {
+        job_order_id: jobOrder.job_order_id,
+        work_order_no: jobOrder.work_order_no,
+        project_name: project.project_name,
+    };
+
+    // 6. Send response
+    return res.status(200).json({
+        success: true,
+        message: 'Job order details fetched successfully',
+        data: responseData,
+    });
+});
+
+export { getJobOrderAutoFetch, getJobOrderProductDetails, getJobOrderTotalProductDetail, getProductSystem, createInternalWorkOrder ,getJInternalWorkOrderDetails};
 
 
 

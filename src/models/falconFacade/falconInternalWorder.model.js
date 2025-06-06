@@ -48,31 +48,31 @@ const productSchema = new mongoose.Schema({
         type: mongoose.Schema.Types.ObjectId,
         required: true,
     },
-    code: {
-        type: String,
-        required: true,
-        trim: true,
-    },
+    // code: {
+    //     type: String,
+    //     required: true,
+    //     trim: true,
+    // },
     po_quantity: {
         type: Number,
         required: true,
         min: 0,
     },
-    color_code: {
-        type: String,
-        required: true,
-        trim: true,
-    },
-    width: {
-        type: Number,
-        required: true,
-        min: 0,
-    },
-    height: {
-        type: Number,
-        required: true,
-        min: 0,
-    },
+    // color_code: {
+    //     type: String,
+    //     required: true,
+    //     trim: true,
+    // },
+    // width: {
+    //     type: Number,
+    //     required: true,
+    //     min: 0,
+    // },
+    // height: {
+    //     type: Number,
+    //     required: true,
+    //     min: 0,
+    // },
     semifinished_details: [semifinishedDetailSchema],
 });
 
@@ -98,14 +98,14 @@ const falconInternalWorkOrderSchema = new mongoose.Schema(
             required: true,
             trim: true,
         },
-        production_requirement_date: {
-            type: Date,
-            required: true,
-        },
-        production_request_date: {
-            type: Date,
-            required: true,
-        },
+        // production_requirement_date: {
+        //     type: Date,
+        //     required: true,
+        // },
+        // production_request_date: {
+        //     type: Date,
+        //     required: true,
+        // },
         date: {
             type: dateRangeSchema,
             required: true,
