@@ -1,8 +1,12 @@
 import { falconJobOrder } from "../../models/falconFacade/falconJobOrder.model.js";
-import { falconSystem } from "../../models/falconFacade/helpers/falconSystem.model.js";
 import { falconProductSystem } from "../../models/falconFacade/helpers/falconProductSystem.model.js";
 import { asyncHandler } from "../../utils/asyncHandler.js";
 import mongoose from "mongoose";
+import fs from 'fs';
+import path from 'path';
+import { putObject } from "../../../util/putObject.js";
+import { falconInternalWorkOrder } from "../../models/falconFacade/falconInternalWorder.model.js";
+import {falconProject} from '../../models/falconFacade/helpers/falconProject.model.js'
 
 
 // Helper function to format date to DD-MM-YYYY
@@ -17,7 +21,6 @@ const formatDateOnly = (date) => {
     const [day, month, year] = istDate.split('/');
     return `${day}-${month}-${year}`;
 };
-
 
 
 const getJobOrderAutoFetch = asyncHandler(async (req, res) => {
@@ -268,68 +271,6 @@ const getProductSystem = asyncHandler(async (req, res) => {
     });
 });
 
-const createInternalWorkOrder111 = asyncHandler(async (req, res) => {
-    try {
-
-    } catch (error) {
-        // Cleanup: Delete temp files on error
-        console.log("error", error);
-        if (req.files) {
-            req.files.forEach((file) => {
-                const tempFilePath = path.join('./public/temp', file.filename);
-                if (fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath);
-            });
-        }
-
-        // Handle different error types
-        if (error instanceof z.ZodError) {
-            return res.status(400).json({
-                success: false,
-                errors: error.errors.map((err) => ({
-                    field: err.path.join('.'),
-                    message: err.message,
-                })),
-            });
-        }
-
-        if (error.name === 'ValidationError') {
-            const formattedErrors = Object.values(error.errors).map((err) => ({
-                field: err.path,
-                message: err.message,
-            }));
-            return res.status(400).json({
-                success: false,
-                errors: formattedErrors,
-            });
-        }
-
-        console.error('Error creating WorkOrder:', error);
-        res.status(500).json({
-            success: false,
-            message: error.message || 'Internal Server Error',
-        });
-    }
-})
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-import fs from 'fs';
-import path from 'path';
-import { putObject } from "../../../util/putObject.js";
-import { falconInternalWorkOrder } from "../../models/falconFacade/falconInternalWorder.model.js";
 
 
 
@@ -390,12 +331,7 @@ const createInternalWorkOrder = asyncHandler(async (req, res) => {
     if (!bodyData.sales_order_no) {
         throw new Error('Sales order number is required');
     }
-    // if (!bodyData.production_requirement_date) {  /////////
-    //     throw new Error('Production requirement date is required');
-    // }
-    // if (!bodyData.production_request_date) { ////////////
-    //     throw new Error('Production request date is required');
-    // }
+
 
     // 4. Extract and validate date fields
     let dateFrom, dateTo;
@@ -412,8 +348,6 @@ const createInternalWorkOrder = asyncHandler(async (req, res) => {
     }
 
     // 5. Parse and validate dates
-    // const productionRequirementDate = parseDate(bodyData.production_requirement_date, 'production_requirement_date'); /////
-    // const productionRequestDate = parseDate(bodyData.production_request_date, 'production_request_date');//////
     const parsedDateFrom = parseDate(dateFrom, 'date.from');
     const parsedDateTo = parseDate(dateTo, 'date.to');
 
@@ -428,8 +362,6 @@ const createInternalWorkOrder = asyncHandler(async (req, res) => {
     const jobOrderData = {
         job_order_id: bodyData.job_order_id,
         sales_order_no: bodyData.sales_order_no,
-        // production_requirement_date: productionRequirementDate,  ////
-        // production_request_date: productionRequestDate, ////
         date: {
             from: parsedDateFrom,
             to: parsedDateTo,
@@ -439,11 +371,8 @@ const createInternalWorkOrder = asyncHandler(async (req, res) => {
             if (!product.product) throw new Error(`Product ID is required for product at index ${productIndex}`);
             if (!product.system) throw new Error(`System is required for product at index ${productIndex}`);
             if (!product.product_system) throw new Error(`Product system is required for product at index ${productIndex}`);
-            // if (!product.code) throw new Error(`Code is required for product at index ${productIndex}`);   /////////
-            if (!product.po_quantity) throw new Error(`PO quantity is required for product at index ${productIndex}`); 
-            // if (!product.color_code) throw new Error(`Color code is required for product at index ${productIndex}`); ///////
-            // if (!product.width) throw new Error(`Width is required for product at index ${productIndex}`); ////////
-            // if (!product.height) throw new Error(`Height is required for product at index ${productIndex}`); ////////////
+            if (!product.po_quantity) throw new Error(`PO quantity is required for product at index ${productIndex}`);
+
 
             // Validate ObjectId for product, system, and product_system
             validateObjectId(product.product, `product at index ${productIndex}`);
@@ -454,11 +383,8 @@ const createInternalWorkOrder = asyncHandler(async (req, res) => {
                 product: product.product,
                 system: product.system,
                 product_system: product.product_system,
-                // code: product.code,  ////
                 po_quantity: parseInt(product.po_quantity),
-                // color_code: product.color_code,////
-                // width: parseFloat(product.width),////
-                // height: parseFloat(product.height),////
+
                 semifinished_details: await Promise.all(product.semifinished_details.map(async (sfDetail, sfIndex) => {
                     // Validate semifinished detail fields
                     if (!sfDetail.semifinished_id) throw new Error(`Semifinished ID is required for semifinished_details at index ${sfIndex} in product ${productIndex}`);
@@ -528,7 +454,7 @@ const createInternalWorkOrder = asyncHandler(async (req, res) => {
         });
     } catch (error) {
         // Multer handles temp file cleanup automatically
-        console.log("error",error);
+        console.log("error", error);
         return res.status(500).json({
             success: false,
             message: `Error creating job order: ${error.message}`,
@@ -536,106 +462,114 @@ const createInternalWorkOrder = asyncHandler(async (req, res) => {
     }
 });
 
-const getJInternalWorkOrderDetails = asyncHandler(async (req, res) => {
-    const { jobOrderId } = req.query;
 
-    // 1. Validate job_order_id
-    if (!jobOrderId) {
-        return res.status(400).json({
+const getInternalWorkOrderDetailsss = asyncHandler(async (req, res) => {
+    try {
+        const internalWorkOrders = await falconInternalWorkOrder.find().select({ job_order_id: 1, date: 1 });
+
+        const detailedInternalWorkOrders = await Promise.all(
+            internalWorkOrders.map(async (internalOrder) => {
+                const jobOrder = await falconJobOrder.findOne({ _id: internalOrder.job_order_id });
+
+                if (jobOrder) {
+                    const project = await falconProject.findById(jobOrder.project_id);
+
+                    return {
+                        job_order_id: jobOrder.job_order_id,
+                        from_date: formatDateOnly(internalOrder.date.from), 
+                        to_date: formatDateOnly(internalOrder.date.to), 
+                        work_order_number: jobOrder.work_order_number,
+                        project_name: project ? project.name : null, 
+                    };
+                } else {
+                    return {
+                        job_order_id: null,
+                        from_date: formatDateOnly(internalOrder.date.from), 
+                        to_date: formatDateOnly(internalOrder.date.to), 
+                        work_order_number: null,
+                        project_name: null,
+                    };
+                }
+            })
+        );
+
+        return res.status(200).json({
+            success: true,
+            message: 'Internal work orders fetched successfully',
+            data: detailedInternalWorkOrders,
+        });
+
+    } catch (error) {
+        console.log('Error:', error);
+        return res.status(500).json({
             success: false,
-            message: 'Job order ID is required in query parameters',
+            message: 'Error fetching internal work orders: ' + error.message,
         });
     }
+});
+const getInternalWorkOrderDetails = asyncHandler(async (req, res) => {
+    try {
+        // Step 1: Fetch all internal work orders
+        const internalWorkOrders = await falconInternalWorkOrder.find().select({ job_order_id: 1, date: 1 });
 
-    // 2. Find the internal work order to ensure it exists
-    const internalWorkOrder = await falconInternalWorkOrder.findOne({ }).lean();
-    if (!internalWorkOrder) {
-        return res.status(404).json({
+        // Extract unique job_order_id values
+        const jobOrderIds = [...new Set(internalWorkOrders.map(order => order.job_order_id))];
+
+        // Step 2: Fetch all corresponding job orders in a single query
+        const jobOrders = await falconJobOrder.find({ '_id': { $in: jobOrderIds } });
+
+        // Create a map for job orders for quick lookup
+        const jobOrderMap = new Map(jobOrders.map(jobOrder => [jobOrder._id.toString(), jobOrder]));
+
+        // Extract unique project_id values from job orders
+        const projectIds = [...new Set(jobOrders.map(jobOrder => jobOrder.project_id.toString()))];
+
+        // Step 3: Fetch all corresponding projects in a single query
+        const projects = await falconProject.find({ '_id': { $in: projectIds } });
+
+        // Create a map for projects for quick lookup
+        const projectMap = new Map(projects.map(project => [project._id.toString(), project]));
+
+        // Step 4: Combine and restructure the data
+        const detailedInternalWorkOrders = internalWorkOrders.map(internalOrder => {
+            const jobOrder = jobOrderMap.get(internalOrder.job_order_id.toString());
+            const project = jobOrder ? projectMap.get(jobOrder.project_id.toString()) : null;
+
+            return {
+                job_order_id: jobOrder ? jobOrder.job_order_id : null,
+                from_date: jobOrder ? formatDateOnly(internalOrder.date.from) : null,
+                to_date: jobOrder ? formatDateOnly(internalOrder.date.to) : null,
+                work_order_number: jobOrder ? jobOrder.work_order_number : null,
+                project_name: project ? project.name : null,
+            };
+        });
+
+        return res.status(200).json({
+            success: true,
+            message: 'Internal work orders fetched successfully',
+            data: detailedInternalWorkOrders,
+        });
+
+    } catch (error) {
+        console.log('Error:', error);
+        return res.status(500).json({
             success: false,
-            message: `Internal work order not found with job order ID: ${jobOrderId}`,
+            message: 'Error fetching internal work orders: ' + error.message,
         });
     }
-
-    // 3. Fetch job order details from falconJobOrder
-    const jobOrder = await falconJobOrder.findOne({ job_order_id: jobOrderId }).lean();
-    if (!jobOrder) {
-        return res.status(404).json({
-            success: false,
-            message: `Job order not found with job order ID: ${jobOrderId}`,
-        });
-    }
-
-    // 4. Fetch project details from falconProjects
-    const project = await falconProjects.findOne({ job_order_id: jobOrderId }).lean();
-    if (!project) {
-        return res.status(404).json({
-            success: false,
-            message: `Project not found with job order ID: ${jobOrderId}`,
-        });
-    }
-
-    // 5. Format the response
-    const responseData = {
-        job_order_id: jobOrder.job_order_id,
-        work_order_no: jobOrder.work_order_no,
-        project_name: project.project_name,
-    };
-
-    // 6. Send response
-    return res.status(200).json({
-        success: true,
-        message: 'Job order details fetched successfully',
-        data: responseData,
-    });
 });
 
-export { getJobOrderAutoFetch, getJobOrderProductDetails, getJobOrderTotalProductDetail, getProductSystem, createInternalWorkOrder ,getJInternalWorkOrderDetails};
 
 
 
 
 
-// {
-//     "job_order_id": "68394d6e411d972fd25c8e8c",
-//         "sales_order_no": "sl1234",
-//             "production_requirement_date": "2025-06-05",
-//                 "production_request_date": "2025-06-05",
-//                     "date": {
-//         "from": "2025-05-29",
-//             "to": "2025-06-04"
-//     },
-//     "products:[
-//     {
-//         "product": '68399c94c1c526ba74b6ad19',
-//             "system": "system1",
-//                 "product_system": "product system1",
-//                     "code": 'P001',
-//                         "po_quantity": 100,
-//                             "color_code": 'RED',
-//                                 "width": 10,
-//                                     "height": 20,
-//                                         "semifinished_details": [
-//                                             {
-//                                                 "semifinished_id": "68399c94c1c526ba74b6ad12",
-//                                                 "file": file,
-//                                                 "remarks": "remarks",
-//                                                 "processes": [
-//                                                     {
-//                                                         "name": "cutting",
-//                                                         "file": file,
-//                                                         "remarks": "remarks"
-//                                                     },
-//                                                     {
-//                                                         "name": "machining",
-//                                                         "file": file,
-//                                                         "remarks": "remarks"
-//                                                     },
-//                                                     ...
-//         ]
 
-//                                             }
-//                                         ]
-//     },
-//     {... }
-//       ]
-// }
+
+export { getJobOrderAutoFetch, getJobOrderProductDetails, getJobOrderTotalProductDetail, getProductSystem, createInternalWorkOrder, getInternalWorkOrderDetails };
+
+
+
+
+
+
