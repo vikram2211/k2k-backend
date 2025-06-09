@@ -91,9 +91,13 @@ const registerUser = asyncHandler(async (req, res) => {
     });
 });
 
-
+import dotenv from 'dotenv';
+dotenv.config();
 
 const loginUser = asyncHandler(async (req, res, next) => {
+  console.log("inside login");
+  const MONGODB_CONNECTION_STRING = process.env.MONGODB_URI;
+  console.log("MONGODB_CONNECTION_STRING", MONGODB_CONNECTION_STRING);
   const loginSchema = Joi.object({
     email: Joi.string().email(),
     username: Joi.string(),
@@ -106,7 +110,7 @@ const loginUser = asyncHandler(async (req, res, next) => {
     return next(error);
   }
 
-  const { email,username, password } = req.body;  //username
+  const { email, username, password } = req.body;  //username
   // console.log("incoming body", req.body);
   const user = await User.findOne({
     $or: [{ username }, { email }],
