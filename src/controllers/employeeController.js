@@ -88,6 +88,7 @@ const createEmployee = asyncHandler(async (req, res) => {
     return sendResponse(res, new ApiResponse(201, formattedEmployee, 'Employee created successfully'));
 });
 const getEmployees = asyncHandler(async (req, res) => {
+    console.log("inside......get");
     const employees = await Employee
       .find()
       .select('_id name')
