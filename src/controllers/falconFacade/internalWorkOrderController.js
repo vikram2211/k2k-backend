@@ -11,6 +11,7 @@ import { falconProject } from '../../models/falconFacade/helpers/falconProject.m
 import { falconClient } from '../../models/falconFacade/helpers/falconClient.model.js';
 import { falconProduct } from '../../models/falconFacade/helpers/falconProduct.model.js';
 import { Employee } from "../../models/employee.model.js";
+import { falconProduction } from '../../models/falconFacade/falconProduction.model.js';
 
 // Helper function to format date to DD-MM-YYYY
 const formatDateOnly = (date) => {
@@ -302,7 +303,8 @@ const validateObjectId = (id, fieldName) => {
 };
 
 // API to create an internal work order with nested files
-const createInternalWorkOrder = asyncHandler(async (req, res) => {
+//Ws working fine - 
+const createInternalWorkOrder1 = asyncHandler(async (req, res) => {
     // 1. Validate job_order_id
     const { job_order_id } = req.body;
     if (!job_order_id) {
@@ -458,6 +460,7 @@ const createInternalWorkOrder = asyncHandler(async (req, res) => {
     };
 
     // 8. Save to MongoDB
+
     try {
         const jobOrder = await falconInternalWorkOrder.create(jobOrderData);
         return res.status(201).json({
@@ -473,6 +476,219 @@ const createInternalWorkOrder = asyncHandler(async (req, res) => {
             message: `Error creating job order: ${error.message}`,
         });
     }
+});
+
+
+const createInternalWorkOrder = asyncHandler(async (req, res) => {
+    // 1. Validate job_order_id
+    const { job_order_id } = req.body;
+    if (!job_order_id) {
+        return res.status(400).json({
+            success: false,
+            message: 'Job order ID is required',
+        });
+    }
+
+    // 2. Validate job_order_id exists in falconJobOrder and is a valid ObjectId
+    if (!mongoose.Types.ObjectId.isValid(job_order_id)) {
+        return res.status(400).json({
+            success: false,
+            message: 'Invalid job_order_id format',
+        });
+    }
+    const jobOrder = await falconJobOrder.findById(job_order_id);
+    if (!jobOrder) {
+        return res.status(400).json({
+            success: false,
+            message: 'Job order not found',
+        });
+    }
+
+    // 3. Parse the form-data body
+    const bodyData = req.body;
+
+    // Debug: Log date fields to confirm their structure
+    console.log("date[from]:", bodyData['date[from]']);
+    console.log("date[to]:", bodyData['date[to]']);
+    console.log("bodyData.date:", bodyData.date);
+
+    // Parse stringified fields if needed (e.g., products)
+    if (typeof bodyData.products === 'string') {
+        try {
+            bodyData.products = JSON.parse(bodyData.products);
+        } catch (err) {
+            throw new Error('Invalid products JSON format');
+        }
+    }
+
+    // 4. Validate required top-level fields
+    if (!bodyData.sales_order_no) {
+        throw new Error('Sales order number is required');
+    }
+
+    // 5. Extract and validate date fields
+    let dateFrom, dateTo;
+    if (bodyData.date && bodyData.date.from && bodyData.date.to) {
+        dateFrom = bodyData.date.from;
+        dateTo = bodyData.date.to;
+    } else if (bodyData['date[from]'] && bodyData['date[to]']) {
+        dateFrom = bodyData['date[from]'];
+        dateTo = bodyData['date[to]'];
+    } else {
+        throw new Error('Date range (from and to) is required');
+    }
+
+    // 6. Parse and validate dates
+    const parsedDateFrom = parseDate(dateFrom, 'date.from');
+    const parsedDateTo = parseDate(dateTo, 'date.to');
+
+    // 7. Map files to their respective fields
+    const filesMap = {};
+    req.files.forEach(file => {
+        const fieldName = file.fieldname;
+        filesMap[fieldName] = file;
+    });
+
+    // 8. Construct the internal work order data
+    const jobOrderData = {
+        job_order_id: bodyData.job_order_id,
+        sales_order_no: bodyData.sales_order_no,
+        date: {
+            from: parsedDateFrom,
+            to: parsedDateTo,
+        },
+        products: await Promise.all(bodyData.products.map(async (product, productIndex) => {
+            // Validate product fields
+            if (!product.product) throw new Error(`Product ID is required for product at index ${productIndex}`);
+            if (!product.system) throw new Error(`System is required for product at index ${productIndex}`);
+            if (!product.product_system) throw new Error(`Product system is required for product at index ${productIndex}`);
+            if (!product.po_quantity) throw new Error(`PO quantity is required for product at index ${productIndex}`);
+
+            // Validate ObjectId for product, system, and product_system
+            validateObjectId(product.product, `product at index ${productIndex}`);
+            validateObjectId(product.system, `system at index ${productIndex}`);
+            validateObjectId(product.product_system, `product_system at index ${productIndex}`);
+
+            return {
+                product: product.product,
+                system: product.system,
+                product_system: product.product_system,
+                po_quantity: parseInt(product.po_quantity),
+                semifinished_details: await Promise.all(product.semifinished_details.map(async (sfDetail, sfIndex) => {
+                    // Validate semifinished detail fields
+                    if (!sfDetail.semifinished_id) throw new Error(`Semifinished ID is required for semifinished_details at index ${sfIndex} in product ${productIndex}`);
+                    if (!sfDetail.remarks) throw new Error(`Remarks is required for semifinished_details at index ${sfIndex} in product ${productIndex}`);
+
+                    const sfFileField = `products[${productIndex}][semifinished_details][${sfIndex}][file]`;
+                    const sfFile = filesMap[sfFileField];
+
+                    if (!sfFile) {
+                        throw new Error(`File missing for semifinished_details at index ${sfIndex} in product ${productIndex}`);
+                    }
+
+                    // Prepare file for S3 upload
+                    const sfFileName = `internal-work-orders/semifinished/${Date.now()}-${sanitizeFilename(sfFile.originalname)}`;
+                    const sfFileData = {
+                        data: fs.readFileSync(sfFile.path),
+                        mimetype: sfFile.mimetype,
+                    };
+                    const sfUploadResult = await putObject(sfFileData, sfFileName);
+
+                    return {
+                        semifinished_id: sfDetail.semifinished_id,
+                        file_url: sfUploadResult.url,
+                        remarks: sfDetail.remarks,
+                        processes: await Promise.all(sfDetail.processes.map(async (process, processIndex) => {
+                            // Validate process fields
+                            if (!process.name) throw new Error(`Process name is required for process at index ${processIndex} in semifinished_details ${sfIndex}, product ${productIndex}`);
+                            if (!process.remarks) throw new Error(`Process remarks is required for process at index ${processIndex} in semifinished_details ${sfIndex}, product ${productIndex}`);
+
+                            const processFileField = `products[${productIndex}][semifinished_details][${sfIndex}][processes][${processIndex}][file]`;
+                            const processFile = filesMap[processFileField];
+
+                            if (!processFile) {
+                                throw new Error(`File missing for process at index ${processIndex} in semifinished_details ${sfIndex}, product ${productIndex}`);
+                            }
+
+                            // Prepare file for S3 upload
+                            const processFileName = `internal-work-orders/processes/${Date.now()}-${sanitizeFilename(processFile.originalname)}`;
+                            const processFileData = {
+                                data: fs.readFileSync(processFile.path),
+                                mimetype: processFile.mimetype,
+                            };
+                            const processUploadResult = await putObject(processFileData, processFileName);
+
+                            return {
+                                name: process.name,
+                                file_url: processUploadResult.url,
+                                remarks: process.remarks,
+                            };
+                        })),
+                    };
+                })),
+            };
+        })),
+    };
+
+    // 9. Save internal work order to MongoDB
+    let internalWorkOrder;
+    try {
+        internalWorkOrder = await falconInternalWorkOrder.create(jobOrderData);
+    } catch (error) {
+        console.log("error", error);
+        return res.status(500).json({
+            success: false,
+            message: `Error creating internal work order: ${error.message}`,
+        });
+    }
+
+    // 10. Construct and save falconProduction documents (one per semifinished_id)
+    try {
+        const productionDocs = [];
+        for (const product of jobOrderData.products) {
+            for (const sfDetail of product.semifinished_details) {
+                // Create a separate document for each process in the processes array
+                for (const process of sfDetail.processes) {
+                    const productionData = {
+                        job_order: job_order_id,
+                        semifinished_id: sfDetail.semifinished_id,
+                        product: {
+                            product_id: product.product,
+                            po_quantity: product.po_quantity,
+                            achieved_quantity: 0,
+                            rejected_quantity: 0,
+                            recycled_quantity: 0,
+                        },
+                        process_name: process.name.toLowerCase(), // Store a single process name
+                        date: parsedDateFrom,
+                        status: 'Pending',
+                        created_by: req.user?._id || null,
+                        updated_by: req.user?._id || null,
+                    };
+                    productionDocs.push(productionData);
+                }
+            }
+        }
+
+        // Create all falconProduction documents
+        const productions = await falconProduction.insertMany(productionDocs);
+        console.log('Production documents created:', productions);
+    } catch (error) {
+        console.log('Error creating production documents:', error);
+        // Rollback internal work order creation
+        await falconInternalWorkOrder.deleteOne({ _id: internalWorkOrder._id });
+        return res.status(500).json({
+            success: false,
+            message: `Error creating production documents: ${error.message}`,
+        });
+    }
+
+    // 11. Return success response
+    return res.status(201).json({
+        success: true,
+        message: 'Internal Work order and Production documents created successfully',
+        data: internalWorkOrder,
+    });
 });
 
 
