@@ -523,7 +523,8 @@ const getInternalWorkOrderDetailsss = asyncHandler(async (req, res) => {
 const getInternalWorkOrderDetails = asyncHandler(async (req, res) => {
     try {
         // Step 1: Fetch all internal work orders
-        const internalWorkOrders = await falconInternalWorkOrder.find().select({ job_order_id: 1, date: 1 });
+        const internalWorkOrders = await falconInternalWorkOrder.find().select({ job_order_id: 1, date: 1, _id: 1 });
+        // console.log("internalWorkOrders", internalWorkOrders);
 
         // Extract unique job_order_id values
         const jobOrderIds = [...new Set(internalWorkOrders.map(order => order.job_order_id))];
@@ -546,9 +547,11 @@ const getInternalWorkOrderDetails = asyncHandler(async (req, res) => {
         // Step 4: Combine and restructure the data
         const detailedInternalWorkOrders = internalWorkOrders.map(internalOrder => {
             const jobOrder = jobOrderMap.get(internalOrder.job_order_id.toString());
+            // console.log("jobOrder", jobOrder);
             const project = jobOrder ? projectMap.get(jobOrder.project_id.toString()) : null;
 
             return {
+                _id: internalOrder._id.toString(), // Add internal work order ID
                 job_order_id: jobOrder ? jobOrder.job_order_id : null,
                 from_date: jobOrder ? formatDateOnly(internalOrder.date.from) : null,
                 to_date: jobOrder ? formatDateOnly(internalOrder.date.to) : null,
@@ -922,7 +925,7 @@ const deleteInternalWorkOrder = asyncHandler(async (req, res) => {
 
 
 
-export { getJobOrderAutoFetch, getJobOrderProductDetails, getJobOrderTotalProductDetail, getProductSystem, createInternalWorkOrder, getInternalWorkOrderDetails, getInternalWorkOrderById, updateInternalWorkOrder, deleteInternalWorkOrder};
+export { getJobOrderAutoFetch, getJobOrderProductDetails, getJobOrderTotalProductDetail, getProductSystem, createInternalWorkOrder, getInternalWorkOrderDetails, getInternalWorkOrderById, updateInternalWorkOrder, deleteInternalWorkOrder };
 
 
 
