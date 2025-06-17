@@ -25,19 +25,19 @@ const productionSchema = new mongoose.Schema(
         required: true,
         default: 0,
       },
-      rejected_quantity: {
-        type: Number,
-        default: 0,
-      },
-      recycled_quantity: {
-        type: Number,
-        default: 0,
-      },
+      // rejected_quantity: {
+      //   type: Number,
+      //   default: 0,
+      // },
+      // recycled_quantity: {
+      //   type: Number,
+      //   default: 0,
+      // },
     },
     process_name: {
       type: String,
       required: true,
-  },
+    },
     date: {
       type: Date,
       required: true,

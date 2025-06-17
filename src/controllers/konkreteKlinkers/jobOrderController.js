@@ -2032,6 +2032,7 @@ export const getMachinesByProduct1 = async (req, res) => {
 export const getMachinesByProduct = async (req, res) => {
   try {
     const materialCode = req.query.material_code;
+    console.log("materialCode",materialCode);
 
     if (!materialCode) {
       return res.status(400).json({
@@ -2042,7 +2043,7 @@ export const getMachinesByProduct = async (req, res) => {
 
     const result = await Product.aggregate([
       {
-        $match: { material_code: materialCode },
+        $match: { _id: new mongoose.Types.ObjectId(materialCode) },
       },
       {
         $lookup: {
@@ -2105,6 +2106,7 @@ export const getMachinesByProduct = async (req, res) => {
         },
       },
     ]);
+    console.log("result",result);
 
     const formattedResult = result.map(item => ({
       _id: item._id,

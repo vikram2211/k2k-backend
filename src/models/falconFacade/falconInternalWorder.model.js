@@ -22,6 +22,7 @@ const semifinishedDetailSchema = new mongoose.Schema({
         type: String,
         required: true,
         trim: true,
+        unique: true
     },
     file_url: {
         type: String,

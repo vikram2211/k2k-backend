@@ -3,7 +3,7 @@ import { WorkOrder } from '../../models/konkreteKlinkers/workOrder.model.js';
 import { JobOrder } from '../../models/konkreteKlinkers/jobOrders.model.js';
 import { Project } from '../../models/konkreteKlinkers/helpers/project.model.js';
 import { Product } from '../../models/konkreteKlinkers/product.model.js';
-import {Dispatch} from '../../models/konkreteKlinkers/dispatch.model.js';
+import { Dispatch } from '../../models/konkreteKlinkers/dispatch.model.js';
 import { QCCheck } from '../../models/konkreteKlinkers/qcCheck.model.js';
 import { z } from 'zod';
 import fs from 'fs';
@@ -14,9 +14,9 @@ import { ApiResponse } from '../../utils/ApiResponse.js';
 import mongoose from 'mongoose';
 import winston from 'winston';
 import { ApiError } from '../../utils/ApiError.js';
-import {Inventory} from '../../models/konkreteKlinkers/inventory.model.js';
-import {DailyProduction} from '../../models/konkreteKlinkers/dailyProductionPlanning.js';
-import {Packing} from '../../models/konkreteKlinkers/packing.model.js';
+import { Inventory } from '../../models/konkreteKlinkers/inventory.model.js';
+import { DailyProduction } from '../../models/konkreteKlinkers/dailyProductionPlanning.js';
+import { Packing } from '../../models/konkreteKlinkers/packing.model.js';
 
 // const logger = winston.createLogger({
 //   level: 'info',
@@ -101,7 +101,7 @@ const createWorkOrderSchema = z.object({
       product_id: z.string().refine((val) => mongoose.isValidObjectId(val), {
         message: 'Invalid product ID',
       }),
-      uom: z.enum(['sqmt', 'nos'], { message: 'UOM must be "sqmt" or "nos"' }),
+      uom: z.enum(['sqmt', 'nos','metre'], { message: 'UOM must be "sqmt" or "nos"' }),
       po_quantity: z.number().min(0, 'PO quantity must be non-negative'),
       qty_in_nos: z.number().min(0, 'Original square meters must be non-negative'),
       // plant_code: z.string().refine((val) => mongoose.isValidObjectId(val), {
@@ -395,7 +395,7 @@ export const createWorkOrder = async (req, res) => {
       bodyData.products.map(async (product) => {
         // Get product details
         const productDetails = await Product.findById(product.product_id);
-        console.log("productDetails",productDetails);
+        console.log("productDetails", productDetails);
 
         if (!productDetails) {
           throw new Error(`Product not found with ID: ${product.product_id}`);
@@ -409,7 +409,7 @@ export const createWorkOrder = async (req, res) => {
         processedProduct.po_quantity = Number(product.po_quantity);
 
         // Handle UOM
-        if (product.uom.toLowerCase() === 'sqmt') {
+        if (product.uom.toLowerCase() === 'sqmt' || product.uom.toLowerCase() === 'metre') {
           if (!productDetails.area || productDetails.area <= 0) {
             throw new Error(`Invalid area value (${productDetails.area}) for product ${productDetails.material_code}`);
           }
@@ -418,7 +418,8 @@ export const createWorkOrder = async (req, res) => {
           // console.log("po_quantity...............",typeof(product.po_quantity));
           // processedProduct.original_sqmt = Number(product.po_quantity); 
           // console.log("lalalallalalala",typeof(processedProduct.original_sqmt));
-          processedProduct.qty_in_nos = Math.floor(Number(product.po_quantity) / productDetails.area);
+          processedProduct.qty_in_nos = Math.ceil(Number(product.po_quantity) / productDetails.area);
+          // console.log("nossss",processedProduct.qty_in_nos);
         }
         else if (product.uom.toLowerCase() === 'nos') {
           // Keep po_quantity as-is, original_sqmt remains 0
@@ -431,7 +432,7 @@ export const createWorkOrder = async (req, res) => {
         return processedProduct;
       })
     );
-    // console.log("processedProduct",processedProduct);
+    console.log("processedProducts", processedProducts);
 
     // 4. Handle file uploads
     const uploadedFiles = [];
@@ -495,7 +496,7 @@ export const createWorkOrder = async (req, res) => {
 
 
     await Inventory.insertMany(inventoryDocs);//, { session }
-    await workOrder.save({  }); //session
+    await workOrder.save({}); //session
 
     // await session.commitTransaction();
     // 8. Return success response
@@ -506,7 +507,7 @@ export const createWorkOrder = async (req, res) => {
     });
   } catch (error) {
     // Cleanup: Delete temp files on error
-    console.log("error",error);
+    console.log("error", error);
     if (req.files) {
       req.files.forEach((file) => {
         const tempFilePath = path.join('./public/temp', file.filename);
@@ -756,9 +757,9 @@ export const getWorkOrderById1 = async (req, res) => {
       client: woData.client_id || null,
       project: woData.project_id
         ? {
-            ...woData.project_id,
-            client: woData.project_id.client || null
-          }
+          ...woData.project_id,
+          client: woData.project_id.client || null
+        }
         : null,
       creator: woData.created_by || null,
       updater: woData.updated_by || null,
@@ -901,9 +902,9 @@ export const getWorkOrderByIds = async (req, res) => {
       client_id: woData.client_id || null,
       project_id: woData.project_id
         ? {
-            ...woData.project_id,
-            client: woData.project_id.client || null,
-          }
+          ...woData.project_id,
+          client: woData.project_id.client || null,
+        }
         : null,
       created_by: woData.created_by || null,
       updated_by: woData.updated_by || null,
@@ -1219,7 +1220,7 @@ export const getWorkOrderById2 = async (req, res) => {
             select: 'username',
           })
           .lean();
-          console.log("dailyProductionDatassssss",dailyProductionData);
+        console.log("dailyProductionDatassssss", dailyProductionData);
 
         // Transform daily production data to rename product_id to product
         const transformedDailyProduction = dailyProductionData.map((dp) => ({
@@ -1268,9 +1269,9 @@ export const getWorkOrderById2 = async (req, res) => {
       client_id: woData.client_id || null,
       project_id: woData.project_id
         ? {
-            ...woData.project_id,
-            client: woData.project_id.client || null,
-          }
+          ...woData.project_id,
+          client: woData.project_id.client || null,
+        }
         : null,
       created_by: woData.created_by || null,
       updated_by: woData.updated_by || null,
@@ -1630,9 +1631,9 @@ export const getWorkOrderById = async (req, res) => {
       client_id: woData.client_id || null,
       project_id: woData.project_id
         ? {
-            ...woData.project_id,
-            client: woData.project_id.client || null,
-          }
+          ...woData.project_id,
+          client: woData.project_id.client || null,
+        }
         : null,
       created_by: woData.created_by || null,
       updated_by: woData.updated_by || null,
@@ -1846,7 +1847,7 @@ export const updateWorkOrder = async (req, res) => {
       if (typeof bodyData.products === 'string') {
         updatedProducts = JSON.parse(bodyData.products);
       }
-      console.log("updatedProducts",updatedProducts);
+      console.log("updatedProducts", updatedProducts);
 
 
       // Process products - convert sqmt to nos if needed
@@ -1875,7 +1876,7 @@ export const updateWorkOrder = async (req, res) => {
             // console.log("type....",typeof(product.po_quantity));
 
             // Calculate quantity in nos
-            const quantityInNos = Math.floor(Number(product.po_quantity) / productDetails.area);
+            const quantityInNos = Math.ceil(Number(product.po_quantity) / productDetails.area);
 
             return {
               ...product,
@@ -1931,7 +1932,7 @@ export const updateWorkOrder = async (req, res) => {
 
     // 10. Validate provided data
     const validatedData = createWorkOrderSchema.partial().parse(updateData);
-    console.log("validatedData",validatedData);
+    console.log("validatedData", validatedData);
 
     // 11. Transform validated data for MongoDB (convert dates to Date objects)
     const mongoData = { ...validatedData };

@@ -99,11 +99,22 @@ const productSchema = Joi.object({
             'string.empty': 'Description is required',
             'any.required': 'Description is required',
         }),
-    uom: Joi.string()
+    // uom: Joi.string()    //WORKED FINE FOR - ONLY SINGLE UOM
+    //     .required()
+    //     .messages({
+    //         'string.empty': 'UOM is required',
+    //         'any.required': 'UOM is required',
+    //     }),
+
+    uom: Joi.array()
+        .items(Joi.string().valid('Square Metre/No', 'Metre/No')) 
+        .min(1) //at least one UOM is provided
         .required()
         .messages({
-            'string.empty': 'UOM is required',
+            'array.min': 'At least one UOM must be provided',
+            'array.base': 'UOM must be an array of valid values',
             'any.required': 'UOM is required',
+            'string.valid': 'UOM must be either "Square Metre/No" or "Metre/No"',
         }),
     area: Joi.number()
         .required()
@@ -182,16 +193,7 @@ const createProduct = asyncHandler(async (req, res, next) => {
     return res.status(201).json(new ApiResponse(201, newProduct, 'Product created successfully'));
 });
 
-// **Get All Products**
-// const getAllProducts = asyncHandler(async (req, res, next) => {
-//     const products = await Product.find().populate("created_by", "name email");
 
-//     if (!products || products.length === 0) {
-//         return next(new ApiError(404, "No products available"));
-//     }
-
-//     return res.status(200).json(new ApiResponse(200, products, "Products fetched successfully"));
-// });
 
 const getAllProducts = asyncHandler(async (req, res, next) => {
     const products = await Product.find({ isDeleted: false })
@@ -229,27 +231,7 @@ const getProductById = asyncHandler(async (req, res, next) => {
     return res.status(200).json(new ApiResponse(200, product, "Product fetched successfully"));
 });
 
-// **Update Product**
-// const updateProduct = asyncHandler(async (req, res, next) => {
-//     const productId = req.params.id;
 
-//     if (!mongoose.Types.ObjectId.isValid(productId)) {
-//         return next(new ApiError(400, `Provided Product ID (${productId}) is not a valid ObjectId`));
-//     }
-
-//     const { error, value } = productSchema.validate(req.body, { abortEarly: false });
-//     if (error) {
-//         return next(new ApiError(400, "Validation failed for product update", error.details));
-//     }
-
-//     const updatedProduct = await Product.findByIdAndUpdate(productId, value, { new: true });
-
-//     if (!updatedProduct) {
-//         return next(new ApiError(404, "No product found with the given ID"));
-//     }
-
-//     return res.status(200).json(new ApiResponse(200, updatedProduct, "Product updated successfully"));
-// });
 
 
 
@@ -270,11 +252,21 @@ const updateProductSchema = Joi.object({
         .messages({
             'string.empty': 'Description cannot be empty if provided',
         }),
-    uom: Joi.string()
-        .valid('Square Metre/No')
+    // uom: Joi.string()  //WORKED FINE FOR - ONLY SINGLE UOM
+    //     .valid('Square Metre/No')
+    //     .optional()
+    //     .messages({
+    //         'any.only': 'UOM must be either "Square Metre" or "Nos"',
+    //     }),
+
+    uom: Joi.array()
+        .items(Joi.string().valid('Square Metre/No', 'Metre/No')) // Allow only these values
+        .min(1) // Ensure at least one UOM is provided if uom is updated
         .optional()
         .messages({
-            'any.only': 'UOM must be either "Square Metre" or "Nos"',
+            'array.min': 'At least one UOM must be provided if updating UOM',
+            'array.base': 'UOM must be an array of valid values',
+            'string.valid': 'UOM must be either "Square Metre/No" or "Metre/No"',
         }),
     area: Joi.number().when('uom', {
         is: 'Square Metre',
@@ -321,7 +313,7 @@ const updateProduct = asyncHandler(async (req, res, next) => {
     // Validate request body
     const { error, value } = updateProductSchema.validate(req.body, { abortEarly: false });
     if (error) {
-        console.log("error",error);
+        console.log("error", error);
         return next(new ApiError(400, 'Validation failed for product update', error.details));
     }
 

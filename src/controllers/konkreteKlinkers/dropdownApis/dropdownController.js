@@ -36,6 +36,7 @@ export const getProductByWorkOrder = async (req, res) => {
                 message: 'Work order not found',
             });
         }
+        console.log("workOrder",workOrder);
 
         // 4. Format the products array
         const formattedProducts = workOrder.products
@@ -46,6 +47,7 @@ export const getProductByWorkOrder = async (req, res) => {
                 description: product.product_id.description,
                 uom: product.uom,
                 po_quantity: product.po_quantity,
+                quantity_in_no: product.qty_in_nos,
                 original_sqmt: product.original_sqmt,
                 plant_code: product.plant_code ? product.plant_code.plant_code : null,
                 delivery_date: product.delivery_date || null,
