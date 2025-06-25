@@ -7,20 +7,10 @@ const falconJobOrderSchema = new mongoose.Schema(
             required: true,
             unique: true,
         },
-        client_id: {
-            type: mongoose.Schema.Types.ObjectId,
-            ref: "falconClient",
-            required: true
-        },
-        project_id: {
-            type: mongoose.Schema.Types.ObjectId,
-            ref: "falconProject",
-            required: true
-        },
         work_order_number: {
-            type: String,
-            required: true,
-            unique: true, // Ensures each work order number is unique
+            type: mongoose.Schema.Types.ObjectId,
+            ref: "falconWorkOrder",
+            required: true
         },
         prod_issued_approved_by: {
             type: mongoose.Schema.Types.ObjectId,
@@ -117,3 +107,25 @@ const falconJobOrderSchema = new mongoose.Schema(
 );
 
 export const falconJobOrder = mongoose.model('falconJobOrder', falconJobOrderSchema);
+
+
+
+
+
+
+
+  // client_id: {
+        //     type: mongoose.Schema.Types.ObjectId,
+        //     ref: "falconClient",
+        //     required: true
+        // },
+        // project_id: {
+        //     type: mongoose.Schema.Types.ObjectId,
+        //     ref: "falconProject",
+        //     required: true
+        // },
+        // work_order_number: {
+        //     type: String,
+        //     required: true,
+        //     unique: true, // Ensures each work order number is unique
+        // },

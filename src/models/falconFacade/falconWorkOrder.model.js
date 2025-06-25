@@ -16,7 +16,7 @@ const falconWorkOrderSchema = new mongoose.Schema(
         work_order_number: {
             type: String,
             required: true,
-            unique: true, // Ensures each work order number is unique
+            unique: true, 
         },
         date: {
             type: Date,
@@ -87,15 +87,15 @@ const falconWorkOrderSchema = new mongoose.Schema(
         },
 
 
-        job_orders: [
-            {
-                type: mongoose.Schema.Types.ObjectId,
-                ref: "JobOrder",
-            },
-        ],
+        // job_orders: [
+        //     {
+        //         type: mongoose.Schema.Types.ObjectId,
+        //         ref: "JobOrder",
+        //     },
+        // ],
     },
     {
-        timestamps: true, // Automatically adds createdAt and updatedAt fields
+        timestamps: true,
     }
 );
 

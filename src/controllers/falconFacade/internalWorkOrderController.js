@@ -1,3 +1,4 @@
+import {falconWorkOrder} from '../../models/falconFacade/falconWorkOrder.model.js'
 import { falconJobOrder } from "../../models/falconFacade/falconJobOrder.model.js";
 import { falconProductSystem } from "../../models/falconFacade/helpers/falconProductSystem.model.js";
 import { asyncHandler } from "../../utils/asyncHandler.js";
@@ -43,15 +44,29 @@ const getJobOrderAutoFetch = asyncHandler(async (req, res) => {
     // 2. Fetch job order with populated fields
     const jobOrder = await falconJobOrder
         .findOne({ _id: joId })
+        // .populate({
+        //     path: 'client_id',
+        //     select: 'name',
+        //     match: { isDeleted: false },
+        // })
+        // .populate({
+        //     path: 'project_id',
+        //     select: 'name',
+        //     match: { isDeleted: false },
+        // })
         .populate({
-            path: 'client_id',
-            select: 'name',
-            match: { isDeleted: false },
-        })
-        .populate({
-            path: 'project_id',
-            select: 'name',
-            match: { isDeleted: false },
+            path: 'work_order_number',
+            select: 'client_id project_id work_order_number',
+            populate: [
+                {
+                    path: 'client_id',
+                    select: 'name address',
+                },
+                {
+                    path: 'project_id',
+                    select: 'name address',
+                },
+            ],
         })
         .lean();
 
@@ -62,12 +77,13 @@ const getJobOrderAutoFetch = asyncHandler(async (req, res) => {
             message: `Job order not found with ID: ${joId}`,
         });
     }
+    console.log("jobOrder", jobOrder);
 
     // 3. Format the response
     const formattedResponse = {
-        workOrderNumber: jobOrder.work_order_number,
-        clientName: jobOrder.client_id?.name || 'N/A',
-        projectName: jobOrder.project_id?.name || 'N/A',
+        workOrderNumber: jobOrder.work_order_number.work_order_number,
+        clientName: jobOrder.work_order_number.client_id?.name || 'N/A',
+        projectName: jobOrder.work_order_number.project_id?.name || 'N/A',
         // products: jobOrder.products.map(product => ({
         //     code: product.code,
         //     colorCode: product.color_code,
@@ -621,6 +637,7 @@ const createInternalWorkOrder = asyncHandler(async (req, res) => {
                                 mimetype: processFile.mimetype,
                             };
                             const processUploadResult = await putObject(processFileData, processFileName);
+                            console.log("process",process);
 
                             return {
                                 name: process.name,
@@ -740,43 +757,112 @@ const getInternalWorkOrderDetailsss = asyncHandler(async (req, res) => {
         });
     }
 });
+// const getInternalWorkOrderDetails = asyncHandler(async (req, res) => {
+//     try {
+//         // Step 1: Fetch all internal work orders
+//         const internalWorkOrders = await falconInternalWorkOrder.find().select({ job_order_id: 1, date: 1, _id: 1 });
+//         console.log("internalWorkOrders", internalWorkOrders);
+
+//         // Extract unique job_order_id values
+//         const jobOrderIds = [...new Set(internalWorkOrders.map(order => order.job_order_id))];
+//         console.log("jobOrderIds",jobOrderIds);
+
+//         // Step 2: Fetch all corresponding job orders in a single query
+//         const jobOrders = await falconJobOrder.find({ '_id': { $in: jobOrderIds } });
+
+//         // Create a map for job orders for quick lookup
+//         const jobOrderMap = new Map(jobOrders.map(jobOrder => [jobOrder._id.toString(), jobOrder]));
+
+//         // Extract unique project_id values from job orders
+//         const projectIds = [...new Set(jobOrders.map(jobOrder => jobOrder.project_id.toString()))];
+
+//         // Step 3: Fetch all corresponding projects in a single query
+//         const projects = await falconProject.find({ '_id': { $in: projectIds } });
+
+//         // Create a map for projects for quick lookup
+//         const projectMap = new Map(projects.map(project => [project._id.toString(), project]));
+
+//         // Step 4: Combine and restructure the data
+//         const detailedInternalWorkOrders = internalWorkOrders.map(internalOrder => {
+//             const jobOrder = jobOrderMap.get(internalOrder.job_order_id.toString());
+//             // console.log("jobOrder", jobOrder);
+//             const project = jobOrder ? projectMap.get(jobOrder.project_id.toString()) : null;
+
+//             return {
+//                 _id: internalOrder._id.toString(), // Add internal work order ID
+//                 job_order_id: jobOrder ? jobOrder.job_order_id : null,
+//                 from_date: jobOrder ? formatDateOnly(internalOrder.date.from) : null,
+//                 to_date: jobOrder ? formatDateOnly(internalOrder.date.to) : null,
+//                 work_order_number: jobOrder ? jobOrder.work_order_number : null,
+//                 project_name: project ? project.name : null,
+//             };
+//         });
+
+//         return res.status(200).json({
+//             success: true,
+//             message: 'Internal work orders fetched successfully',
+//             data: detailedInternalWorkOrders,
+//         });
+
+//     } catch (error) {
+//         console.log('Error:', error);
+//         return res.status(500).json({
+//             success: false,
+//             message: 'Error fetching internal work orders: ' + error.message,
+//         });
+//     }
+// });
+
 const getInternalWorkOrderDetails = asyncHandler(async (req, res) => {
     try {
-        // Step 1: Fetch all internal work orders
-        const internalWorkOrders = await falconInternalWorkOrder.find().select({ job_order_id: 1, date: 1, _id: 1 });
-        // console.log("internalWorkOrders", internalWorkOrders);
+        // Step 1: Fetch all internal work orders with minimal fields
+        const internalWorkOrders = await falconInternalWorkOrder
+            .find()
+            .select('job_order_id date _id')
+            .lean();
 
-        // Extract unique job_order_id values
-        const jobOrderIds = [...new Set(internalWorkOrders.map(order => order.job_order_id))];
+        if (!internalWorkOrders.length) {
+            return res.status(200).json({
+                success: true,
+                message: 'No internal work orders found',
+                data: [],
+            });
+        }
 
-        // Step 2: Fetch all corresponding job orders in a single query
-        const jobOrders = await falconJobOrder.find({ '_id': { $in: jobOrderIds } });
+        // Step 2: Populate job orders with work order and project details
+        const jobOrderIds = [...new Set(internalWorkOrders.map(order => order.job_order_id.toString()))];
 
-        // Create a map for job orders for quick lookup
+        const jobOrders = await falconJobOrder
+            .find({ _id: { $in: jobOrderIds } })
+            .populate({
+                path: 'work_order_number',
+                select: 'work_order_number project_id',
+                populate: {
+                    path: 'project_id',
+                    model: 'falconProject',
+                    select: 'name',
+                    match: { isDeleted: false },
+                },
+            })
+            .select('job_order_id work_order_number')
+            .lean();
+
+        // Create a map for job orders
         const jobOrderMap = new Map(jobOrders.map(jobOrder => [jobOrder._id.toString(), jobOrder]));
 
-        // Extract unique project_id values from job orders
-        const projectIds = [...new Set(jobOrders.map(jobOrder => jobOrder.project_id.toString()))];
-
-        // Step 3: Fetch all corresponding projects in a single query
-        const projects = await falconProject.find({ '_id': { $in: projectIds } });
-
-        // Create a map for projects for quick lookup
-        const projectMap = new Map(projects.map(project => [project._id.toString(), project]));
-
-        // Step 4: Combine and restructure the data
+        // Step 3: Construct the response
         const detailedInternalWorkOrders = internalWorkOrders.map(internalOrder => {
             const jobOrder = jobOrderMap.get(internalOrder.job_order_id.toString());
-            // console.log("jobOrder", jobOrder);
-            const project = jobOrder ? projectMap.get(jobOrder.project_id.toString()) : null;
+            const workOrder = jobOrder?.work_order_number;
+            const project = workOrder?.project_id;
 
             return {
-                _id: internalOrder._id.toString(), // Add internal work order ID
-                job_order_id: jobOrder ? jobOrder.job_order_id : null,
-                from_date: jobOrder ? formatDateOnly(internalOrder.date.from) : null,
-                to_date: jobOrder ? formatDateOnly(internalOrder.date.to) : null,
-                work_order_number: jobOrder ? jobOrder.work_order_number : null,
-                project_name: project ? project.name : null,
+                _id: internalOrder._id.toString(),
+                job_order_id: jobOrder?.job_order_id || null,
+                work_order_number: workOrder?.work_order_number || null,
+                project_name: project?.name || null,
+                from_date: internalOrder.date?.from ? formatDateOnly(internalOrder.date.from) : null,
+                to_date: internalOrder.date?.to ? formatDateOnly(internalOrder.date.to) : null,
             };
         });
 
@@ -785,59 +871,231 @@ const getInternalWorkOrderDetails = asyncHandler(async (req, res) => {
             message: 'Internal work orders fetched successfully',
             data: detailedInternalWorkOrders,
         });
-
     } catch (error) {
-        console.log('Error:', error);
+        console.error('Error fetching internal work orders:', error);
         return res.status(500).json({
             success: false,
-            message: 'Error fetching internal work orders: ' + error.message,
+            message: `Error fetching internal work orders: ${error.message}`,
         });
     }
 });
 
+
+// const getInternalWorkOrderById = asyncHandler(async (req, res) => {
+//     try {
+//         const { id } = req.params; // Assuming the _id is passed as a URL parameter
+
+//         // Step 1: Fetch the internal work order by ID
+//         const internalWorkOrder = await falconInternalWorkOrder.findById(id);
+//         if (!internalWorkOrder) {
+//             return res.status(404).json({
+//                 success: false,
+//                 message: 'Internal work order not found',
+//             });
+//         }
+//         console.log("internalWorkOrder",internalWorkOrder);
+//         internalWorkOrder.products.map(product => {
+//             console.log("****product", product);
+//             product.semifinished_details.map(sf => {
+//                 console.log("****sf", sf);
+
+//             })
+//         })
+
+//         // Step 2: Fetch the job order details
+//         const jobOrder = await falconJobOrder.findById(internalWorkOrder.job_order_id);
+//         if (!jobOrder) {
+//             return res.status(404).json({
+//                 success: false,
+//                 message: 'Job order not found',
+//             });
+//         }
+//         // console.log("jobOrder",jobOrder);
+//         const woOrder = await falconWorkOrder.findById(jobOrder.work_order_number);
+//         if (!woOrder) {
+//             return res.status(404).json({
+//                 success: false,
+//                 message: 'Work order not found',
+//             });
+//         }
+//         // console.log("woOrder",woOrder);
+
+
+//         // Step 3: Fetch the client and project details
+//         const client = await falconClient.findById(woOrder.client_id);
+//         // console.log("client",client);
+//         const project = await falconProject.findById(woOrder.project_id);
+//         // console.log("project",project);
+
+//         // Step 4: Fetch the employee details for approvedBy and receivedBy
+//         const approvedBy = await Employee.findById(jobOrder.prod_issued_approved_by);
+//         const receivedBy = await Employee.findById(jobOrder.prod_recieved_by);
+
+//         // Step 5: Fetch the product details
+//         const productsDetails = await Promise.all(
+//             jobOrder.products.map(async (jobProduct) => {
+//                 const productDetail = await falconProduct.findById(jobProduct.product);
+
+//                 // Match with internalWorkOrder product
+//                 const matchedInternalProduct = internalWorkOrder.products.find(
+//                     p => String(p.product) === String(jobProduct.product)
+//                 );
+
+//                 return {
+//                     product_name: productDetail ? productDetail.name : null,
+//                     product_id: jobProduct.product,
+//                     sales_order_no: internalWorkOrder.sales_order_no,
+//                     // system: , 
+//                     // system_id: ,
+//                     // product_system: ,
+//                     // product_system_id: ,
+//                     po_quantity: jobProduct.po_quantity,
+//                     from_date: formatDateOnly(internalWorkOrder.date.from),
+//                     to_date: formatDateOnly(internalWorkOrder.date.to),
+//                     uom: jobProduct.uom,
+//                     code: jobProduct.code,
+//                     color_code: jobProduct.color_code,
+//                     width: jobProduct.width,
+//                     height: jobProduct.height,
+//                     semifinished_details: matchedInternalProduct?.semifinished_details || [] // ✅ Add semifinished_details
+//                 };
+//             })
+//         );
+
+
+//         // Step 6: Format the response
+//         const responseData = {
+//             clientProjectDetails: {
+//                 clientName: client ? client.name : null,
+//                 clientId: client ? client._id : null,
+//                 address: client ? client.address : null,
+//                 projectName: project ? project.name : null,
+//                 projectId: project ? project._id : null,
+//             },
+//             workOrderDetails: {
+//                 workOrderNumber: jobOrder.work_order_number,
+//                 productionRequestDate: formatDateOnly(jobOrder.prod_requset_date),
+//                 productionRequirementDate: formatDateOnly(jobOrder.prod_requirement_date),
+//                 approvedBy: approvedBy ? approvedBy.name : null,
+//                 approvedById: approvedBy ? approvedBy._id : null,
+//                 receivedBy: receivedBy ? receivedBy.name : null,
+//                 receivedById: receivedBy ? receivedBy._id : null,
+//                 workOrderDate: formatDateOnly(jobOrder.date),
+//                 file: jobOrder.files,
+//                 createdAt: formatDateOnly(jobOrder.createdAt),
+//                 createdBy: "admin", // Replace with actual createdBy data if available
+//             },
+//             jobOrderDetails: {
+//                 job_order_id: jobOrder._id,
+//                 jobOrderNumber: jobOrder.job_order_id,
+//                 createdAt: formatDateOnly(jobOrder.createdAt),
+//                 createdBy: "admin", // Replace with actual createdBy data if available
+//                 status: jobOrder.status,
+//             },
+//             productsDetails: productsDetails,
+//         };
+
+//         return res.status(200).json({
+//             success: true,
+//             message: 'Internal work order fetched successfully',
+//             data: responseData,
+//         });
+
+//     } catch (error) {
+//         console.log('Error:', error);
+//         return res.status(500).json({
+//             success: false,
+//             message: 'Error fetching internal work order: ' + error.message,
+//         });
+//     }
+// });
 const getInternalWorkOrderById = asyncHandler(async (req, res) => {
     try {
-        const { id } = req.params; // Assuming the _id is passed as a URL parameter
+        const { id } = req.params;
 
-        // Step 1: Fetch the internal work order by ID
-        const internalWorkOrder = await falconInternalWorkOrder.findById(id);
+        // Step 1: Fetch the internal work order by ID with populated system and product_system
+        const internalWorkOrder = await falconInternalWorkOrder
+            .findById(id)
+            .populate({
+                path: 'products.system',
+                model: 'falconSystem',
+                select: 'name',
+                match: { isDeleted: false },
+            })
+            .populate({
+                path: 'products.product_system',
+                model: 'falconProductSystem',
+                select: 'name',
+                match: { isDeleted: false },
+            })
+            .lean();
+
         if (!internalWorkOrder) {
             return res.status(404).json({
                 success: false,
                 message: 'Internal work order not found',
             });
         }
-        // console.log("internalWorkOrder",internalWorkOrder);
-        internalWorkOrder.products.map(product => {
-            console.log("product", product);
-            product.semifinished_details.map(sf => {
-                console.log("sf", sf);
-
-            })
-        })
 
         // Step 2: Fetch the job order details
-        const jobOrder = await falconJobOrder.findById(internalWorkOrder.job_order_id);
+        const jobOrder = await falconJobOrder
+            .findById(internalWorkOrder.job_order_id)
+            .populate({
+                path: 'work_order_number',
+                model: 'falconWorkOrder',
+                select: 'work_order_number client_id project_id',
+                populate: [
+                    {
+                        path: 'client_id',
+                        model: 'falconClient',
+                        select: 'name address',
+                        match: { isDeleted: false },
+                    },
+                    {
+                        path: 'project_id',
+                        model: 'falconProject',
+                        select: 'name',
+                        match: { isDeleted: false },
+                    },
+                ],
+            })
+            .populate({
+                path: 'prod_issued_approved_by',
+                model: 'Employee',
+                select: 'name',
+            })
+            .populate({
+                path: 'prod_recieved_by',
+                model: 'Employee',
+                select: 'name',
+            })
+            .populate({
+                path: 'created_by',
+                model: 'User',
+                select: 'username',
+            })
+            .lean();
+
+            console.log("jobOrder",jobOrder);
+
         if (!jobOrder) {
             return res.status(404).json({
                 success: false,
                 message: 'Job order not found',
             });
         }
-        // console.log("jobOrder",jobOrder);
 
-        // Step 3: Fetch the client and project details
-        const client = await falconClient.findById(jobOrder.client_id);
-        const project = await falconProject.findById(jobOrder.project_id);
+        if (!jobOrder.work_order_number) {
+            return res.status(404).json({
+                success: false,
+                message: 'Work order not found',
+            });
+        }
 
-        // Step 4: Fetch the employee details for approvedBy and receivedBy
-        const approvedBy = await Employee.findById(jobOrder.prod_issued_approved_by);
-        const receivedBy = await Employee.findById(jobOrder.prod_recieved_by);
-
-        // Step 5: Fetch the product details
+        // Step 3: Fetch product details for job order products
         const productsDetails = await Promise.all(
             jobOrder.products.map(async (jobProduct) => {
-                const productDetail = await falconProduct.findById(jobProduct.product);
+                const productDetail = await falconProduct.findById(jobProduct.product).select('name').lean();
 
                 // Match with internalWorkOrder product
                 const matchedInternalProduct = internalWorkOrder.products.find(
@@ -848,51 +1106,50 @@ const getInternalWorkOrderById = asyncHandler(async (req, res) => {
                     product_name: productDetail ? productDetail.name : null,
                     product_id: jobProduct.product,
                     sales_order_no: internalWorkOrder.sales_order_no,
-                    system: "system1", // Replace with actual system data if needed
-                    system_id: "68399c94c1c526ba74b6ad11",
-                    product_system: "product system 1",
-                    product_system_id: "68399c94c1c526ba74b6ad13",
+                    system_name: matchedInternalProduct?.system?.name || null,
+                    system_id: matchedInternalProduct?.system?._id || null,
+                    product_system_name: matchedInternalProduct?.product_system?.name || null,
+                    product_system_id: matchedInternalProduct?.product_system?._id || null,
                     po_quantity: jobProduct.po_quantity,
-                    from_date: formatDateOnly(internalWorkOrder.date.from),
-                    to_date: formatDateOnly(internalWorkOrder.date.to),
+                    from_date: internalWorkOrder.date?.from ? formatDateOnly(internalWorkOrder.date.from) : null,
+                    to_date: internalWorkOrder.date?.to ? formatDateOnly(internalWorkOrder.date.to) : null,
                     uom: jobProduct.uom,
                     code: jobProduct.code,
                     color_code: jobProduct.color_code,
                     width: jobProduct.width,
                     height: jobProduct.height,
-                    semifinished_details: matchedInternalProduct?.semifinished_details || [] // ✅ Add semifinished_details
+                    semifinished_details: matchedInternalProduct?.semifinished_details || [],
                 };
             })
         );
 
-
-        // Step 6: Format the response
+        // Step 4: Format the response
         const responseData = {
             clientProjectDetails: {
-                clientName: client ? client.name : null,
-                clientId: client ? client._id : null,
-                address: client ? client.address : null,
-                projectName: project ? project.name : null,
-                projectId: project ? project._id : null,
+                clientName: jobOrder.work_order_number?.client_id?.name || null,
+                clientId: jobOrder.work_order_number?.client_id?._id || null,
+                address: jobOrder.work_order_number?.client_id?.address || null,
+                projectName: jobOrder.work_order_number?.project_id?.name || null,
+                projectId: jobOrder.work_order_number?.project_id?._id || null,
             },
             workOrderDetails: {
-                workOrderNumber: jobOrder.work_order_number,
-                productionRequestDate: formatDateOnly(jobOrder.prod_requset_date),
-                productionRequirementDate: formatDateOnly(jobOrder.prod_requirement_date),
-                approvedBy: approvedBy ? approvedBy.name : null,
-                approvedById: approvedBy ? approvedBy._id : null,
-                receivedBy: receivedBy ? receivedBy.name : null,
-                receivedById: receivedBy ? receivedBy._id : null,
-                workOrderDate: formatDateOnly(jobOrder.date),
-                file: jobOrder.files,
-                createdAt: formatDateOnly(jobOrder.createdAt),
-                createdBy: "admin", // Replace with actual createdBy data if available
+                workOrderNumber: jobOrder.work_order_number?.work_order_number || null,
+                productionRequestDate: jobOrder.prod_requset_date ? formatDateOnly(jobOrder.prod_requset_date) : null,
+                productionRequirementDate: jobOrder.prod_requirement_date ? formatDateOnly(jobOrder.prod_requirement_date) : null,
+                approvedBy: jobOrder.prod_issued_approved_by?.name || null,
+                approvedById: jobOrder.prod_issued_approved_by?._id || null,
+                receivedBy: jobOrder.prod_recieved_by?.name || null,
+                receivedById: jobOrder.prod_recieved_by?._id || null,
+                workOrderDate: jobOrder.date ? formatDateOnly(jobOrder.date) : null,
+                file: jobOrder.files || [],
+                createdAt: jobOrder.createdAt ? formatDateOnly(jobOrder.createdAt) : null,
+                createdBy: jobOrder.created_by.username,
             },
             jobOrderDetails: {
                 job_order_id: jobOrder._id,
                 jobOrderNumber: jobOrder.job_order_id,
-                createdAt: formatDateOnly(jobOrder.createdAt),
-                createdBy: "admin", // Replace with actual createdBy data if available
+                createdAt: jobOrder.createdAt ? formatDateOnly(jobOrder.createdAt) : null,
+                createdBy: jobOrder.created_by.username, 
                 status: jobOrder.status,
             },
             productsDetails: productsDetails,
@@ -903,16 +1160,14 @@ const getInternalWorkOrderById = asyncHandler(async (req, res) => {
             message: 'Internal work order fetched successfully',
             data: responseData,
         });
-
     } catch (error) {
-        console.log('Error:', error);
+        console.error('Error fetching internal work order:', error);
         return res.status(500).json({
             success: false,
-            message: 'Error fetching internal work order: ' + error.message,
+            message: `Error fetching internal work order: ${error.message}`,
         });
     }
 });
-
 
 const updateInternalWorkOrder = asyncHandler(async (req, res) => {
     const { id } = req.params; // Internal work order ID

@@ -22,7 +22,7 @@ const semifinishedDetailSchema = new mongoose.Schema({
         type: String,
         required: true,
         trim: true,
-        unique: true
+        // unique: true    - NEED TO THINK ON IT
     },
     file_url: {
         type: String,
@@ -71,8 +71,9 @@ const dateRangeSchema = new mongoose.Schema({
 const falconInternalWorkOrderSchema = new mongoose.Schema(
     {
         job_order_id: {
-            type: String,
-            required: true,
+            type: mongoose.Schema.Types.ObjectId,
+            ref: "falconJobOrder",
+            required: true
         },
         sales_order_no: {
             type: String,
@@ -88,4 +89,4 @@ const falconInternalWorkOrderSchema = new mongoose.Schema(
     { timestamps: true }
 );
 
-export const falconInternalWorkOrder = mongoose.model('falconInternalWorkOrder', falconInternalWorkOrderSchema);
+export const falconInternalWorkOrder = mongoose.model('falconInternalWorkOrder', falconInternalWorkOrderSchema);    

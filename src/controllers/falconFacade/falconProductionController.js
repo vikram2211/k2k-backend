@@ -14,7 +14,7 @@ const getProductionsByProcess = asyncHandler(async (req, res) => {
     try {
         // 1. Get the process name from query parameters
         const { process } = req.query;
-        // console.log("process", process);
+        console.log("process", process);
         if (!process) {
             return res.status(400).json({
                 success: false,
@@ -31,6 +31,7 @@ const getProductionsByProcess = asyncHandler(async (req, res) => {
                 message: `Invalid process name. Allowed values are: ${validProcesses.join(', ')}`,
             });
         }
+        console.log("processName",processName);
 
         // 3. Query falconProduction directly by process name
         const productions = await falconProduction.aggregate([
@@ -142,7 +143,7 @@ const startProduction = asyncHandler(async (req, res) => {
     try {
         const { id } = req.params; // Get production ID from URL
         const { achieved_quantity } = req.body; // Optional: achieved_quantity from request body
-        console.log("achieved_quantity",achieved_quantity);
+        console.log("achieved_quantity", achieved_quantity);
         const userId = req.user?._id; // Assume user ID from authenticated user (e.g., JWT middleware)
 
         // Validate inputs
@@ -306,7 +307,7 @@ const productionQCCheck = asyncHandler(async (req, res) => {
                 message: `Rejected quantity (${rejected_quantity}) cannot exceed achieved quantity (${production.product.achieved_quantity})`,
             });
         }
-        console.log("production",production);
+        console.log("production", production);
 
         // Create a new QC Check record
         const qcCheck = new falconQCCheck({
@@ -416,6 +417,7 @@ const formatTimestamp = (date) => {
 const getProductionById = asyncHandler(async (req, res) => {
     try {
         const { productionId } = req.params; // Get production ID from URL
+        console.log("productionId",productionId);
 
         // Validate productionId
         if (!productionId || !mongoose.Types.ObjectId.isValid(productionId)) {
@@ -431,11 +433,11 @@ const getProductionById = asyncHandler(async (req, res) => {
                 path: 'job_order',
                 model: 'falconJobOrder',
                 populate: [
-                    {
-                        path: 'project_id',
-                        model: 'falconProject',
-                        select: 'name',
-                    },
+                    // {
+                    //     path: 'project_id',
+                    //     model: 'falconProject',
+                    //     select: 'name',
+                    // },
                     {
                         path: 'created_by',
                         model: 'User',
@@ -453,7 +455,7 @@ const getProductionById = asyncHandler(async (req, res) => {
                 model: 'User',
                 select: 'username',
             });
-        // console.log("production", production);
+        console.log("production", production);
 
         if (!production) {
             return res.status(404).json({
@@ -523,7 +525,8 @@ const getProductionById = asyncHandler(async (req, res) => {
                     createdAt: formatDate(jobOrder.createdAt) || '',
                     createdBy: jobOrder.created_by?.username || 'admin',
                     status: jobOrder.status || 'Pending',
-                    file: jobOrder.files?.[0] || 'N/A',
+                    // file: jobOrder.files?.[0] || 'N/A',
+                    file:'file',
                 },
                 productDetails: {
                     productName: production.product.product_id?.name || 'Product ABC',
