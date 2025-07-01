@@ -50,9 +50,9 @@ const getJobOrderAutoFetch = asyncHandler(async (req, res) => {
         //     match: { isDeleted: false },
         // })
         // .populate({
-        //     path: 'project_id',
+        //     path: 'products',
         //     select: 'name',
-        //     match: { isDeleted: false },
+        //     // match: { isDeleted: false },
         // })
         .populate({
             path: 'work_order_number',
@@ -68,6 +68,11 @@ const getJobOrderAutoFetch = asyncHandler(async (req, res) => {
                 },
             ],
         })
+        .populate({
+            path: 'products.product',
+            select: 'name',
+            model: 'falconProduct',
+        })
         .lean();
 
     // Check if job order exists
@@ -78,18 +83,23 @@ const getJobOrderAutoFetch = asyncHandler(async (req, res) => {
         });
     }
     console.log("jobOrder", jobOrder);
+    // jobOrder.products.map(product => (console.log("product",product)))
 
     // 3. Format the response
     const formattedResponse = {
-        workOrderNumber: jobOrder.work_order_number.work_order_number,
+        workOrderId:jobOrder.work_order_number._id,
+        workOrderNumber: jobOrder.work_order_number.work_order_number,      
         clientName: jobOrder.work_order_number.client_id?.name || 'N/A',
+        clientAddress:jobOrder.work_order_number.client_id?.address || 'N/A',
         projectName: jobOrder.work_order_number.project_id?.name || 'N/A',
-        // products: jobOrder.products.map(product => ({
-        //     code: product.code,
-        //     colorCode: product.color_code,
-        //     height: product.height,
-        //     width: product.width,
-        // })),
+        products: jobOrder.products.map(product => ({
+            productId:product.product._id,
+            productName: product.product.name, 
+            code: product.code,
+            colorCode: product.color_code,
+            height: product.height,
+            width: product.width,
+        })),
         productionRequestDate: formatDateOnly(jobOrder.prod_requset_date),
         productionRequirementDate: formatDateOnly(jobOrder.prod_requirement_date),
     };

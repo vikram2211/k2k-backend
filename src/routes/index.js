@@ -52,6 +52,8 @@ import falconJobOrderRouter from './falconFacadeRoutes/joborder.routes.js';
 import internalWorkOrderRouter from './falconFacadeRoutes/internalworkorder.routes.js';
 import falconProductionRouter from './falconFacadeRoutes/falconProduction.routes.js';
 import falconPackingRouter from './falconFacadeRoutes/packing.routes.js';
+import falconDispatchRouter from './falconFacadeRoutes/dispatch.routes.js';
+import falconQcCheckRouter from './falconFacadeRoutes/falconQcCheck.routes.js';
 
 router.use('/falconFacade', falconClientRouter);
 router.use('/falconFacade', falconProjectRouter);
@@ -63,6 +65,9 @@ router.use('/falconFacade', falconJobOrderRouter);
 router.use('/falconFacade', internalWorkOrderRouter);
 router.use('/falconFacade', falconProductionRouter);
 router.use('/falconFacade', falconPackingRouter);
+router.use('/falconFacade', falconDispatchRouter);
+router.use('/falconFacade', falconDispatchRouter);
+router.use('/falconFacade', falconQcCheckRouter);
 
 
 //routes a/c to the employee permissions. 

@@ -1,112 +1,112 @@
-import mongoose from 'mongoose';
+    import mongoose from 'mongoose';
 
-const falconJobOrderSchema = new mongoose.Schema(
-    {
-        job_order_id: {
-            type: String,
-            required: true,
-            unique: true,
-        },
-        work_order_number: {
-            type: mongoose.Schema.Types.ObjectId,
-            ref: "falconWorkOrder",
-            required: true
-        },
-        prod_issued_approved_by: {
-            type: mongoose.Schema.Types.ObjectId,
-            ref: "Employee",
-            required: true
-        },
-        prod_recieved_by: {
-            type: mongoose.Schema.Types.ObjectId,
-            ref: "Employee",
-            required: true
-        },
-        date: {
-            type: Date,
-            required: true
-        },
-        prod_requset_date: {
-            type: Date,
-            required: true
-        },
-        prod_requirement_date: {
-            type: Date,
-            required: true
-        },
-        remarks: {
-            type: String,
-            required: true
-        },
-        products: [
-            {
-                product: {
-                    type: mongoose.Schema.Types.ObjectId,
-                    ref: 'falconProduct',
-                    required: true,
-                },
-                code: {
-                    type: String,
-                    required: true,
-                },
-                uom: {
-                    type: String,
-                    required: true,
-                },
-                po_quantity: {
-                    type: Number,
-                    required: true,
-                },
-                color_code: {
-                    type: String,
-                    required: true,
-                },
-                width: {
-                    type: Number,
-                    required: true,
-                },
-                height: {
-                    type: Number,
-                    required: true,
-                },
+    const falconJobOrderSchema = new mongoose.Schema(
+        {
+            job_order_id: {
+                type: String,
+                required: true,
+                unique: true,
             },
-        ],
-        files: [
-            {
-                file_name: {
-                    type: String,
-                    required: true,
-                },
-                file_url: {
-                    type: String,
-                    required: true,
-                },
-                uploaded_at: {
-                    type: Date,
-                    default: Date.now,
-                },
+            work_order_number: {
+                type: mongoose.Schema.Types.ObjectId,
+                ref: "falconWorkOrder",
+                required: true
             },
-        ],
-        created_by: {
-            type: mongoose.Schema.Types.ObjectId,
-            ref: 'User',
-            required: true,
+            prod_issued_approved_by: {
+                type: mongoose.Schema.Types.ObjectId,
+                ref: "Employee",
+                required: true
+            },
+            prod_recieved_by: {
+                type: mongoose.Schema.Types.ObjectId,
+                ref: "Employee",
+                required: true
+            },
+            date: {
+                type: Date,
+                required: true
+            },
+            prod_requset_date: {
+                type: Date,
+                required: true
+            },
+            prod_requirement_date: {
+                type: Date,
+                required: true
+            },
+            remarks: {
+                type: String,
+                required: true
+            },
+            products: [
+                {
+                    product: {
+                        type: mongoose.Schema.Types.ObjectId,
+                        ref: 'falconProduct',
+                        required: true,
+                    },
+                    code: {
+                        type: String,
+                        required: true,
+                    },
+                    uom: {
+                        type: String,
+                        required: true,
+                    },
+                    po_quantity: {
+                        type: Number,
+                        required: true,
+                    },
+                    color_code: {
+                        type: String,
+                        required: true,
+                    },
+                    width: {
+                        type: Number,
+                        required: true,
+                    },
+                    height: {
+                        type: Number,
+                        required: true,
+                    },
+                },
+            ],
+            files: [
+                {
+                    file_name: {
+                        type: String,
+                        required: true,
+                    },
+                    file_url: {
+                        type: String,
+                        required: true,
+                    },
+                    uploaded_at: {
+                        type: Date,
+                        default: Date.now,
+                    },
+                },
+            ],
+            created_by: {
+                type: mongoose.Schema.Types.ObjectId,
+                ref: 'User',
+                required: true,
+            },
+            updated_by: {
+                type: mongoose.Schema.Types.ObjectId,
+                ref: 'User',
+                required: true,
+            },
+            status: {
+                type: String,
+                enum: ['Pending', 'Approved', 'Rejected', 'In Progress'],
+                default: 'Pending',
+            },
         },
-        updated_by: {
-            type: mongoose.Schema.Types.ObjectId,
-            ref: 'User',
-            required: true,
-        },
-        status: {
-            type: String,
-            enum: ['Pending', 'Approved', 'Rejected', 'In Progress'],
-            default: 'Pending',
-        },
-    },
-    { timestamps: true },
-);
+        { timestamps: true },
+    );
 
-export const falconJobOrder = mongoose.model('falconJobOrder', falconJobOrderSchema);
+    export const falconJobOrder = mongoose.model('falconJobOrder', falconJobOrderSchema);
 
 
 

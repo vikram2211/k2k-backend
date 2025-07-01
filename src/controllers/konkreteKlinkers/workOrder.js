@@ -101,7 +101,7 @@ const createWorkOrderSchema = z.object({
       product_id: z.string().refine((val) => mongoose.isValidObjectId(val), {
         message: 'Invalid product ID',
       }),
-      uom: z.enum(['sqmt', 'nos','metre'], { message: 'UOM must be "sqmt" or "nos"' }),
+      uom: z.enum(['sqmt', 'nos', 'metre'], { message: 'UOM must be "sqmt" or "nos"' }),
       po_quantity: z.number().min(0, 'PO quantity must be non-negative'),
       qty_in_nos: z.number().min(0, 'Original square meters must be non-negative'),
       // plant_code: z.string().refine((val) => mongoose.isValidObjectId(val), {
@@ -751,7 +751,6 @@ export const getWorkOrderById1 = async (req, res) => {
         message: `Work Order with id ${woId} not found`
       });
     }
-
     const transformedData = {
       ...woData,
       client: woData.client_id || null,
@@ -1371,6 +1370,8 @@ export const getWorkOrderById = async (req, res) => {
         message: `Work Order with id ${woId} not found`,
       });
     }
+    console.log("woData", woData);
+
 
     // Fetch aggregated data from DailyProduction for achieved_quantity
     const dailyProductions = await DailyProduction.find({ work_order: woId })
@@ -1653,6 +1654,7 @@ export const getWorkOrderById = async (req, res) => {
       dispatches: dispatchesArray,
       qc_details: qcDetailsArray,
     };
+    console.log("transformedData",transformedData);
 
     // Clean up unwanted fields, preserving original key names
     transformedData.products.forEach((product) => {

@@ -322,13 +322,13 @@ export const createJobOrder1 = async (req, res, next) => {
         work_order: validatedData.work_order,
         job_order: jobOrder[0]._id,
         products: [schemaProduct],
-        date:new Date(product.scheduled_date),
+        date: new Date(product.scheduled_date),
         submitted_by: req.user._id,
         created_by: req.user._id,
         updated_by: req.user._id,
         status: 'Pending',
       });
-      console.log("newProduction",newProduction);
+      console.log("newProduction", newProduction);
 
       return newProduction.save({}); //session
     });
@@ -350,7 +350,7 @@ export const createJobOrder1 = async (req, res, next) => {
       },
     });
   } catch (error) {
-    console.log("error",error);
+    console.log("error", error);
     // await session.abortTransaction();
     // session.endSession();
     if (error instanceof z.ZodError) {
@@ -368,7 +368,7 @@ export const createJobOrder = async (req, res, next) => {
   console.log("came here");
   try {
     const validatedData = jobOrderZodSchema.parse(req.body);
-    console.log("validatedData",validatedData);
+    console.log("validatedData", validatedData);
 
     if (!req.user || !req.user._id) {
       return next(new ApiError(401, 'Unauthorized: User not authenticated'));
@@ -449,9 +449,9 @@ export const createJobOrder = async (req, res, next) => {
         rejected_quantity: 0,
         recycled_quantity: 0,
       };
-      console.log("validatedData",validatedData);
+      console.log("validatedData", validatedData);
 
-      console.log("date",product.scheduled_date
+      console.log("date", product.scheduled_date
       );
       // date:new Date(product.scheduled_date),
 
@@ -481,6 +481,7 @@ export const createJobOrder = async (req, res, next) => {
       },
     });
   } catch (error) {
+    // console.log("error",error);
     if (error instanceof z.ZodError) {
       const errors = error.errors.map((err) => ({
         field: err.path.join('.'),
@@ -510,8 +511,8 @@ export const getJobOrders = async (req, res) => {
           select: 'username'
         }
       })
-      .populate({path : 'created_by', select:'username'})
-      
+      .populate({ path: 'created_by', select: 'username' })
+
     // Transform the response to include project_name at the top level
     const transformedOrders = jobOrders.map(order => {
       const orderObj = order.toObject();
@@ -1031,7 +1032,7 @@ export const getJobOrders = async (req, res) => {
 export const getJobOrderById1 = async (req, res) => {
   try {
     const joId = req.params.id;
-    console.log("joId",joId);
+    console.log("joId", joId);
 
     // Validate joId
     if (!mongoose.isValidObjectId(joId)) {
@@ -1434,7 +1435,7 @@ export const getJobOrderById = async (req, res) => {
           from: 'dailyproductions',
           let: { job_order_id: '$_id' },
           pipeline: [
-            { $match: { $expr: { $eq: ['$job_order', '$$job_order_id' ]} } },
+            { $match: { $expr: { $eq: ['$job_order', '$$job_order_id'] } } },
             { $unwind: '$products' },
             {
               $group: {
@@ -2032,7 +2033,7 @@ export const getMachinesByProduct1 = async (req, res) => {
 export const getMachinesByProduct = async (req, res) => {
   try {
     const materialCode = req.query.material_code;
-    console.log("materialCode",materialCode);
+    console.log("materialCode", materialCode);
 
     if (!materialCode) {
       return res.status(400).json({
@@ -2106,7 +2107,7 @@ export const getMachinesByProduct = async (req, res) => {
         },
       },
     ]);
-    console.log("result",result);
+    console.log("result", result);
 
     const formattedResult = result.map(item => ({
       _id: item._id,
