@@ -554,11 +554,29 @@ export const getJobOrders = async (req, res) => {
           select: 'username'
         }
       })
+
+      // .populate({
+      //   path: 'work_order',
+      //   select: 'project_id work_order_number',
+      //   populate: {
+      //     path: 'project_id',
+      //     select: 'name'
+      //   }
+      // })
+      // .populate({
+      //   path: 'work_order',
+      //   select: 'created_by',
+      //   populate: {
+      //     path: 'created_by',
+      //     select: 'username'
+      //   }
+      // })
       .populate({ path: 'created_by', select: 'username' })
 
     // Transform the response to include project_name at the top level
     const transformedOrders = jobOrders.map(order => {
       const orderObj = order.toObject();
+      console.log("orderObj***********",orderObj);
       return {
         ...orderObj,
         project_name: orderObj.work_order?.project_id?.name || 'N/A',
@@ -581,6 +599,53 @@ export const getJobOrders = async (req, res) => {
     });
   }
 };
+
+// export const getJobOrders = async (req, res) => {
+//   try {
+//     const jobOrders = await JobOrder.find()
+//       .populate({
+//         path: 'work_order',
+//         select: 'project_id work_order_number',
+//         populate: {
+//           path: 'project_id',
+//           select: 'name'
+//         }
+//       })
+//       .populate({
+//         path: 'work_order',
+//         select: 'created_by',
+//         populate: {
+//           path: 'created_by',
+//           select: 'username'
+//         }
+//       })
+//       .populate({ path: 'created_by', select: 'username' });
+
+//     const transformedOrders = jobOrders.map(order => {
+//       const orderObj = order.toObject();
+//       return {
+//         ...orderObj,
+//         project_name: orderObj.work_order?.project_id?.name || 'N/A',
+//         work_order_number: orderObj.work_order?.work_order_number || 'N/A'
+//       };
+//     });
+
+//     return res.status(200).json({
+//       success: true,
+//       message: "Job Order data fetched successfully",
+//       data: transformedOrders
+//     });
+//   } catch (error) {
+//     console.error("Error getting JobOrder:", error);
+//     res.status(500).json({
+//       success: false,
+//       message: "Internal Server Error",
+//       error: error.message
+//     });
+//   }
+// };
+
+
 
 // export const getJobOrderById = async (req, res) => {
 //     try {

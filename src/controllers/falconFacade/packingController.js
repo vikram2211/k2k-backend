@@ -912,11 +912,194 @@ const getJobOrderByWorkOrder = asyncHandler(async (req, res) => {
 });
 
 
+// const getWorkOrderDetails = asyncHandler(async (req, res) => {
+//     try {
+//         const { workOrderId, jobOrderId } = req.params;
+
+//         // Validate the workOrderId and jobOrderId
+//         if (!mongoose.Types.ObjectId.isValid(workOrderId) || !mongoose.Types.ObjectId.isValid(jobOrderId)) {
+//             return res.status(400).json({
+//                 statusCode: 400,
+//                 success: false,
+//                 message: 'Invalid work order ID or job order ID format'
+//             });
+//         }
+
+//         // Fetch job order details and calculate achieved quantities
+//         const jobOrderDetails = await falconJobOrder.aggregate([
+//             {
+//                 $match: {
+//                     _id: new mongoose.Types.ObjectId(jobOrderId),
+//                     work_order_number: new mongoose.Types.ObjectId(workOrderId)
+//                 }
+//             },
+//             {
+//                 $lookup: {
+//                     from: 'falconproductions',
+//                     localField: '_id',
+//                     foreignField: 'job_order',
+//                     as: 'productionDetails'
+//                 }
+//             },
+//             {
+//                 $unwind: { path: '$productionDetails', preserveNullAndEmptyArrays: true }
+//             },
+//             {
+//                 $lookup: {
+//                     from: 'falconinternalworkorders',
+//                     let: { job_order_id: '$_id', products: '$products' },
+//                     pipeline: [
+//                         {
+//                             $match: {
+//                                 $expr: { $eq: ['$job_order_id', '$$job_order_id'] }
+//                             }
+//                         },
+//                         {
+//                             $unwind: '$products'
+//                         },
+//                         {
+//                             $match: {
+//                                 $expr: {
+//                                     $in: ['$products.product', {
+//                                         $map: {
+//                                             input: '$$products',
+//                                             as: 'prod',
+//                                             in: '$$prod.product'
+//                                         }
+//                                     }]
+//                                 }
+//                             }
+//                         },
+//                         {
+//                             $group: {
+//                                 _id: '$products.product',
+//                                 semifinished_ids: { $push: '$products.semifinished_details.semifinished_id' }
+//                             }
+//                         },
+//                         {
+//                             $project: {
+//                                 product_id: '$_id',
+//                                 semifinished_ids: {
+//                                     $reduce: {
+//                                         input: '$semifinished_ids',
+//                                         initialValue: [],
+//                                         in: { $concatArrays: ['$$value', '$$this'] }
+//                                     }
+//                                 }
+//                             }
+//                         }
+//                     ],
+//                     as: 'internalWorkOrderDetails'
+//                 }
+//             },
+//             {
+//                 $group: {
+//                     _id: '$_id',
+//                     job_order_id: { $first: '$job_order_id' },
+//                     work_order_number: { $first: '$work_order_number' },
+//                     date: { $first: '$date' },
+//                     prod_requset_date: { $first: '$prod_requset_date' },
+//                     prod_requirement_date: { $first: '$prod_requirement_date' },
+//                     products: { $first: '$products' },
+//                     achievedQuantities: {
+//                         $push: {
+//                             product_id: '$productionDetails.product.product_id',
+//                             achieved_quantity: '$productionDetails.product.achieved_quantity'
+//                         }
+//                     },
+//                     internalWorkOrderDetails: { $first: '$internalWorkOrderDetails' }
+//                 }
+//             },
+//             {
+//                 $project: {
+//                     _id: 1,
+//                     job_order_id: 1,
+//                     work_order_number: 1,
+//                     date: 1,
+//                     prod_requset_date: 1,
+//                     prod_requirement_date: 1,
+//                     products: {
+//                         $map: {
+//                             input: '$products',
+//                             as: 'product',
+//                             in: {
+//                                 $mergeObjects: [
+//                                     '$$product',
+//                                     {
+//                                         achieved_quantity: {
+//                                             $reduce: {
+//                                                 input: {
+//                                                     $filter: {
+//                                                         input: '$achievedQuantities',
+//                                                         as: 'aq',
+//                                                         cond: { $eq: ['$$aq.product_id', '$$product.product'] }
+//                                                     }
+//                                                 },
+//                                                 initialValue: 0,
+//                                                 in: { $add: ['$$value', '$$this.achieved_quantity'] }
+//                                             }
+//                                         },
+//                                         semifinished_ids: {
+//                                             $let: {
+//                                                 vars: {
+//                                                     matchingWorkOrder: {
+//                                                         $filter: {
+//                                                             input: '$internalWorkOrderDetails',
+//                                                             as: 'iwo',
+//                                                             cond: { $eq: ['$$iwo.product_id', '$$product.product'] }
+//                                                         }
+//                                                     }
+//                                                 },
+//                                                 in: {
+//                                                     $cond: {
+//                                                         if: { $gt: [{ $size: '$$matchingWorkOrder' }, 0] },
+//                                                         then: { $arrayElemAt: ['$$matchingWorkOrder.semifinished_ids', 0] },
+//                                                         else: []
+//                                                     }
+//                                                 }
+//                                             }
+//                                         }
+//                                     }
+//                                 ]
+//                             }
+//                         }
+//                     }
+//                 }
+//             }
+//         ]);
+
+//         console.log("jobOrderDetails", jobOrderDetails);
+
+//         if (!jobOrderDetails.length) {
+//             return res.status(404).json({
+//                 statusCode: 404,
+//                 success: false,
+//                 message: 'Job order not found for the given work order ID and job order ID'
+//             });
+//         }
+
+//         const response = {
+//             statusCode: 200,
+//             success: true,
+//             message: 'Job order details fetched successfully',
+//             data: jobOrderDetails[0]
+//         };
+
+//         res.json(response);
+//     } catch (error) {
+//         console.error(error);
+//         res.status(500).json({
+//             statusCode: 500,
+//             success: false,
+//             message: 'Internal server error'
+//         });
+//     }
+// });
+
 const getWorkOrderDetails = asyncHandler(async (req, res) => {
     try {
         const { workOrderId, jobOrderId } = req.params;
 
-        // Validate the workOrderId and jobOrderId
         if (!mongoose.Types.ObjectId.isValid(workOrderId) || !mongoose.Types.ObjectId.isValid(jobOrderId)) {
             return res.status(400).json({
                 statusCode: 400,
@@ -925,24 +1108,12 @@ const getWorkOrderDetails = asyncHandler(async (req, res) => {
             });
         }
 
-        // Fetch job order details and calculate achieved quantities
         const jobOrderDetails = await falconJobOrder.aggregate([
             {
                 $match: {
                     _id: new mongoose.Types.ObjectId(jobOrderId),
                     work_order_number: new mongoose.Types.ObjectId(workOrderId)
                 }
-            },
-            {
-                $lookup: {
-                    from: 'falconproductions',
-                    localField: '_id',
-                    foreignField: 'job_order',
-                    as: 'productionDetails'
-                }
-            },
-            {
-                $unwind: { path: '$productionDetails', preserveNullAndEmptyArrays: true }
             },
             {
                 $lookup: {
@@ -954,38 +1125,30 @@ const getWorkOrderDetails = asyncHandler(async (req, res) => {
                                 $expr: { $eq: ['$job_order_id', '$$job_order_id'] }
                             }
                         },
+                        { $unwind: '$products' },
                         {
-                            $unwind: '$products'
+                            $project: {
+                                product_id: '$products.product',
+                                semifinished_ids: '$products.semifinished_details.semifinished_id'
+                            }
                         },
+                        { $unwind: '$semifinished_ids' },
                         {
-                            $match: {
-                                $expr: {
-                                    $in: ['$products.product', {
-                                        $map: {
-                                            input: '$$products',
-                                            as: 'prod',
-                                            in: '$$prod.product'
-                                        }
-                                    }]
-                                }
+                            $group: {
+                                _id: { product_id: '$product_id', semifinished_id: '$semifinished_ids' },
                             }
                         },
                         {
                             $group: {
-                                _id: '$products.product',
-                                semifinished_ids: { $push: '$products.semifinished_details.semifinished_id' }
+                                _id: '$_id.product_id',
+                                semifinished_ids: { $addToSet: '$_id.semifinished_id' }
                             }
                         },
                         {
                             $project: {
                                 product_id: '$_id',
-                                semifinished_ids: {
-                                    $reduce: {
-                                        input: '$semifinished_ids',
-                                        initialValue: [],
-                                        in: { $concatArrays: ['$$value', '$$this'] }
-                                    }
-                                }
+                                semifinished_ids: 1,
+                                _id: 0
                             }
                         }
                     ],
@@ -993,21 +1156,39 @@ const getWorkOrderDetails = asyncHandler(async (req, res) => {
                 }
             },
             {
-                $group: {
-                    _id: '$_id',
-                    job_order_id: { $first: '$job_order_id' },
-                    work_order_number: { $first: '$work_order_number' },
-                    date: { $first: '$date' },
-                    prod_requset_date: { $first: '$prod_requset_date' },
-                    prod_requirement_date: { $first: '$prod_requirement_date' },
-                    products: { $first: '$products' },
-                    achievedQuantities: {
-                        $push: {
-                            product_id: '$productionDetails.product.product_id',
-                            achieved_quantity: '$productionDetails.product.achieved_quantity'
+                $lookup: {
+                    from: 'falconproductions',
+                    let: { job_order_id: '$_id' },
+                    pipeline: [
+                        {
+                            $match: {
+                                $expr: { $eq: ['$job_order', '$$job_order_id'] }
+                            }
+                        },
+                        {
+                            $group: {
+                                _id: {
+                                    product_id: '$product.product_id',
+                                    semifinished_id: '$semifinished_id'
+                                },
+                                min_achieved: { $min: '$product.achieved_quantity' }
+                            }
+                        },
+                        {
+                            $group: {
+                                _id: '$_id.product_id',
+                                min_achieved_set: { $addToSet: '$min_achieved' }
+                            }
+                        },
+                        {
+                            $project: {
+                                product_id: '$_id',
+                                achieved_quantity: { $min: '$min_achieved_set' },
+                                _id: 0
+                            }
                         }
-                    },
-                    internalWorkOrderDetails: { $first: '$internalWorkOrderDetails' }
+                    ],
+                    as: 'productionAggregates'
                 }
             },
             {
@@ -1027,16 +1208,23 @@ const getWorkOrderDetails = asyncHandler(async (req, res) => {
                                     '$$product',
                                     {
                                         achieved_quantity: {
-                                            $reduce: {
-                                                input: {
-                                                    $filter: {
-                                                        input: '$achievedQuantities',
-                                                        as: 'aq',
-                                                        cond: { $eq: ['$$aq.product_id', '$$product.product'] }
+                                            $let: {
+                                                vars: {
+                                                    matchProd: {
+                                                        $filter: {
+                                                            input: '$productionAggregates',
+                                                            as: 'agg',
+                                                            cond: { $eq: ['$$agg.product_id', '$$product.product'] }
+                                                        }
                                                     }
                                                 },
-                                                initialValue: 0,
-                                                in: { $add: ['$$value', '$$this.achieved_quantity'] }
+                                                in: {
+                                                    $cond: [
+                                                        { $gt: [{ $size: '$$matchProd' }, 0] },
+                                                        { $arrayElemAt: ['$$matchProd.achieved_quantity', 0] },
+                                                        0
+                                                    ]
+                                                }
                                             }
                                         },
                                         semifinished_ids: {
@@ -1076,14 +1264,12 @@ const getWorkOrderDetails = asyncHandler(async (req, res) => {
             });
         }
 
-        const response = {
+        res.status(200).json({
             statusCode: 200,
             success: true,
             message: 'Job order details fetched successfully',
             data: jobOrderDetails[0]
-        };
-
-        res.json(response);
+        });
     } catch (error) {
         console.error(error);
         res.status(500).json({
@@ -1095,5 +1281,7 @@ const getWorkOrderDetails = asyncHandler(async (req, res) => {
 });
 
 
-export { createPackingBundle, createFalconPacking, getAllFalconPackings, getFalconPackingById,getJobOrderByWorkOrder, getWorkOrderDetails};
+
+
+export { createPackingBundle, createFalconPacking, getAllFalconPackings, getFalconPackingById, getJobOrderByWorkOrder, getWorkOrderDetails };
 
