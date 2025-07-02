@@ -15,6 +15,32 @@ import { ApiError } from '../../utils/ApiError.js';
 const objectIdSchema = z.string().regex(/^[0-9a-fA-F]{24}$/, "Invalid ObjectId");
 const dateStringSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Date must be in YYYY-MM-DD format");
 
+
+// ✅ Helper: Convert any valid format to ISO string (YYYY-MM-DD)
+function normalizeDate(input) {
+  if (typeof input === 'string') {
+    // Try built-in parser
+    let parsed = new Date(input);
+    if (!isNaN(parsed)) return parsed;
+
+    // Try DD/MM/YYYY manually
+    if (/^\d{2}\/\d{2}\/\d{4}$/.test(input)) {
+      const [day, month, year] = input.split('/');
+      parsed = new Date(`${year}-${month}-${day}`);
+      if (!isNaN(parsed)) return parsed;
+    }
+
+    throw new Error(`Invalid date format: ${input}`);
+  }
+
+  if (input instanceof Date && !isNaN(input)) {
+    return input;
+  }
+
+  throw new Error(`Invalid date type: ${input}`);
+}
+
+
 // Zod schema for date range (from/to)
 const dateRangeSchema = z.object({
   from: dateStringSchema, // Accepts ISO strings or Date objects
@@ -367,6 +393,23 @@ export const createJobOrder1 = async (req, res, next) => {
 export const createJobOrder = async (req, res, next) => {
   console.log("came here");
   try {
+
+
+    // ✅ Normalize date inputs before validation
+    if (req.body.date) {
+      req.body.date.from = normalizeDate(req.body.date.from).toISOString().split('T')[0];
+      req.body.date.to = normalizeDate(req.body.date.to).toISOString().split('T')[0];
+    }
+
+    if (Array.isArray(req.body.products)) {
+      req.body.products = req.body.products.map((p) => ({
+        ...p,
+        scheduled_date: normalizeDate(p.scheduled_date).toISOString().split('T')[0],
+      }));
+    }
+
+
+
     const validatedData = jobOrderZodSchema.parse(req.body);
     console.log("validatedData", validatedData);
 
