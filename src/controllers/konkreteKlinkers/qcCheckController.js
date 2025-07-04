@@ -422,6 +422,118 @@ const updateQcCheckZodSchema = z.object({
     status: z.enum(['Active', 'Inactive']).optional(),
   }).strict();
   
+  // export const updateQcCheck = async (req, res) => {
+  //   try {
+  //     // 1. Validate QC check ID
+  //     const { id } = req.params;
+  //     if (!mongoose.isValidObjectId(id)) {
+  //       return res.status(400).json({
+  //         success: false,
+  //         message: 'Invalid QC check ID',
+  //       });
+  //     }
+  
+  //     // 2. Validate request data using Zod
+  //     const validatedData = updateQcCheckZodSchema.parse(req.body);
+  
+  //     // 3. Check for authenticated user
+  //     if (!req.user?.id) {
+  //       return res.status(401).json({
+  //         success: false,
+  //         message: 'Unauthorized: User not authenticated',
+  //       });
+  //     }
+  
+  //     // 4. Add updated_by from authenticated user
+  //     validatedData.updated_by = req.user._id;
+  
+  //     // 5. Find and update the QC Check
+  //     const qcCheck = await QCCheck.findByIdAndUpdate(
+  //       id,
+  //       { $set: validatedData },
+  //       { new: true, runValidators: true } // Return updated document, run schema validators
+  //     )
+  //       .populate('work_order', 'work_order_number')
+  //       .populate('product_id', 'description')
+  //       .lean();
+  
+  //     // 6. Check if QC check exists
+  //     if (!qcCheck) {
+  //       return res.status(404).json({
+  //         success: false,
+  //         message: 'QC check not found',
+  //       });
+  //     }
+  
+  //     // 7. Transform response to match getQcCheckDetails format
+  //     const transformedData = {
+  //       work_order: qcCheck.work_order?._id || null,
+  //       work_order_number: qcCheck.work_order?.work_order_number || 'N/A',
+  //       job_order: qcCheck.job_order,
+  //       product_id: qcCheck.product_id?._id || null,
+  //       product_description: qcCheck.product_id?.description || 'N/A',
+  //       rejected_quantity: qcCheck.rejected_quantity,
+  //       recycled_quantity: qcCheck.recycled_quantity,
+  //       remarks: qcCheck.remarks,
+  //       created_by: qcCheck.created_by,
+  //       createdAt: qcCheck.createdAt,
+  //       updated_by: qcCheck.updated_by,
+  //       updatedAt: qcCheck.updatedAt,
+  //       status: qcCheck.status,
+  //     };
+  
+  //     // 8. Return success response
+  //     return res.status(200).json({
+  //       success: true,
+  //       message: 'QC check updated successfully',
+  //       data: transformedData,
+  //     });
+  //   } catch (error) {
+  //     // Handle Zod validation errors
+  //     if (error instanceof z.ZodError) {
+  //       return res.status(400).json({
+  //         success: false,
+  //         errors: error.errors.map((err) => ({
+  //           field: err.path.join('.'),
+  //           message: err.message,
+  //         })),
+  //       });
+  //     }
+  
+  //     // Handle Mongoose validation errors
+  //     if (error.name === 'ValidationError') {
+  //       const formattedErrors = Object.values(error.errors).map((err) => ({
+  //         field: err.path,
+  //         message: err.message,
+  //       }));
+  //       return res.status(400).json({
+  //         success: false,
+  //         errors: formattedErrors,
+  //       });
+  //     }
+  
+  //     // Handle duplicate key errors
+  //     if (error.code === 11000) {
+  //       return res.status(400).json({
+  //         success: false,
+  //         message: 'Duplicate key error',
+  //         field: Object.keys(error.keyPattern)[0],
+  //       });
+  //     }
+  
+  //     // Handle other errors
+  //     console.error('Error updating QC Check:', error);
+  //     return res.status(500).json({
+  //       success: false,
+  //       message: 'Internal Server Error',
+  //       error: error.message,
+  //     });
+  //   }
+  // };
+
+
+
+
   export const updateQcCheck = async (req, res) => {
     try {
       // 1. Validate QC check ID
@@ -433,10 +545,10 @@ const updateQcCheckZodSchema = z.object({
         });
       }
   
-      // 2. Validate request data using Zod
+      // 2. Validate request data
       const validatedData = updateQcCheckZodSchema.parse(req.body);
   
-      // 3. Check for authenticated user
+      // 3. Authenticated user
       if (!req.user?.id) {
         return res.status(401).json({
           success: false,
@@ -444,28 +556,64 @@ const updateQcCheckZodSchema = z.object({
         });
       }
   
-      // 4. Add updated_by from authenticated user
       validatedData.updated_by = req.user._id;
   
-      // 5. Find and update the QC Check
-      const qcCheck = await QCCheck.findByIdAndUpdate(
-        id,
-        { $set: validatedData },
-        { new: true, runValidators: true } // Return updated document, run schema validators
-      )
-        .populate('work_order', 'work_order_number')
-        .populate('product_id', 'description')
-        .lean();
-  
-      // 6. Check if QC check exists
-      if (!qcCheck) {
+      // 4. Fetch old QCCheck for delta calculation
+      const oldQcCheck = await QCCheck.findById(id).lean();
+      if (!oldQcCheck) {
         return res.status(404).json({
           success: false,
           message: 'QC check not found',
         });
       }
   
-      // 7. Transform response to match getQcCheckDetails format
+      // 5. Update QCCheck
+      const qcCheck = await QCCheck.findByIdAndUpdate(
+        id,
+        { $set: validatedData },
+        { new: true, runValidators: true }
+      )
+        .populate('work_order', 'work_order_number')
+        .populate('product_id', 'description')
+        .lean();
+  
+      // 6. Update DailyProduction
+      if (
+        validatedData.rejected_quantity !== undefined ||
+        validatedData.recycled_quantity !== undefined
+      ) {
+        const dailyProduction = await DailyProduction.findOne({
+          work_order: oldQcCheck.work_order,
+          job_order: oldQcCheck.job_order,
+        });
+  
+        if (dailyProduction) {
+          const product = dailyProduction.products.find(p =>
+            p.product_id.toString() === oldQcCheck.product_id.toString()
+          );
+  
+          if (product) {
+            const deltaRejected =
+              (validatedData.rejected_quantity ?? oldQcCheck.rejected_quantity) -
+              oldQcCheck.rejected_quantity;
+  
+            const deltaRecycled =
+              (validatedData.recycled_quantity ?? oldQcCheck.recycled_quantity) -
+              oldQcCheck.recycled_quantity;
+  
+            product.rejected_quantity =
+              (product.rejected_quantity || 0) + deltaRejected;
+  
+            product.recycled_quantity =
+              (product.recycled_quantity || 0) + deltaRecycled;
+  
+            dailyProduction.updated_by = req.user._id;
+            await dailyProduction.save();
+          }
+        }
+      }
+  
+      // 7. Format response
       const transformedData = {
         work_order: qcCheck.work_order?._id || null,
         work_order_number: qcCheck.work_order?.work_order_number || 'N/A',
@@ -482,14 +630,14 @@ const updateQcCheckZodSchema = z.object({
         status: qcCheck.status,
       };
   
-      // 8. Return success response
       return res.status(200).json({
         success: true,
         message: 'QC check updated successfully',
         data: transformedData,
       });
+  
     } catch (error) {
-      // Handle Zod validation errors
+      // Zod validation
       if (error instanceof z.ZodError) {
         return res.status(400).json({
           success: false,
@@ -500,7 +648,7 @@ const updateQcCheckZodSchema = z.object({
         });
       }
   
-      // Handle Mongoose validation errors
+      // Mongoose validation
       if (error.name === 'ValidationError') {
         const formattedErrors = Object.values(error.errors).map((err) => ({
           field: err.path,
@@ -512,7 +660,7 @@ const updateQcCheckZodSchema = z.object({
         });
       }
   
-      // Handle duplicate key errors
+      // Duplicate key
       if (error.code === 11000) {
         return res.status(400).json({
           success: false,
@@ -521,7 +669,6 @@ const updateQcCheckZodSchema = z.object({
         });
       }
   
-      // Handle other errors
       console.error('Error updating QC Check:', error);
       return res.status(500).json({
         success: false,
@@ -530,7 +677,6 @@ const updateQcCheckZodSchema = z.object({
       });
     }
   };
-
   // Zod schema for deletion
 const deleteQcCheckZodSchema = z.object({
     ids: z.array(

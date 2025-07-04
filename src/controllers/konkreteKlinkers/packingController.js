@@ -286,6 +286,7 @@ export const createPackingBundles = async (req, res) => {
 
       // 3. Validate work_order and product existence
       const { work_order, product, uom, product_quantity, bundle_size } = validatedData;
+      console.log("product_quantity",product_quantity);
       let totalAchievedQuantity = 0;
       let totalPackedQuantity = 0;
 
@@ -349,10 +350,15 @@ export const createPackingBundles = async (req, res) => {
       }
 
       // 7. Calculate number of bundles
-      const fullBundles = Math.floor(product_quantity / bundle_size);
+      const fullBundles = Math.ceil(product_quantity / bundle_size);
+      console.log("fullBundles",fullBundles);
+
       const remainingItems = product_quantity % bundle_size;
+      console.log("remainingItems",remainingItems);
+
       // Minimize bundles: if remainder exists, add it to the last full bundle
       const numberOfBundles = remainingItems > 0 ? Math.max(1, fullBundles) : fullBundles;
+      console.log("numberOfBundles",numberOfBundles);
 
       // 8. Generate Packing documents for each bundle
       const packingDocuments = [];

@@ -357,6 +357,12 @@ export const getScannedProductsData = async(req,res)=>{
 
     let getScannedProducts = await (await Packing.findOne({qr_id:qrId})).populate('product','description');
     console.log("getScannedProducts",getScannedProducts);
+    if (getScannedProducts.delivery_stage === 'Dispatched') {
+      return res.status(400).json({
+        success: false,
+        message: `QR ID ${qrId} has already been scanned & dispatched.`,
+      });
+    }
     res.status(200).json({ success: true, data: getScannedProducts });
 
   } catch (error) {

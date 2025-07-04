@@ -1,4 +1,4 @@
-import {falconWorkOrder} from '../../models/falconFacade/falconWorkOrder.model.js'
+import { falconWorkOrder } from '../../models/falconFacade/falconWorkOrder.model.js'
 import { falconJobOrder } from "../../models/falconFacade/falconJobOrder.model.js";
 import { falconProductSystem } from "../../models/falconFacade/helpers/falconProductSystem.model.js";
 import { asyncHandler } from "../../utils/asyncHandler.js";
@@ -87,14 +87,14 @@ const getJobOrderAutoFetch = asyncHandler(async (req, res) => {
 
     // 3. Format the response
     const formattedResponse = {
-        workOrderId:jobOrder.work_order_number._id,
-        workOrderNumber: jobOrder.work_order_number.work_order_number,      
+        workOrderId: jobOrder.work_order_number._id,
+        workOrderNumber: jobOrder.work_order_number.work_order_number,
         clientName: jobOrder.work_order_number.client_id?.name || 'N/A',
-        clientAddress:jobOrder.work_order_number.client_id?.address || 'N/A',
+        clientAddress: jobOrder.work_order_number.client_id?.address || 'N/A',
         projectName: jobOrder.work_order_number.project_id?.name || 'N/A',
         products: jobOrder.products.map(product => ({
-            productId:product.product._id,
-            productName: product.product.name, 
+            productId: product.product._id,
+            productName: product.product.name,
             code: product.code,
             colorCode: product.color_code,
             height: product.height,
@@ -647,7 +647,7 @@ const createInternalWorkOrder = asyncHandler(async (req, res) => {
                                 mimetype: processFile.mimetype,
                             };
                             const processUploadResult = await putObject(processFileData, processFileName);
-                            console.log("process",process);
+                            console.log("process", process);
 
                             return {
                                 name: process.name,
@@ -1086,7 +1086,7 @@ const getInternalWorkOrderById = asyncHandler(async (req, res) => {
             })
             .lean();
 
-            console.log("jobOrder",jobOrder);
+        console.log("jobOrder", jobOrder);
 
         if (!jobOrder) {
             return res.status(404).json({
@@ -1159,7 +1159,7 @@ const getInternalWorkOrderById = asyncHandler(async (req, res) => {
                 job_order_id: jobOrder._id,
                 jobOrderNumber: jobOrder.job_order_id,
                 createdAt: jobOrder.createdAt ? formatDateOnly(jobOrder.createdAt) : null,
-                createdBy: jobOrder.created_by.username, 
+                createdBy: jobOrder.created_by.username,
                 status: jobOrder.status,
             },
             productsDetails: productsDetails,
