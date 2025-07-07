@@ -46,6 +46,10 @@ const getScannedProductsData = asyncHandler(async (req, res) => {
             return res.status(404).json({ success: false, message: "No packing entry found for QR ID" });
         }
         console.log("packingEntry", packingEntry);
+        
+        if (packingEntry.delivery_stage !== 'Packed') {
+            return res.status(400).json({ success: false, message: "This product has already been dispatched or delivered" });
+        }
 
         // Fetch job order details using job_order_id from packingEntry
         const jobOrder = await falconJobOrder.findOne({ _id: packingEntry.job_order_id });
@@ -423,18 +427,39 @@ const createDispatch = async (req, res, next) => {
     }
 
     // Auto-generate gate_pass_no and dc_no using falconCounter
-    let counter = await falconCounter.findOneAndUpdate(
-        { _id: 'dispatchCounter' },
-        { $inc: { sequence_value: 1 } },
-        { new: true, upsert: true }
-    );
-    const gate_pass_no = counter.sequence_value;
-    const dc_no = counter.sequence_value;
+    // let counter = await falconCounter.findOneAndUpdate(
+    //     { _id: 'dispatchCounter' },
+    //     { $inc: { sequence_value: 1 } },
+    //     { new: true, upsert: true }
+    // );
+    // const gate_pass_no = counter.sequence_value;
+    // const dc_no = counter.sequence_value;
+
+    const generateUniqueFourDigitNumber = async (field) => {
+        let unique = false;
+        let num;
+        while (!unique) {
+            num = Math.floor(1000 + Math.random() * 9000);
+            const exists = await falocnDispatch.findOne({ [field]: num });
+            if (!exists) unique = true;
+        }
+        return num;
+    };
+
+    const gate_pass_no = await generateUniqueFourDigitNumber('gate_pass_no');
+    const dc_no = await generateUniqueFourDigitNumber('dc_no');
 
     // Fetch Packing Entries Based on Scanned QR Codes
     const packingEntries = await falconPacking.find({ qr_code: { $in: qr_codes } }).populate('product', 'description');
     if (!packingEntries || packingEntries.length === 0) {
         return next(new ApiError(404, 'No packing entries found for scanned QR codes'));
+    }
+
+    // Check if any of the packing entries are already dispatched
+    const alreadyDispatched = packingEntries.filter(entry => entry.delivery_stage !== 'Packed');
+    if (alreadyDispatched.length > 0) {
+        const scannedIds = alreadyDispatched.map(entry => entry.qr_code || entry.qr_id).join(', ');
+        return next(new ApiError(400, `The following QR codes have already been dispatched or delivered: ${scannedIds}`));
     }
 
     // Fetch product names from falconProduct for each unique product_id
