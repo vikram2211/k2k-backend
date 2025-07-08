@@ -134,8 +134,90 @@
 
 // export const Product = mongoose.model('Product', productSchema);
 
-////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////////////////////////
 
+//WAS WORKING FINE - ******************
+
+// import mongoose from 'mongoose';
+
+// const productSchema = new mongoose.Schema(
+//     {
+//         plant: {
+//             type: mongoose.Schema.Types.ObjectId,
+//             ref: 'Plant',
+//             required: true,
+//         },
+//         material_code: {
+//             type: String,
+//             required: true,
+//             // unique: true,
+//             trim: true,
+//         },
+//         description: {
+//             type: String,
+//             required: true,
+//         },
+//         uom: {
+//             type: [String], 
+//             enum: ['Square Metre/No', 'Metre/No'], 
+//             required: true,
+//             validate: {
+//                 validator: (value) => value.length > 0, //at least one UOM shoule be provided
+//                 message: 'At least one UOM must be provided',
+//             },
+//         },
+//         area: {
+//             type: Number,
+//             required: true,
+//         },
+//         no_of_pieces_per_punch: {
+//             type: Number,
+//             required: true,
+//         },
+//         qty_in_bundle: {
+//             type: Number,
+//             required: true,
+//         },
+//         created_by: {
+//             type: mongoose.Schema.Types.ObjectId,
+//             ref: 'User',
+//             required: true,
+//         },
+//         status: {
+//             type: String,
+//             enum: ['Active', 'Inactive'],
+//             default: 'Active',
+//         },
+//         isDeleted: {
+//             type: Boolean,
+//             default: false,
+//         },
+//     },
+//     {
+//         timestamps: true,
+//     }
+// );
+
+// export const Product = mongoose.model('Product', productSchema);
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+////////////////////////////////////////////////////////////////////////////////////////
 
 
 import mongoose from 'mongoose';
@@ -150,7 +232,6 @@ const productSchema = new mongoose.Schema(
         material_code: {
             type: String,
             required: true,
-            // unique: true,
             trim: true,
         },
         description: {
@@ -158,17 +239,25 @@ const productSchema = new mongoose.Schema(
             required: true,
         },
         uom: {
-            type: [String], 
-            enum: ['Square Metre/No', 'Metre/No'], 
+            type: [String],
+            enum: ['Square Metre/No', 'Metre/No'],
             required: true,
             validate: {
-                validator: (value) => value.length > 0, //at least one UOM shoule be provided
+                validator: (value) => value.length > 0,
                 message: 'At least one UOM must be provided',
             },
         },
-        area: {
-            type: Number,
+        areas: {
+            type: Map,
+            of: Number,
             required: true,
+            validate: {
+                validator: function (value) {
+                    const uoms = this.uom;
+                    return uoms.every((uom) => value.has(uom));
+                },
+                message: 'Areas must include an entry for each selected UOM',
+            },
         },
         no_of_pieces_per_punch: {
             type: Number,

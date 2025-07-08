@@ -786,10 +786,11 @@ const getFalconWorkOrderById = asyncHandler(async (req, res) => {
                     steps
                 });
             }
+            console.log("relatedJobOrder",relatedJobOrder);
 
 
             jobOrderSemiDetails.push({
-                job_order_id: relatedJobOrder?._id,
+                job_order_id: relatedJobOrder?.job_order_id,
                 sales_order_no: iwo.sales_order_no,
                 product_name: productNamesMap[productObj.product.toString()],
                 system: systemNameMap[productObj.system?.toString()] || '',

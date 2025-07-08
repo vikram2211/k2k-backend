@@ -371,16 +371,206 @@ const createWorkOrderSchema = z.object({
 
 
 
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+
+
+
+
+
 //Working fine ------
+// export const createWorkOrder = async (req, res) => {
+//   // const session = await mongoose.startSession();
+//   try {
+//     // session.startTransaction();
+//     // 1. Parse form-data
+//     const bodyData = req.body;
+//     console.log("userId", typeof (req.user._id));
+//     const userId = req.user._id.toString();
+
+
+//     // 2. Parse stringified fields if needed
+//     if (typeof bodyData.products === 'string') {
+//       bodyData.products = JSON.parse(bodyData.products);
+//     }
+//     if (typeof bodyData.buffer_stock === 'string') {
+//       bodyData.buffer_stock = JSON.parse(bodyData.buffer_stock);
+//     }
+
+//     // 3. Process products - handle sqmt to nos conversion
+//     const processedProducts = await Promise.all(
+//       bodyData.products.map(async (product) => {
+//         // Get product details
+//         const productDetails = await Product.findById(product.product_id);
+//         console.log("productDetails", productDetails);
+
+//         if (!productDetails) {
+//           throw new Error(`Product not found with ID: ${product.product_id}`);
+//         }
+
+//         // Initialize processed product
+//         const processedProduct = {
+//           ...product,
+//           qty_in_nos: 0, // Default to 0
+//         };
+//         processedProduct.po_quantity = Number(product.po_quantity);
+
+//         // Handle UOM
+//         if (product.uom.toLowerCase() === 'sqmt' || product.uom.toLowerCase() === 'metre') {
+//           if (!productDetails.area || productDetails.area <= 0) {
+//             throw new Error(`Invalid area value (${productDetails.area}) for product ${productDetails.material_code}`);
+//           }
+
+//           // Store original sqmt and convert po_quantity to nos
+//           // console.log("po_quantity...............",typeof(product.po_quantity));
+//           // processedProduct.original_sqmt = Number(product.po_quantity); 
+//           // console.log("lalalallalalala",typeof(processedProduct.original_sqmt));
+//           processedProduct.qty_in_nos = Math.ceil(Number(product.po_quantity) / productDetails.area);
+//           // console.log("nossss",processedProduct.qty_in_nos);
+//         }
+//         else if (product.uom.toLowerCase() === 'nos') {
+//           // Keep po_quantity as-is, original_sqmt remains 0
+//           processedProduct.qty_in_nos = Number(product.po_quantity);
+//         }
+//         else {
+//           throw new Error(`Invalid UOM: ${product.uom} for product ${productDetails.material_code}`);
+//         }
+
+//         return processedProduct;
+//       })
+//     );
+//     console.log("processedProducts", processedProducts);
+
+//     // 4. Handle file uploads
+//     const uploadedFiles = [];
+//     if (req.files && req.files.length > 0) {
+//       for (const file of req.files) {
+//         const tempFilePath = path.join('./public/temp', file.filename);
+//         const fileBuffer = fs.readFileSync(tempFilePath);
+
+//         // Upload to S3
+//         const { url } = await putObject(
+//           { data: fileBuffer, mimetype: file.mimetype },
+//           `work-orders/${Date.now()}-${file.originalname}`
+//         );
+
+//         // Delete temp file
+//         fs.unlinkSync(tempFilePath);
+
+//         uploadedFiles.push({
+//           file_name: file.originalname,
+//           file_url: url,
+//         });
+//       }
+//     }
+
+//     // 5. Prepare and validate data
+//     const workOrderData = {
+//       ...bodyData,
+//       products: processedProducts,
+//       files: uploadedFiles,
+//       date: bodyData.date ? new Date(bodyData.date) : undefined,
+//       buffer_stock: bodyData.buffer_stock || false,
+//       created_by: userId, // Assuming authentication middleware sets req.user
+//       updated_by: userId,
+//     };
+
+//     // Convert delivery dates if they exist
+//     workOrderData.products = workOrderData.products.map((product) => ({
+//       ...product,
+//       delivery_date: product.delivery_date ? new Date(product.delivery_date) : undefined,
+//     }));
+//     // console.log("workOrderData",workOrderData);
+
+
+//     // 6. Validate with Zod
+//     const validatedData = createWorkOrderSchema.parse(workOrderData);
+//     console.log("validatedData", validatedData);
+
+//     // 7. Save to MongoDB
+//     const workOrder = new WorkOrder(validatedData);
+
+//     const inventoryDocs = validatedData.products.map((product) => ({
+//       product: product.product_id,
+//       work_order: workOrder._id,
+//       produced_quantity: 0,
+//       packed_quantity: 0,
+//       dispatched_quantity: 0,
+//       available_stock: 0,
+//       updated_by: userId,
+//     }));
+
+
+
+//     await Inventory.insertMany(inventoryDocs);//, { session }
+//     await workOrder.save({}); //session
+
+//     // await session.commitTransaction();
+//     // 8. Return success response
+//     res.status(201).json({
+//       success: true,
+//       data: workOrder,
+//       message: 'Work order created successfully',
+//     });
+//   } catch (error) {
+//     // Cleanup: Delete temp files on error
+//     console.log("error", error);
+//     if (req.files) {
+//       req.files.forEach((file) => {
+//         const tempFilePath = path.join('./public/temp', file.filename);
+//         if (fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath);
+//       });
+//     }
+
+//     // Handle different error types
+//     if (error instanceof z.ZodError) {
+//       return res.status(400).json({
+//         success: false,
+//         errors: error.errors.map((err) => ({
+//           field: err.path.join('.'),
+//           message: err.message,
+//         })),
+//       });
+//     }
+
+//     if (error.name === 'ValidationError') {
+//       const formattedErrors = Object.values(error.errors).map((err) => ({
+//         field: err.path,
+//         message: err.message,
+//       }));
+//       return res.status(400).json({
+//         success: false,
+//         errors: formattedErrors,
+//       });
+//     }
+
+//     console.error('Error creating WorkOrder:', error);
+//     res.status(500).json({
+//       success: false,
+//       message: error.message || 'Internal Server Error',
+//     });
+//   }
+// };
+
+
+
+
+
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+
+
+
+
 export const createWorkOrder = async (req, res) => {
-  // const session = await mongoose.startSession();
   try {
-    // session.startTransaction();
     // 1. Parse form-data
     const bodyData = req.body;
-    console.log("userId", typeof (req.user._id));
     const userId = req.user._id.toString();
-
 
     // 2. Parse stringified fields if needed
     if (typeof bodyData.products === 'string') {
@@ -390,49 +580,60 @@ export const createWorkOrder = async (req, res) => {
       bodyData.buffer_stock = JSON.parse(bodyData.buffer_stock);
     }
 
-    // 3. Process products - handle sqmt to nos conversion
+    // 3. Process products - handle sqmt/metre to nos conversion
     const processedProducts = await Promise.all(
       bodyData.products.map(async (product) => {
         // Get product details
         const productDetails = await Product.findById(product.product_id);
-        console.log("productDetails", productDetails);
-
         if (!productDetails) {
           throw new Error(`Product not found with ID: ${product.product_id}`);
         }
 
         // Initialize processed product
         const processedProduct = {
-          ...product,
-          qty_in_nos: 0, // Default to 0
+          product_id: product.product_id,
+          uom: product.uom,
+          po_quantity: Number(product.po_quantity),
+          qty_in_nos: 0,
+          delivery_date: product.delivery_date,
         };
-        processedProduct.po_quantity = Number(product.po_quantity);
+
+        // Normalize submitted UOM for validation
+        const uomLower = product.uom.toLowerCase();
+        const uomMap = {
+          sqmt: 'square metre',
+          metre: 'metre',
+          nos: 'nos',
+        };
+        const normalizedUOM = uomMap[uomLower] || uomLower;
+
+        // Validate UOM
+        const productUOMs = productDetails.uom || [];
+        const validUOMs = productUOMs.map(u => u.toLowerCase().replace('/no', '')); // e.g., ['square metre', 'metre']
+        if (normalizedUOM !== 'nos' && !validUOMs.includes(normalizedUOM)) {
+          throw new Error(`Invalid UOM: ${product.uom} for product ${productDetails.material_code}. Available UOMs: ${productUOMs.join(', ')}`);
+        }
 
         // Handle UOM
-        if (product.uom.toLowerCase() === 'sqmt' || product.uom.toLowerCase() === 'metre') {
-          if (!productDetails.area || productDetails.area <= 0) {
-            throw new Error(`Invalid area value (${productDetails.area}) for product ${productDetails.material_code}`);
+        if (uomLower === 'sqmt' || uomLower === 'metre') {
+          const areaKey = uomLower === 'sqmt' ? 'Square Metre/No' : 'Metre/No';
+          const areaValue = parseFloat(productDetails.areas?.get(areaKey) || '0');
+          if (!areaValue || areaValue <= 0) {
+            throw new Error(
+              `Invalid area value for UOM ${product.uom} in product ${productDetails.material_code}. ` +
+              `Expected a positive number for ${areaKey}, got: ${productDetails.areas?.get(areaKey) || 'missing'}`
+            );
           }
-
-          // Store original sqmt and convert po_quantity to nos
-          // console.log("po_quantity...............",typeof(product.po_quantity));
-          // processedProduct.original_sqmt = Number(product.po_quantity); 
-          // console.log("lalalallalalala",typeof(processedProduct.original_sqmt));
-          processedProduct.qty_in_nos = Math.ceil(Number(product.po_quantity) / productDetails.area);
-          // console.log("nossss",processedProduct.qty_in_nos);
-        }
-        else if (product.uom.toLowerCase() === 'nos') {
-          // Keep po_quantity as-is, original_sqmt remains 0
+          processedProduct.qty_in_nos = Math.ceil(Number(product.po_quantity) / areaValue);
+        } else if (uomLower === 'nos') {
           processedProduct.qty_in_nos = Number(product.po_quantity);
-        }
-        else {
-          throw new Error(`Invalid UOM: ${product.uom} for product ${productDetails.material_code}`);
+        } else {
+          throw new Error(`Unsupported UOM: ${product.uom} for product ${productDetails.material_code}`);
         }
 
         return processedProduct;
       })
     );
-    console.log("processedProducts", processedProducts);
 
     // 4. Handle file uploads
     const uploadedFiles = [];
@@ -464,7 +665,7 @@ export const createWorkOrder = async (req, res) => {
       files: uploadedFiles,
       date: bodyData.date ? new Date(bodyData.date) : undefined,
       buffer_stock: bodyData.buffer_stock || false,
-      created_by: userId, // Assuming authentication middleware sets req.user
+      created_by: userId,
       updated_by: userId,
     };
 
@@ -473,12 +674,9 @@ export const createWorkOrder = async (req, res) => {
       ...product,
       delivery_date: product.delivery_date ? new Date(product.delivery_date) : undefined,
     }));
-    // console.log("workOrderData",workOrderData);
-
 
     // 6. Validate with Zod
     const validatedData = createWorkOrderSchema.parse(workOrderData);
-    console.log("validatedData", validatedData);
 
     // 7. Save to MongoDB
     const workOrder = new WorkOrder(validatedData);
@@ -493,12 +691,9 @@ export const createWorkOrder = async (req, res) => {
       updated_by: userId,
     }));
 
+    await Inventory.insertMany(inventoryDocs);
+    await workOrder.save();
 
-
-    await Inventory.insertMany(inventoryDocs);//, { session }
-    await workOrder.save({}); //session
-
-    // await session.commitTransaction();
     // 8. Return success response
     res.status(201).json({
       success: true,
@@ -507,7 +702,6 @@ export const createWorkOrder = async (req, res) => {
     });
   } catch (error) {
     // Cleanup: Delete temp files on error
-    console.log("error", error);
     if (req.files) {
       req.files.forEach((file) => {
         const tempFilePath = path.join('./public/temp', file.filename);
@@ -544,6 +738,10 @@ export const createWorkOrder = async (req, res) => {
     });
   }
 };
+
+
+
+
 
 
 
@@ -1654,7 +1852,7 @@ export const getWorkOrderById = async (req, res) => {
       dispatches: dispatchesArray,
       qc_details: qcDetailsArray,
     };
-    console.log("transformedData",transformedData);
+    console.log("transformedData", transformedData);
 
     // Clean up unwanted fields, preserving original key names
     transformedData.products.forEach((product) => {

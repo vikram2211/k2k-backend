@@ -79,6 +79,130 @@ import Joi from "joi";
 //   });
 //   dropMaterialCodeIndex();
 
+
+/////////////////////////////////////////////////////////
+//WAS WORKING FINE - *************************************
+// const productSchema = Joi.object({
+//     plant: Joi.string()
+//         .regex(/^[0-9a-fA-F]{24}$/, 'Invalid plant ID')
+//         .required()
+//         .messages({
+//             'string.pattern.base': 'Plant ID must be a valid ObjectId',
+//             'any.required': 'Plant ID is required',
+//         }),
+//     material_code: Joi.string()
+//         .required()
+//         .messages({
+//             'string.empty': 'Material Code is required',
+//             'any.required': 'Material Code is required',
+//         }),
+//     description: Joi.string()
+//         .required()
+//         .messages({
+//             'string.empty': 'Description is required',
+//             'any.required': 'Description is required',
+//         }),
+//     // uom: Joi.string()    //WORKED FINE FOR - ONLY SINGLE UOM
+//     //     .required()
+//     //     .messages({
+//     //         'string.empty': 'UOM is required',
+//     //         'any.required': 'UOM is required',
+//     //     }),
+
+//     uom: Joi.array()
+//         .items(Joi.string().valid('Square Metre/No', 'Metre/No')) 
+//         .min(1) //at least one UOM is provided
+//         .required()
+//         .messages({
+//             'array.min': 'At least one UOM must be provided',
+//             'array.base': 'UOM must be an array of valid values',
+//             'any.required': 'UOM is required',
+//             'string.valid': 'UOM must be either "Square Metre/No" or "Metre/No"',
+//         }),
+//     area: Joi.number()
+//         .required()
+//         .messages({
+//             'number.base': 'Area must be a number',
+//             'any.required': 'Area is required',
+//         }),
+//     no_of_pieces_per_punch: Joi.number()
+//         .required()
+//         .messages({
+//             'number.base': 'Number of pieces per punch must be a number',
+//             'any.required': 'Number of pieces per punch is required',
+//         }),
+//     qty_in_bundle: Joi.number()
+//         .required()
+//         .messages({
+//             'number.base': 'Quantity in bundle must be a number',
+//             'any.required': 'Quantity in bundle is required',
+//         }),
+//     status: Joi.string()
+//         .valid('Active', 'Inactive')
+//         .default('Active'),
+// });
+
+// **Create Product**
+// **Create Product**
+// const createProduct = asyncHandler(async (req, res, next) => {
+//     console.log('Product creation request:', req.body);
+
+//     // Validate request body
+//     const { error, value } = productSchema.validate(req.body, { abortEarly: false });
+//     if (error) {
+//         return next(new ApiError(400, 'Validation failed for product creation', error.details));
+//     }
+
+//     // Destructure validated fields
+//     const {
+//         plant,
+//         material_code,
+//         description,
+//         uom,
+//         area,
+//         no_of_pieces_per_punch,
+//         qty_in_bundle,
+//         status,
+//     } = value;
+
+//     // Check for duplicate material_code
+//     // const existingProduct = await Product.findOne({ material_code });
+//     // if (existingProduct) {
+//     //     return next(new ApiError(400, 'Material code already exists'));
+//     // }
+
+//     // Verify that the plant exists and is not deleted
+//     const plantExists = await Plant.findOne({ _id: plant, isDeleted: false });
+//     if (!plantExists) {
+//         return next(new ApiError(400, 'Plant not found or has been deleted'));
+//     }
+
+//     // Get logged-in user ID (from authentication middleware)
+//     const created_by = req.user._id;
+
+//     // Create new product
+//     const newProduct = await Product.create({
+//         plant,
+//         material_code,
+//         description,
+//         uom,
+//         area,
+//         no_of_pieces_per_punch,
+//         qty_in_bundle,
+//         created_by,
+//         status,
+//     });
+
+//     return res.status(201).json(new ApiResponse(201, newProduct, 'Product created successfully'));
+// });
+
+
+
+
+
+////////////////////////////////////////////////////////////////////////////////
+
+
 const productSchema = Joi.object({
     plant: Joi.string()
         .regex(/^[0-9a-fA-F]{24}$/, 'Invalid plant ID')
@@ -99,16 +223,9 @@ const productSchema = Joi.object({
             'string.empty': 'Description is required',
             'any.required': 'Description is required',
         }),
-    // uom: Joi.string()    //WORKED FINE FOR - ONLY SINGLE UOM
-    //     .required()
-    //     .messages({
-    //         'string.empty': 'UOM is required',
-    //         'any.required': 'UOM is required',
-    //     }),
-
     uom: Joi.array()
-        .items(Joi.string().valid('Square Metre/No', 'Metre/No')) 
-        .min(1) //at least one UOM is provided
+        .items(Joi.string().valid('Square Metre/No', 'Metre/No'))
+        .min(1)
         .required()
         .messages({
             'array.min': 'At least one UOM must be provided',
@@ -116,11 +233,20 @@ const productSchema = Joi.object({
             'any.required': 'UOM is required',
             'string.valid': 'UOM must be either "Square Metre/No" or "Metre/No"',
         }),
-    area: Joi.number()
+    areas: Joi.object()
+        .pattern(Joi.string().valid('Square Metre/No', 'Metre/No'), Joi.number().required())
         .required()
+        .custom((value, helpers) => {
+            const uom = helpers.state.ancestors[0].uom;
+            const areaKeys = Object.keys(value);
+            if (!uom.every((u) => areaKeys.includes(u))) {
+                return helpers.error('any.custom', { message: 'Areas must include an entry for each selected UOM' });
+            }
+            return value;
+        })
         .messages({
-            'number.base': 'Area must be a number',
-            'any.required': 'Area is required',
+            'object.pattern.base': 'Areas must be an object with valid UOM keys and numeric values',
+            'any.required': 'Areas is required',
         }),
     no_of_pieces_per_punch: Joi.number()
         .required()
@@ -139,8 +265,6 @@ const productSchema = Joi.object({
         .default('Active'),
 });
 
-// **Create Product**
-// **Create Product**
 const createProduct = asyncHandler(async (req, res, next) => {
     console.log('Product creation request:', req.body);
 
@@ -156,7 +280,7 @@ const createProduct = asyncHandler(async (req, res, next) => {
         material_code,
         description,
         uom,
-        area,
+        areas,
         no_of_pieces_per_punch,
         qty_in_bundle,
         status,
@@ -177,13 +301,19 @@ const createProduct = asyncHandler(async (req, res, next) => {
     // Get logged-in user ID (from authentication middleware)
     const created_by = req.user._id;
 
+    // Convert areas object to Map for Mongoose schema
+    const areasMap = new Map();
+    for (const [key, value] of Object.entries(areas)) {
+        areasMap.set(key, value);
+    }
+
     // Create new product
     const newProduct = await Product.create({
         plant,
         material_code,
         description,
         uom,
-        area,
+        areas: areasMap,
         no_of_pieces_per_punch,
         qty_in_bundle,
         created_by,
@@ -192,8 +322,6 @@ const createProduct = asyncHandler(async (req, res, next) => {
 
     return res.status(201).json(new ApiResponse(201, newProduct, 'Product created successfully'));
 });
-
-
 
 const getAllProducts = asyncHandler(async (req, res, next) => {
     const products = await Product.find({ isDeleted: false })
