@@ -636,19 +636,23 @@ const getFalconWorkOrderById = asyncHandler(async (req, res) => {
     }
 
     const jobOrders = await falconJobOrder.find({ work_order_number: id }).lean();
+    // console.log("jobOrders",jobOrders);
     const internalWorkOrders = await falconInternalWorkOrder.find({
         job_order_id: { $in: jobOrders.map(j => j._id) }
     }).lean();
 
     const systemIds = new Set();
     const productSystemIds = new Set();
+    console.log("internalWorkOrders",internalWorkOrders);
 
     internalWorkOrders.forEach(iwo => {
         iwo.products.forEach(prod => {
+            console.log("prod",prod);
             systemIds.add(prod.system?.toString());
             productSystemIds.add(prod.product_system?.toString());
         });
     });
+    console.log("productSystemIds",productSystemIds);
 
     const systemDocs = await falconSystem.find({ _id: { $in: Array.from(systemIds) } }).select('name').lean();
     const productSystemDocs = await falconProductSystem.find({ _id: { $in: Array.from(productSystemIds) } }).select('name').lean();
@@ -692,6 +696,7 @@ const getFalconWorkOrderById = asyncHandler(async (req, res) => {
             }).lean();
 
             const totalRejected = qcs.reduce((sum, qc) => sum + (qc?.rejected_quantity || 0), 0);
+            // console.log("productSystemNameMap",productSystemNameMap);
 
             internalDetails.push({
                 product_name: productNamesMap[productObj.product.toString()],
@@ -752,7 +757,7 @@ const getFalconWorkOrderById = asyncHandler(async (req, res) => {
             const semiFinishedArray = [];
 
             for (const semi of productObj.semifinished_details) {
-                console.log("semi", semi);
+                // console.log("semi", semi);
 
                 const relatedProductions = await falconProduction.find({
                     job_order: relatedJobOrder._id,

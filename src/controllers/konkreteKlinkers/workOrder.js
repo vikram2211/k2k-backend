@@ -103,8 +103,7 @@ const createWorkOrderSchema = z.object({
       }),
       uom: z.enum(['sqmt', 'nos', 'metre'], { message: 'UOM must be "sqmt" or "nos"' }),
       po_quantity: z.number().min(0, 'PO quantity must be non-negative'),
-      qty_in_nos: z.number().min(0, 'Original square meters must be non-negative'),
-      // plant_code: z.string().refine((val) => mongoose.isValidObjectId(val), {
+      qty_in_nos: z.number().min(0, 'Original square meters must be non-negative').refine((val) => !isNaN(val), { message: 'qty_in_nos cannot be NaN' }),      // plant_code: z.string().refine((val) => mongoose.isValidObjectId(val), {
       //   message: 'Invalid plant code',
       // }),
       delivery_date: z.date().optional(),
@@ -2000,30 +1999,31 @@ export const getWorkOrderById = async (req, res) => {
 //     });
 //   }
 // };
-export const updateWorkOrder = async (req, res) => {
-  // console.log(req.body);
 
+
+
+
+export const updateWorkOrder = async (req, res) => {
   try {
     // 1. Get work order ID from params
     const { id } = req.params;
-    // console.log("id", id);
 
     // 2. Check if work order exists
     const existingWorkOrder = await WorkOrder.findById(id);
     if (!existingWorkOrder) {
-      return res.status(404).json({
+      return res.status(400).json({
         success: false,
         message: "Work order not found",
       });
     }
 
-    // 3. Parse form-data (already parsed by multer)
+    // 3. Parse form-data
     const bodyData = req.body;
 
     // 4. Initialize update data object
     const updateData = {};
 
-    // 5. Handle date update if provided (keep as string for validation)
+    // 5. Handle date update if provided
     if (bodyData.date) {
       const dateObj = new Date(bodyData.date);
       if (isNaN(dateObj.getTime())) {
@@ -2043,55 +2043,58 @@ export const updateWorkOrder = async (req, res) => {
     // 7. Handle products update if provided
     if (bodyData.products) {
       let updatedProducts = bodyData.products;
-      // Parse stringified products array if needed
       if (typeof bodyData.products === 'string') {
         updatedProducts = JSON.parse(bodyData.products);
       }
       console.log("updatedProducts", updatedProducts);
 
-
-      // Process products - convert sqmt to nos if needed
       updateData.products = await Promise.all(
         updatedProducts.map(async (product) => {
-          // Get the product details
           const productDetails = await Product.findById(product.product_id);
           if (!productDetails) {
             throw new Error(`Product not found with ID: ${product.product_id}`);
           }
-          // console.log("came here......",product.delivery_date);
+
           // Convert delivery_date to Date object
-          if (product.delivery_date) {
-            product.delivery_date = new Date(product.delivery_date);
-          } else {
-            product.delivery_date = undefined; // Ensure it's undefined if not provided
+          const deliveryDate = product.delivery_date ? new Date(product.delivery_date) : undefined;
+
+          // Convert po_quantity to number with validation
+          const poQuantity = Number(product.po_quantity);
+          if (isNaN(poQuantity)) {
+            throw new Error(`Invalid po_quantity value: ${product.po_quantity} for product ${product.product_id}`);
           }
 
-          // If UOM is "sqmt", convert to nos
-          if (product.uom && product.uom.toLowerCase() === 'sqmt') {
-            if (!productDetails.area || productDetails.area <= 0) {
+          // Normalize UOM and determine area
+          const uomLower = product.uom.toLowerCase();
+          const uomMap = {
+            sqmt: 'Square Metre/No',
+            metre: 'Metre/No',
+            nos: null, // No area conversion for 'nos'
+          };
+          const areaKey = uomMap[uomLower];
+          let areaValue = 1; // Default for 'nos' or invalid uom
+          if (areaKey) {
+            areaValue = parseFloat(productDetails.areas?.get(areaKey) || '0');
+            if (isNaN(areaValue) || areaValue <= 0) {
               throw new Error(
-                `Invalid area value (${productDetails.area}) for product ${productDetails.material_code}`
+                `Invalid area value for UOM ${product.uom} in product ${productDetails.material_code}. ` +
+                `Expected a positive number for ${areaKey}, got: ${productDetails.areas?.get(areaKey) || 'missing'}`
               );
             }
-            // console.log("type....",typeof(product.po_quantity));
-
-            // Calculate quantity in nos
-            const quantityInNos = Math.ceil(Number(product.po_quantity) / productDetails.area);
-
-            return {
-              ...product,
-              po_quantity: Number(product.po_quantity),
-              qty_in_nos: quantityInNos,
-              delivery_date: product.delivery_date,
-            };
           }
 
-          // For "nos", keep as is
+          // Calculate qty_in_nos
+          const qtyInNos = areaKey
+            ? Math.ceil(poQuantity / areaValue)
+            : poQuantity;
+
           return {
-            ...product,
-            po_quantity: Number(product.po_quantity),
-            qty_in_nos: Number(product.po_quantity),
-            delivery_date: product.delivery_date,
+            product_id: product.product_id,
+            uom: product.uom,
+            po_quantity: poQuantity,
+            qty_in_nos: qtyInNos,
+            plant_code: product.plant_code,
+            delivery_date: deliveryDate,
           };
         })
       );
@@ -2104,13 +2107,11 @@ export const updateWorkOrder = async (req, res) => {
         const tempFilePath = path.join("./public/temp", file.filename);
         const fileBuffer = fs.readFileSync(tempFilePath);
 
-        // Upload to S3
         const { url } = await putObject(
           { data: fileBuffer, mimetype: file.mimetype },
           `work-orders/${Date.now()}-${file.originalname}`
         );
 
-        // Delete temp file
         fs.unlinkSync(tempFilePath);
 
         uploadedFiles.push({
@@ -2118,7 +2119,6 @@ export const updateWorkOrder = async (req, res) => {
           file_url: url,
         });
       }
-      // Append new files to existing files
       updateData.files = [...existingWorkOrder.files, ...uploadedFiles];
     }
 
@@ -2134,11 +2134,9 @@ export const updateWorkOrder = async (req, res) => {
     const validatedData = createWorkOrderSchema.partial().parse(updateData);
     console.log("validatedData", validatedData);
 
-    // 11. Transform validated data for MongoDB (convert dates to Date objects)
+    // 11. Transform validated data for MongoDB
     const mongoData = { ...validatedData };
-    if (mongoData.date) {
-      mongoData.date = new Date(mongoData.date);
-    }
+    if (mongoData.date) mongoData.date = new Date(mongoData.date);
     if (mongoData.products) {
       mongoData.products = mongoData.products.map((product) => ({
         ...product,
@@ -2159,7 +2157,7 @@ export const updateWorkOrder = async (req, res) => {
       message: "Work order updated successfully",
     });
   } catch (error) {
-    // Cleanup: Delete temp files on error
+    console.log("error", error);
     if (req.files) {
       req.files.forEach((file) => {
         const tempFilePath = path.join("./public/temp", file.filename);
@@ -2167,7 +2165,6 @@ export const updateWorkOrder = async (req, res) => {
       });
     }
 
-    // Handle different error types
     if (error instanceof z.ZodError) {
       return res.status(400).json({
         success: false,
@@ -2196,13 +2193,217 @@ export const updateWorkOrder = async (req, res) => {
       });
     }
 
-    console.error("Error updating work order:", error);
     res.status(500).json({
       success: false,
       message: error.message || "Internal Server Error",
     });
   }
 };
+// export const updateWorkOrder = async (req, res) => {
+//   // console.log(req.body);
+
+//   try {
+//     // 1. Get work order ID from params
+//     const { id } = req.params;
+//     // console.log("id", id);
+
+//     // 2. Check if work order exists
+//     const existingWorkOrder = await WorkOrder.findById(id);
+//     if (!existingWorkOrder) {
+//       return res.status(404).json({
+//         success: false,
+//         message: "Work order not found",
+//       });
+//     }
+
+//     // 3. Parse form-data (already parsed by multer)
+//     const bodyData = req.body;
+
+//     // 4. Initialize update data object
+//     const updateData = {};
+
+//     // 5. Handle date update if provided (keep as string for validation)
+//     if (bodyData.date) {
+//       const dateObj = new Date(bodyData.date);
+//       if (isNaN(dateObj.getTime())) {
+//         return res.status(400).json({
+//           success: false,
+//           message: "Invalid date format. Please use YYYY-MM-DD",
+//         });
+//       }
+//       updateData.date = dateObj;
+//     }
+
+//     // 6. Handle plant update if provided
+//     if (bodyData.plant) {
+//       updateData.plant = bodyData.plant;
+//     }
+
+//     // 7. Handle products update if provided
+//     if (bodyData.products) {
+//       let updatedProducts = bodyData.products;
+//       // Parse stringified products array if needed
+//       if (typeof bodyData.products === 'string') {
+//         updatedProducts = JSON.parse(bodyData.products);
+//       }
+//       console.log("updatedProducts", updatedProducts);
+
+
+//       // Process products - convert sqmt to nos if needed
+//       updateData.products = await Promise.all(
+//         updatedProducts.map(async (product) => {
+//           // Get the product details
+//           const productDetails = await Product.findById(product.product_id);
+//           if (!productDetails) {
+//             throw new Error(`Product not found with ID: ${product.product_id}`);
+//           }
+//           // console.log("came here......",product.delivery_date);
+//           // Convert delivery_date to Date object
+//           if (product.delivery_date) {
+//             product.delivery_date = new Date(product.delivery_date);
+//           } else {
+//             product.delivery_date = undefined; // Ensure it's undefined if not provided
+//           }
+//           console.log("productDetails",productDetails.areas);
+
+//           // If UOM is "sqmt", convert to nos
+//           if (product.uom && product.uom.toLowerCase() === 'sqmt') {
+//             if (!productDetails.areas || productDetails.areas <= 0) {
+//               throw new Error(
+//                 `Invalid area value (${productDetails.areas}) for product ${productDetails.material_code}`
+//               );
+//             }
+//             // console.log("type....",typeof(product.po_quantity));
+
+//             // Calculate quantity in nos
+//             const quantityInNos = Math.ceil(Number(product.po_quantity) / productDetails.area);
+
+//             return {
+//               ...product,
+//               po_quantity: Number(product.po_quantity),
+//               qty_in_nos: quantityInNos,
+//               delivery_date: product.delivery_date,
+//             };
+//           }
+
+//           // For "nos", keep as is
+//           return {
+//             ...product,
+//             po_quantity: Number(product.po_quantity),
+//             qty_in_nos: Number(product.po_quantity),
+//             delivery_date: product.delivery_date,
+//           };
+//         })
+//       );
+//     }
+
+//     // 8. Handle file uploads if provided
+//     if (req.files && req.files.length > 0) {
+//       const uploadedFiles = [];
+//       for (const file of req.files) {
+//         const tempFilePath = path.join("./public/temp", file.filename);
+//         const fileBuffer = fs.readFileSync(tempFilePath);
+
+//         // Upload to S3
+//         const { url } = await putObject(
+//           { data: fileBuffer, mimetype: file.mimetype },
+//           `work-orders/${Date.now()}-${file.originalname}`
+//         );
+
+//         // Delete temp file
+//         fs.unlinkSync(tempFilePath);
+
+//         uploadedFiles.push({
+//           file_name: file.originalname,
+//           file_url: url,
+//         });
+//       }
+//       // Append new files to existing files
+//       updateData.files = [...existingWorkOrder.files, ...uploadedFiles];
+//     }
+
+//     // 9. Check if there's anything to update
+//     if (Object.keys(updateData).length === 0) {
+//       return res.status(400).json({
+//         success: false,
+//         message: "No fields provided for update",
+//       });
+//     }
+
+//     // 10. Validate provided data
+//     const validatedData = createWorkOrderSchema.partial().parse(updateData);
+//     console.log("validatedData", validatedData);
+
+//     // 11. Transform validated data for MongoDB (convert dates to Date objects)
+//     const mongoData = { ...validatedData };
+//     if (mongoData.date) {
+//       mongoData.date = new Date(mongoData.date);
+//     }
+//     if (mongoData.products) {
+//       mongoData.products = mongoData.products.map((product) => ({
+//         ...product,
+//         delivery_date: product.delivery_date ? new Date(product.delivery_date) : undefined,
+//       }));
+//     }
+
+//     // 12. Update work order
+//     const updatedWorkOrder = await WorkOrder.findByIdAndUpdate(
+//       id,
+//       { $set: mongoData },
+//       { new: true, runValidators: true }
+//     );
+
+//     res.status(200).json({
+//       success: true,
+//       data: updatedWorkOrder,
+//       message: "Work order updated successfully",
+//     });
+//   } catch (error) {
+//     // Cleanup: Delete temp files on error
+//     console.log("error",error);
+//     if (req.files) {
+//       req.files.forEach((file) => {
+//         const tempFilePath = path.join("./public/temp", file.filename);
+//         if (fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath);
+//       });
+//     }
+
+//     // Handle different error types
+//     if (error instanceof z.ZodError) {
+//       return res.status(400).json({
+//         success: false,
+//         errors: error.errors.map((err) => ({
+//           field: err.path.join("."),
+//           message: err.message,
+//         })),
+//       });
+//     }
+
+//     if (error.name === "ValidationError") {
+//       const formattedErrors = Object.values(error.errors).map((err) => ({
+//         field: err.path,
+//         message: err.message,
+//       }));
+//       return res.status(400).json({
+//         success: false,
+//         errors: formattedErrors,
+//       });
+//     }
+
+//     if (error.name === "CastError") {
+//       return res.status(400).json({
+//         success: false,
+//         message: `Invalid ID format: ${error.value}`,
+//       });
+//     }
+
+//     console.error("Error updating work order:", error);
+//     res.status(500).json({
+//       success: false,
+//       message: error.message || "Internal Server Error",
+//     });
+//   }
+// };
 
 
 export const deleteWorkOrder = async (req, res) => {

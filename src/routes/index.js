@@ -70,6 +70,23 @@ router.use('/falconFacade', falconDispatchRouter);
 router.use('/falconFacade', falconQcCheckRouter);
 
 
+
+//////IRON SMITH ROUTER -
+
+import ironClientRouter from './ironSmithRoutes/client.routes.js';
+import ironMachineRouter from './ironSmithRoutes/machine.routes.js';
+import ironProjectRouter from './ironSmithRoutes/project.routes.js';
+import ironShapesRouter from './ironSmithRoutes/dimension.routes.js';
+
+
+
+router.use('/ironSmith', ironClientRouter);
+router.use('/ironSmith', ironMachineRouter);
+router.use('/ironSmith', ironProjectRouter);
+router.use('/ironSmith', ironShapesRouter);
+
+
+
 //routes a/c to the employee permissions. 
 //either the employee can have the access to the individual CRUD operations (more chances this will be implemented ~ full control , create any type of user in the future and use. submadmin,qc check, inventory check , etc.. no difference among each other.)or
 // according to the process which means in each continuous checks page can be added. and if its done for multiple employees .(complex)

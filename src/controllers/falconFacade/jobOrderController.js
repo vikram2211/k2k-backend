@@ -8,10 +8,17 @@ import { asyncHandler } from '../../utils/asyncHandler.js';
 import { ApiError } from '../../utils/ApiError.js';
 import { ApiResponse } from '../../utils/ApiResponse.js';
 import { falconJobOrder } from '../../models/falconFacade/falconJobOrder.model.js';
+import { falconInternalWorkOrder } from '../../models/falconFacade/falconInternalWorder.model.js';
+import { falconProduction } from '../../models/falconFacade/falconProduction.model.js';
 import { formatDateToIST } from '../../utils/formatDate.js';
 import { putObject } from '../../../util/putObject.js';
 import { deleteObject } from '../../../util/deleteObject.js';
-import {falconWorkOrder} from '../../models/falconFacade/falconWorkOrder.model.js';
+import { falconWorkOrder } from '../../models/falconFacade/falconWorkOrder.model.js';
+import { falconPacking } from '../../models/falconFacade/falconPacking.model.js';
+import { falocnDispatch } from '../../models/falconFacade/falconDispatch.model.js';
+import { falconQCCheck } from '../../models/falconFacade/falconQcCheck.model.js';
+import { falconSystem } from '../../models/falconFacade/helpers/falconSystem.model.js';
+import { falconProductSystem } from '../../models/falconFacade/helpers/falconProductSystem.model.js';
 import { z } from 'zod';
 
 
@@ -386,114 +393,114 @@ const getFalconJobOrders = asyncHandler(async (req, res) => {
     return sendResponse(res, new ApiResponse(200, formattedJobOrders, 'Job orders fetched successfully'));
 });
 
-const getFalconJobOrderById = asyncHandler(async (req, res) => {
-    // 1. Get job order ID from params
-    const { id } = req.params;
-    if (!mongoose.Types.ObjectId.isValid(id)) {
-        throw new ApiError(400, `Invalid job order ID: ${id}`);
-    }
+// const getFalconJobOrderById = asyncHandler(async (req, res) => {
+//     // 1. Get job order ID from params
+//     const { id } = req.params;
+//     if (!mongoose.Types.ObjectId.isValid(id)) {
+//         throw new ApiError(400, `Invalid job order ID: ${id}`);
+//     }
 
-    // 2. Fetch job order with populated fields
-    const jobOrder = await falconJobOrder
-        .findById(id)
-        // .populate({
-        //     path: 'client_id',
-        //     select: 'name address',
-        //     // match: { isDeleted: false },
-        // })
-        // .populate({
-        //     path: 'project_id',
-        //     select: 'name',
-        //     // match: { isDeleted: false },
-        // })
-        .populate({
-            path: 'work_order_number',
-            select: 'client_id project_id work_order_number',
-            populate: [
-                {
-                    path: 'client_id',
-                    select: 'name address',
-                },
-                {
-                    path: 'project_id',
-                    select: 'name address',
-                },
-            ],
-        })
-        .populate({
-            path: 'products.product',
-            select: 'name',
-            match: { isDeleted: false },
-        })
-        .populate({
-            path: 'prod_issued_approved_by',
-            select: 'name',
-            // match: { isDeleted: false },
-        })
-        .populate({
-            path: 'prod_recieved_by',
-            select: 'name',
-            // match: { isDeleted: false },
-        })
-        .populate('created_by', 'username email')
-        .populate('updated_by', 'username email')
-        .lean();
+//     // 2. Fetch job order with populated fields
+//     const jobOrder = await falconJobOrder
+//         .findById(id)
+//         // .populate({
+//         //     path: 'client_id',
+//         //     select: 'name address',
+//         //     // match: { isDeleted: false },
+//         // })
+//         // .populate({
+//         //     path: 'project_id',
+//         //     select: 'name',
+//         //     // match: { isDeleted: false },
+//         // })
+//         .populate({
+//             path: 'work_order_number',
+//             select: 'client_id project_id work_order_number',
+//             populate: [
+//                 {
+//                     path: 'client_id',
+//                     select: 'name address',
+//                 },
+//                 {
+//                     path: 'project_id',
+//                     select: 'name address',
+//                 },
+//             ],
+//         })
+//         .populate({
+//             path: 'products.product',
+//             select: 'name',
+//             match: { isDeleted: false },
+//         })
+//         .populate({
+//             path: 'prod_issued_approved_by',
+//             select: 'name',
+//             // match: { isDeleted: false },
+//         })
+//         .populate({
+//             path: 'prod_recieved_by',
+//             select: 'name',
+//             // match: { isDeleted: false },
+//         })
+//         .populate('created_by', 'username email')
+//         .populate('updated_by', 'username email')
+//         .lean();
 
-    if (!jobOrder) {
-        throw new ApiError(404, `Job order not found with ID: ${id}`);
-    }
-    console.log("jobOrder", jobOrder);
+//     if (!jobOrder) {
+//         throw new ApiError(404, `Job order not found with ID: ${id}`);
+//     }
+//     console.log("jobOrder", jobOrder);
 
-    // 3. Format the response
-    const formattedJobOrder = {
-        clientProjectDetails: {
-            clientName: jobOrder.work_order_number?.client_id?.name || 'N/A',
-            clientId: jobOrder.work_order_number?.client_id?._id || null,
-            address: jobOrder.work_order_number?.client_id?.address || 'N/A',
-            projectName: jobOrder.work_order_number?.project_id?.name || 'N/A',
-            projectId: jobOrder.work_order_number?.project_id?._id || null,
-        },
-        workOrderDetails: {
-            workOrderId: jobOrder.work_order_number._id,
-            workOrderNumber: jobOrder.work_order_number.work_order_number,
-            productionRequestDate: formatDateOnly(jobOrder.prod_requset_date),
-            productionRequirementDate: formatDateOnly(jobOrder.prod_requirement_date),
-            approvedBy: jobOrder.prod_issued_approved_by?.name || 'N/A',
-            approvedById: jobOrder.prod_issued_approved_by?._id?.toString() || null,
-            receivedBy: jobOrder.prod_recieved_by?.name || 'N/A',
-            receivedById: jobOrder.prod_recieved_by?._id?.toString() || null,
-            remarks: jobOrder.remarks,
-            workOrderDate: formatDateOnly(jobOrder.date),
-            file: jobOrder.files.map(file => ({
-                file_name: file.file_name,
-                file_url: file.file_url,
-                uploaded_at: file.uploaded_at,
-                _id: file._id?.toString(),
-            })),
-            createdAt: formatDateToIST({ createdAt: jobOrder.createdAt }).createdAt.split(' ')[0], // Only date part
-            createdBy: jobOrder.created_by?.username || 'N/A',
-        },
-        jobOrderDetails: {
-            jobOrderNumber: jobOrder.job_order_id,
-            createdAt: formatDateToIST({ createdAt: jobOrder.createdAt }).createdAt.split(' ')[0], // Only date part
-            createdBy: jobOrder.created_by?.username || 'N/A',
-            status: jobOrder.status,
-        },
-        productsDetails: jobOrder.products.map(product => ({
-            productName: product.product?.name || 'N/A',
-            productId: product.product?._id?.toString() || null,
-            uom: product.uom,
-            code: product.code,
-            colorCode: product.color_code,
-            height: product.height,
-            width: product.width,
-            poQuantity: product.po_quantity,
-            deliveryDate: formatDateOnly(jobOrder.prod_requirement_date),
-        })),
-    };
+//     // 3. Format the response
+//     const formattedJobOrder = {
+//         clientProjectDetails: {
+//             clientName: jobOrder.work_order_number?.client_id?.name || 'N/A',
+//             clientId: jobOrder.work_order_number?.client_id?._id || null,
+//             address: jobOrder.work_order_number?.client_id?.address || 'N/A',
+//             projectName: jobOrder.work_order_number?.project_id?.name || 'N/A',
+//             projectId: jobOrder.work_order_number?.project_id?._id || null,
+//         },
+//         workOrderDetails: {
+//             workOrderId: jobOrder.work_order_number._id,
+//             workOrderNumber: jobOrder.work_order_number.work_order_number,
+//             productionRequestDate: formatDateOnly(jobOrder.prod_requset_date),
+//             productionRequirementDate: formatDateOnly(jobOrder.prod_requirement_date),
+//             approvedBy: jobOrder.prod_issued_approved_by?.name || 'N/A',
+//             approvedById: jobOrder.prod_issued_approved_by?._id?.toString() || null,
+//             receivedBy: jobOrder.prod_recieved_by?.name || 'N/A',
+//             receivedById: jobOrder.prod_recieved_by?._id?.toString() || null,
+//             remarks: jobOrder.remarks,
+//             workOrderDate: formatDateOnly(jobOrder.date),
+//             file: jobOrder.files.map(file => ({
+//                 file_name: file.file_name,
+//                 file_url: file.file_url,
+//                 uploaded_at: file.uploaded_at,
+//                 _id: file._id?.toString(),
+//             })),
+//             createdAt: formatDateToIST({ createdAt: jobOrder.createdAt }).createdAt.split(' ')[0], // Only date part
+//             createdBy: jobOrder.created_by?.username || 'N/A',
+//         },
+//         jobOrderDetails: {
+//             jobOrderNumber: jobOrder.job_order_id,
+//             createdAt: formatDateToIST({ createdAt: jobOrder.createdAt }).createdAt.split(' ')[0], // Only date part
+//             createdBy: jobOrder.created_by?.username || 'N/A',
+//             status: jobOrder.status,
+//         },
+//         productsDetails: jobOrder.products.map(product => ({
+//             productName: product.product?.name || 'N/A',
+//             productId: product.product?._id?.toString() || null,
+//             uom: product.uom,
+//             code: product.code,
+//             colorCode: product.color_code,
+//             height: product.height,
+//             width: product.width,
+//             poQuantity: product.po_quantity,
+//             deliveryDate: formatDateOnly(jobOrder.prod_requirement_date),
+//         })),
+//     };
 
-    return sendResponse(res, new ApiResponse(200, formattedJobOrder, 'Job order fetched successfully'));
-});
+//     return sendResponse(res, new ApiResponse(200, formattedJobOrder, 'Job order fetched successfully'));
+// });
 
 
 // const updateFalconJobOrder = asyncHandler(async (req, res) => {
@@ -792,6 +799,367 @@ const getFalconJobOrderById = asyncHandler(async (req, res) => {
 //     return sendResponse(res, new ApiResponse(200, formattedJobOrder, 'Job order updated successfully'));
 // });
 
+const getFalconJobOrderById = asyncHandler(async (req, res) => {
+    const { id } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+        throw new ApiError(400, `Invalid job order ID: ${id}`);
+    }
+
+    const jobOrder = await falconJobOrder
+        .findById(id)
+        .populate({
+            path: 'work_order_number',
+            select: 'client_id project_id work_order_number',
+            populate: [
+                { path: 'client_id', select: 'name address' },
+                { path: 'project_id', select: 'name address' },
+            ],
+        })
+        .populate({
+            path: 'products.product',
+            select: 'name',
+            match: { isDeleted: false },
+        })
+        .populate('prod_issued_approved_by', 'name')
+        .populate('prod_recieved_by', 'name')
+        .populate('created_by', 'username email')
+        .populate('updated_by', 'username email')
+        .lean();
+
+    if (!jobOrder) {
+        throw new ApiError(404, `Job order not found with ID: ${id}`);
+    }
+    // console.log("jobOrder",jobOrder);
+
+    // Fetch internal work order by job_order_id
+    const internalWorkOrder = await falconInternalWorkOrder.findOne({
+        job_order_id: id,
+    }).lean();
+
+    const formattedProductsDetails = await Promise.all(
+        jobOrder.products.map(async (product) => {
+            const productId = product.product?._id?.toString();
+
+            let achievedQty = 0;
+            let packedQty = 0;
+            let dispatchQty = 0;
+            if (internalWorkOrder) {
+                const relatedProduct = internalWorkOrder.products.find(
+                    (p) => p.product.toString() === productId
+                );
+
+                if (relatedProduct && relatedProduct.semifinished_details.length > 0) {
+                    for (const semi of relatedProduct.semifinished_details) {
+                        const processes = semi.processes;
+                        if (processes.length > 0) {
+                            const lastProcess = processes[processes.length - 1];
+                            const processName = lastProcess.name;
+                            // console.log("job order", id);
+                            // console.log("semi id", semi.semifinished_id);
+                            // console.log("product id", productId);
+                            // console.log("processName", processName);
+
+
+
+                            // Fetch the production data for this semifinished_id, job order and product
+                            const productionDoc = await falconProduction.findOne({
+                                job_order: id,
+                                'product.product_id': productId,
+                                semifinished_id: semi.semifinished_id,
+                                process_name: { $regex: `^${processName}$`, $options: 'i' }, // 👈 case-insensitive exact match
+                            }).lean();
+                            // console.log("productionDoc", productionDoc);
+
+                            if (productionDoc) {
+                                achievedQty += productionDoc.product.achieved_quantity || 0;
+                            }
+                        }
+                    }
+                }
+                // 🟢 Fetch packed quantity from packing collection
+                const packingDocs = await falconPacking.find({
+                    work_order: jobOrder.work_order_number._id,
+                    job_order_id: jobOrder._id,
+                    product: product.product._id,
+                }).lean();
+
+                packedQty = packingDocs.reduce(
+                    (sum, doc) => sum + (doc.semi_finished_quantity || 0),
+                    0
+                );
+
+                // ✅ Get dispatch quantity
+                const packingIds = packingDocs.map((doc) => doc._id);
+
+                const dispatchDocs = await falocnDispatch.find({
+                    job_order: jobOrder._id,
+                    packing_ids: { $in: packingIds },
+                }).lean();
+
+                for (const dispatch of dispatchDocs) {
+                    for (const dispatchedProduct of dispatch.products) {
+                        if (dispatchedProduct.product_id.toString() === productId) {
+                            dispatchQty += dispatchedProduct.dispatch_quantity || 0;
+                        }
+                    }
+                }
+            }
+
+            return {
+                productName: product.product?.name || 'N/A',
+                productId,
+                uom: product.uom,
+                code: product.code,
+                colorCode: product.color_code,
+                height: product.height,
+                width: product.width,
+                poQuantity: product.po_quantity,
+                deliveryDate: formatDateOnly(jobOrder.prod_requirement_date),
+                achievedQty, // ✅ added field
+                packedQty,
+                dispatchQty
+            };
+        })
+    );
+
+    // ✅ Add detailed semi-finished info for current job order only
+    const jobOrderDetailsWithSemiFinished = [];
+
+    if (internalWorkOrder) {
+        for (const prod of internalWorkOrder.products) {
+            const productId = prod.product.toString();
+            let achievedQty = 0;
+            const semiFinishedDetails = [];
+
+            for (const semi of prod.semifinished_details || []) {
+                const lastProcess = semi.processes?.[semi.processes.length - 1];
+
+                if (lastProcess) {
+                    const productionDoc = await falconProduction.findOne({
+                        job_order: id,
+                        'product.product_id': productId,
+                        semifinished_id: semi.semifinished_id,
+                        process_name: { $regex: `^${lastProcess.name}$`, $options: 'i' }
+                    }).lean();
+
+                    if (productionDoc) {
+                        achievedQty += productionDoc.product.achieved_quantity || 0;
+                    }
+                }
+                //Packing details - 
+                const packingDocs = await falconPacking.find({
+                    job_order_id: jobOrder._id,
+                    product: prod.product,
+                    semi_finished_id: semi.semifinished_id,
+                }).lean();
+
+                const packed_qty = packingDocs.reduce(
+                    (sum, doc) => sum + (doc.semi_finished_quantity || 0),
+                    0
+                );
+                const packingIds = packingDocs.map(doc => doc._id);
+
+                // 🔴 Get dispatch quantity
+                const dispatchDocs = await falocnDispatch.find({
+                    job_order: jobOrder._id,
+                    packing_ids: { $in: packingIds },
+                }).lean();
+
+                let dispatch_qty = 0;
+
+                dispatchDocs.forEach(dispatch => {
+                    dispatch.products.forEach(product => {
+                        if (
+                            product.product_id?.toString() === prod.product?.toString() &&
+                            product.semi_finished_id === semi.semifinished_id
+                        ) {
+                            dispatch_qty += product.dispatch_quantity || 0;
+                        }
+                    });
+                });
+
+                semiFinishedDetails.push({
+                    semifinished_id: semi.semifinished_id,
+                    file_url: semi.file_url,
+                    remarks: semi.remarks,
+                    packed_qty,
+                    dispatch_qty,
+                    // processes: semi.processes.map(proc => ({
+                    //     name: proc.name,
+                    //     file_url: proc.file_url,
+                    //     remarks: proc.remarks
+                    // }))
+                    processes: await Promise.all(
+                        semi.processes.map(async (proc) => {
+                            const production = await falconProduction.findOne({
+                                job_order: jobOrder._id,
+                                'product.product_id': prod.product,
+                                semifinished_id: semi.semifinished_id,
+                                process_name: { $regex: `^${proc.name}$`, $options: 'i' }, // case-insensitive match
+                            }).lean();
+
+                            return {
+                                name: proc.name,
+                                file_url: proc.file_url,
+                                remarks: proc.remarks,
+                                achievedQty: production?.product?.achieved_quantity || 0 // ✅ attach achieved qty
+                            };
+                        })
+                    )
+                });
+            }
+            // console.log("jobOrder",jobOrder);
+
+            // 🔴 Get rejected quantity from QC Check collection
+            const qcDocs = await falconQCCheck.find({
+                job_order: jobOrder._id,
+                product_id: prod.product,
+            }).lean();
+
+            let rejectedQty = 0;
+
+            if (qcDocs?.length > 0) {
+                rejectedQty = qcDocs.reduce((sum, doc) => sum + (doc.rejected_quantity || 0), 0);
+            }
+
+            // 🟢 Fetch system name
+            let systemName = 'N/A';
+            if (prod.system) {
+                const systemDoc = await falconSystem.findById(prod.system).select('name').lean();
+                if (systemDoc) systemName = systemDoc.name;
+            }
+
+            // 🟢 Fetch product system name
+            let productSystemName = 'N/A';
+            if (prod.product_system) {
+                const productSystemDoc = await falconProductSystem.findById(prod.product_system).select('name').lean();
+                if (productSystemDoc) productSystemName = productSystemDoc.name;
+            }
+
+            jobOrderDetailsWithSemiFinished.push({
+                job_order_id: jobOrder.job_order_id,
+                product_id: prod.product?.toString(),
+                sales_order_no: internalWorkOrder.sales_order_no,
+                job_order_db_id: jobOrder._id,
+                date: internalWorkOrder.date,
+                system: prod.system,
+                system_name: systemName,
+                product_system: prod.product_system,
+                product_system_name: productSystemName,
+                po_quantity: prod.po_quantity,
+                achievedQty,
+                rejectedQty,
+                semiFinishedDetails
+            });
+        }
+    }
+
+    const rawPackingDocs = await falconPacking
+        .find({ job_order_id: jobOrder._id })
+        .populate('product', 'name uom')
+        .populate('packed_by', 'username')
+        .lean();
+
+    // Map to group products and semi-finished items
+    const productMap = {};
+
+    for (const doc of rawPackingDocs) {
+        const productId = doc.product?._id?.toString();
+        const productName = doc.product?.name || 'N/A';
+        const uom = doc.product?.uom || 'nos';
+        const sfId = doc.semi_finished_id;
+
+        if (!productMap[productId]) {
+            productMap[productId] = {
+                productId,
+                productName,
+                uom,
+                semiFinishedProducts: {}
+            };
+        }
+
+        if (!productMap[productId].semiFinishedProducts[sfId]) {
+            productMap[productId].semiFinishedProducts[sfId] = {
+                sfId,
+                quantity: 0,
+                qrCodes: []
+            };
+        }
+
+        productMap[productId].semiFinishedProducts[sfId].quantity += doc.semi_finished_quantity || 0;
+
+        const qrEntries = [doc.qr_id, doc.qr_code].filter(Boolean);
+        productMap[productId].semiFinishedProducts[sfId].qrCodes.push({
+            code: doc.qr_id,
+            url: doc.qr_code
+        });
+    }
+
+    const workOrderDoc = await falconWorkOrder.findById(jobOrder.work_order_number).lean();
+    const workOrderNumber = workOrderDoc?.work_order_number || 'N/A';
+
+    // Final formatted packing details
+    const packing_details = [
+        {
+            // workOrderId: jobOrder.work_order_number?._id,
+            workOrderId: workOrderNumber,
+            jobOrder: jobOrder.job_order_id,
+            status: "Packed",
+            createdBy: jobOrder.created_by?.username || 'N/A',
+            timestamp: jobOrder.createdAt,
+            products: Object.values(productMap).map(prod => ({
+                ...prod,
+                semiFinishedProducts: Object.values(prod.semiFinishedProducts)
+            }))
+        }
+    ];
+
+
+
+
+
+    const formattedJobOrder = {
+        clientProjectDetails: {
+            clientName: jobOrder.work_order_number?.client_id?.name || 'N/A',
+            clientId: jobOrder.work_order_number?.client_id?._id || null,
+            address: jobOrder.work_order_number?.client_id?.address || 'N/A',
+            projectName: jobOrder.work_order_number?.project_id?.name || 'N/A',
+            projectId: jobOrder.work_order_number?.project_id?._id || null,
+        },
+        workOrderDetails: {
+            workOrderId: jobOrder.work_order_number._id,
+            workOrderNumber: jobOrder.work_order_number.work_order_number,
+            productionRequestDate: formatDateOnly(jobOrder.prod_requset_date),
+            productionRequirementDate: formatDateOnly(jobOrder.prod_requirement_date),
+            approvedBy: jobOrder.prod_issued_approved_by?.name || 'N/A',
+            approvedById: jobOrder.prod_issued_approved_by?._id?.toString() || null,
+            receivedBy: jobOrder.prod_recieved_by?.name || 'N/A',
+            receivedById: jobOrder.prod_recieved_by?._id?.toString() || null,
+            remarks: jobOrder.remarks,
+            workOrderDate: formatDateOnly(jobOrder.date),
+            file: jobOrder.files.map(file => ({
+                file_name: file.file_name,
+                file_url: file.file_url,
+                uploaded_at: file.uploaded_at,
+                _id: file._id?.toString(),
+            })),
+            createdAt: formatDateToIST({ createdAt: jobOrder.createdAt }).createdAt.split(' ')[0],
+            createdBy: jobOrder.created_by?.username || 'N/A',
+        },
+        jobOrderDetails: {
+            jobOrderNumber: jobOrder.job_order_id,
+            createdAt: formatDateToIST({ createdAt: jobOrder.createdAt }).createdAt.split(' ')[0],
+            createdBy: jobOrder.created_by?.username || 'N/A',
+            status: jobOrder.status,
+        },
+        productsDetails: formattedProductsDetails,
+        jobOrderDetailsWithSemiFinished,
+        packing_details
+    };
+
+    return sendResponse(res, new ApiResponse(200, formattedJobOrder, 'Job order fetched successfully'));
+});
 
 const updateFalconJobOrder = asyncHandler(async (req, res) => {
     // 1. Get job order ID from params

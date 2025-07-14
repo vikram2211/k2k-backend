@@ -13,6 +13,10 @@ const machineSchema = new mongoose.Schema(
       type: String,
       required: true,
     },
+    isDeleted: {
+      type: Boolean,
+      default: false,
+    },
 
    
     created_by: {
@@ -26,4 +30,4 @@ const machineSchema = new mongoose.Schema(
   }
 );
 
-export const Machine = mongoose.model('Machine', machineSchema);
+export const ironMachine = mongoose.model('ironMachine', machineSchema);

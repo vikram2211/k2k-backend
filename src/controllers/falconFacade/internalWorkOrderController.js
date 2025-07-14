@@ -286,6 +286,7 @@ const getProductSystem = asyncHandler(async (req, res) => {
 
     // Format the response
     const formattedResponse = validProductSystems.map(ps => ({
+        productSystemId: ps._id,
         name: ps.name,
         systemId: ps.system._id.toString(),
         systemName: ps.system.name,

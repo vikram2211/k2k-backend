@@ -10,27 +10,23 @@ import { User } from "../models/user.model.js";
 
 export const verifyJWT = asyncHandler(async (req, res, next) => {
   try {
-    // console.log("came in auth");
     const accessToken =
       req.cookies?.accessToken 
       ||
       req.header("Authorization")?.replace("Bearer ", "");
-    // console.log("verifyJwt - accessToken", accessToken);
 
     if (!accessToken) {
       throw new ApiError(401, "Unauthorized request");
     }
 
     let decodedToken;
-    // console.log("env-token", process.env.ACCESS_TOKEN_SECRET);
     try {
       decodedToken = jwt.verify(accessToken, process.env.ACCESS_TOKEN_SECRET);
-      // console.log("decodedToken", decodedToken);
     } catch (error) {
       if (error.name === "TokenExpiredError") {
         // Access token expired. Attempt to refresh.
+        console.log("Access token expired");
         const refreshToken = req.cookies?.refreshToken;
-        // console.log("refreshToken", refreshToken);
         if (!refreshToken) {
           throw new ApiError(401, "Session expired. Please log in again.");
         }
@@ -39,10 +35,8 @@ export const verifyJWT = asyncHandler(async (req, res, next) => {
           refreshToken,
           process.env.REFRESH_TOKEN_SECRET
         );
-        // console.log("decodedRefreshToken", decodedRefreshToken);
 
         const user = await User.findById(decodedRefreshToken._id);
-        // console.log("user", user);
 
         if (!user || user.refreshToken !== refreshToken) {
           throw new ApiError(401, "Invalid refresh token");
@@ -73,14 +67,12 @@ export const verifyJWT = asyncHandler(async (req, res, next) => {
         });
 
         decodedToken = jwt.verify(newAccessToken, process.env.ACCESS_TOKEN_SECRET);
-        // console.log("decodedToken222",decodedToken);
       } else {
         throw new ApiError(401, "Invalid access token");
       }
     }
 
     req.user = await User.findById(decodedToken._id).select("-password -refreshToken");
-    // console.log("from auth middleware",req.user);
     next();
   } catch (error) {
     throw new ApiError(401, error.message || "Unauthorized");

@@ -12,6 +12,10 @@ const clientSchema = new mongoose.Schema(
       required: true,
       trim: true,
     },
+    isDeleted: {
+      type: Boolean,
+      default: false,
+    },
     created_by: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
@@ -23,5 +27,5 @@ const clientSchema = new mongoose.Schema(
   },
 );
 
-export const Client = mongoose.model('Client', clientSchema);
+export const ironClient = mongoose.model('ironClient', clientSchema);
 // export const User = mongoose.model("User", userSchema);

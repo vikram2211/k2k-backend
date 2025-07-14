@@ -438,6 +438,17 @@ export const getJobOrdersByDate2 = async (req, res) => {
     });
   }
 };
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+//////Working fine, but using final getJobOrdersByDate api in bottom, so commenting this one -****&&&^^^%%%$$#######
+
+
+
+
+
+
+
 
 export const getJobOrdersByDate = async (req, res) => {
   try {
@@ -651,6 +662,14 @@ export const getJobOrdersByDate = async (req, res) => {
     });
   }
 };
+
+
+
+
+
+
+
+
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -939,7 +958,7 @@ const simulateProductionCount2 = async (job_order, product_id) => {
 
 
 
-///Working code - 
+
 
 
 // export const handleDailyProductionAction = async (req, res) => {
@@ -2078,7 +2097,7 @@ export const handleDailyProductionAction22 = async (req, res) => {
 
 const simulateProductionCount = async (job_order, product_id) => {
   try {
-    console.log("Came in simulated count api");
+    console.log("Came in simulated count api**");
 
     // Find the DailyProduction document that matches both job_order and product_id
     const dailyProduction = await DailyProduction.findOne({
@@ -2537,14 +2556,14 @@ export const handleDailyProductionAction = async (req, res) => {
 
 const simulateProductionCounts = async (job_order, product_id) => {
   try {
-    console.log("Came in simulated count api");
+    // console.log("Came in simulated count api###");
 
     // Find the DailyProduction document that matches both job_order and product_id
     const dailyProduction = await DailyProduction.findOne({
       job_order,
       'products.product_id': product_id,
     });
-    console.log("dailyProduction.....", dailyProduction);
+    // console.log("dailyProduction.....", dailyProduction);
 
     if (!dailyProduction) {
       console.error(`DailyProduction not found for job_order: ${job_order}, product_id: ${product_id}`);
@@ -3909,6 +3928,174 @@ export const getUpdatedProductProduction = async (req, res) => {
 
 
 
+////////////////////////////NEED TO USE BELLOW API TO SHOW ALL THE PRODUCTION DOCUMENTS IN PRODUCTION TAB, BECAUSE CURRENT API WHICH IS ABOVE IS NOT SHOWING ALL THE PRODUCTION DOCUMENT ----------===========>
+//09-07-2025
 
+
+
+// export const getJobOrdersByDate = async (req, res) => {
+//   try {
+//     const today = new Date();
+//     const todayUTC = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()));
+//     const tomorrowUTC = new Date(todayUTC);
+//     tomorrowUTC.setUTCDate(tomorrowUTC.getUTCDate() + 1);
+
+//     const { date } = req.query;
+//     let query = {};
+
+//     if (date) {
+//       const inputDate = new Date(date);
+//       if (isNaN(inputDate.getTime())) {
+//         return res.status(400).json({
+//           success: false,
+//           message: 'Invalid date format. Use YYYY-MM-DD (e.g., "2025-05-06")',
+//         });
+//       }
+//       const normalizedDate = new Date(Date.UTC(inputDate.getUTCFullYear(), inputDate.getUTCMonth(), inputDate.getUTCDate()));
+//       query.date = {
+//         $gte: normalizedDate,
+//         $lt: new Date(normalizedDate.getTime() + 24 * 60 * 60 * 1000),
+//       };
+//     }
+
+//     const dailyProductions = await DailyProduction.find(query)
+//       .populate({
+//         path: 'job_order',
+//         select: 'job_order_id sales_order_number batch_number date status created_by updated_by createdAt updatedAt products',
+//         populate: [
+//           {
+//             path: 'work_order',
+//             select: 'project_id work_order_number products client_id',
+//             populate: [
+//               { path: 'project_id', select: 'name' },
+//               { path: 'client_id', select: 'name' },
+//             ],
+//           },
+//           {
+//             path: 'products.machine_name',
+//             select: 'name',
+//           },
+//         ],
+//       })
+//       .populate({
+//         path: 'products.product_id',
+//         select: 'material_code description plant',
+//         populate: { path: 'plant', select: 'plant_name' },
+//       })
+//       .lean();
+
+//     const categorizedOrders = {
+//       pastDPR: [],
+//       todayDPR: [],
+//       futureDPR: [],
+//     };
+
+//     dailyProductions.forEach((dailyProduction) => {
+//       const jobOrder = dailyProduction.job_order;
+//       const dpProduct = dailyProduction.products[0];
+//       if (!dpProduct) return;
+
+//       const productId = dpProduct.product_id._id.toString();
+//       const jobOrderProduct = jobOrder?.products?.find(
+//         (prod) => prod.product.toString() === productId
+//       );
+//       const workOrderProduct = jobOrder?.work_order?.products?.find(
+//         (prod) => prod.product_id.toString() === productId
+//       );
+
+//       let started_at = null;
+//       let stopped_at = null;
+
+//       if (dailyProduction.production_logs?.length > 0) {
+//         const startLog = dailyProduction.production_logs
+//           .filter((log) => log.action === 'Start')
+//           .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))[0];
+//         const stopLog = dailyProduction.production_logs
+//           .filter((log) => log.action === 'Stop')
+//           .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))[0];
+
+//         started_at = startLog?.timestamp || null;
+//         stopped_at = stopLog?.timestamp || null;
+//       }
+
+//       const entry = {
+//         _id: jobOrder?._id || dailyProduction._id,
+//         work_order: {
+//           _id: jobOrder?.work_order?._id || null,
+//           work_order_number: jobOrder?.work_order?.work_order_number || 'N/A',
+//           project_name: jobOrder?.work_order?.project_id?.name || 'N/A',
+//           client_name: jobOrder?.work_order?.client_id?.name || 'N/A',
+//         },
+//         sales_order_number: jobOrder?.sales_order_number || 'N/A',
+//         batch_number: jobOrder?.batch_number || 'N/A',
+//         date: jobOrder?.date || { from: null, to: null },
+//         status: jobOrder?.status || dailyProduction.status,
+//         created_by: jobOrder?.created_by || dailyProduction.created_by,
+//         updated_by: jobOrder?.updated_by || dailyProduction.updated_by,
+//         createdAt: jobOrder?.createdAt || dailyProduction.createdAt,
+//         updatedAt: jobOrder?.updatedAt || dailyProduction.updatedAt,
+//         job_order: jobOrder?._id || dailyProduction._id,
+//         job_order_id: jobOrder?.job_order_id,
+//         product_id: dpProduct.product_id._id,
+//         plant_name: dpProduct.product_id?.plant?.plant_name || 'N/A',
+//         machine_name: jobOrderProduct?.machine_name?.name || 'N/A',
+//         material_code: dpProduct.product_id?.material_code || 'N/A',
+//         description: dpProduct.product_id?.description || 'N/A',
+//         po_quantity: workOrderProduct?.po_quantity || 0,
+//         planned_quantity: jobOrderProduct?.planned_quantity || 0,
+//         scheduled_date: jobOrderProduct?.scheduled_date || dailyProduction.date,
+//         achieved_quantity: dpProduct.achieved_quantity || 0,
+//         rejected_quantity: dpProduct.rejected_quantity || 0,
+//         recycled_quantity: dpProduct.recycled_quantity || 0,
+//         started_at,
+//         stopped_at,
+//         submitted_by: dpProduct.submitted_by || null,
+//         daily_production: {
+//           _id: dailyProduction._id,
+//           status: dailyProduction.status,
+//           date: dailyProduction.date,
+//           qc_checked_by: dailyProduction.qc_checked_by,
+//           downtime: dailyProduction.downtime,
+//           created_by: dailyProduction.created_by,
+//           updated_by: dailyProduction.updated_by,
+//           createdAt: dailyProduction.createdAt,
+//           updatedAt: dailyProduction.updatedAt,
+//         },
+//         latestDate: dailyProduction.date,
+//       };
+
+//       const dpDate = new Date(Date.UTC(
+//         new Date(entry.latestDate).getUTCFullYear(),
+//         new Date(entry.latestDate).getUTCMonth(),
+//         new Date(entry.latestDate).getUTCDate()
+//       ));
+
+//       if (date) {
+//         categorizedOrders.todayDPR.push(entry);
+//       } else {
+//         if (dpDate.getTime() === todayUTC.getTime()) {
+//           categorizedOrders.todayDPR.push(entry);
+//         } else if (dpDate < todayUTC) {
+//           categorizedOrders.pastDPR.push(entry);
+//         } else if (dpDate >= tomorrowUTC) {
+//           categorizedOrders.futureDPR.push(entry);
+//         }
+//       }
+//     });
+
+//     return res.status(200).json({
+//       success: true,
+//       message: 'Production data fetched successfully',
+//       data: categorizedOrders,
+//     });
+//   } catch (error) {
+//     console.error('Error getting production data:', error);
+//     res.status(500).json({
+//       success: false,
+//       message: 'Internal Server Error',
+//       error: error.message,
+//     });
+//   }
+// };
 
 
