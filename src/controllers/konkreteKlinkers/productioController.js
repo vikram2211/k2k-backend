@@ -464,13 +464,15 @@ export const getJobOrdersByDate = async (req, res) => {
 
     // Query parameters
     const { date } = req.query;
+    console.log("date", date);
     let query = {};
+    console.log("query", query);
 
     // If a specific date is provided, filter by that date
     if (date) {
       // console.log("date provided");
       const inputDate = new Date(date);
-      // console.log("inputDate", inputDate);
+      console.log("inputDate", inputDate);
 
       if (isNaN(inputDate.getTime())) {
         return res.status(400).json({
@@ -486,8 +488,11 @@ export const getJobOrdersByDate = async (req, res) => {
         $gte: normalizedDate,
         $lt: new Date(normalizedDate.getTime() + 24 * 60 * 60 * 1000), // Next day
       };
+      console.log("inside query",query);
     }
     // console.log("date not provided");
+    console.log("outside query",query);
+
 
     // Fetch daily productions with populated fields
     const dailyProductions = await DailyProduction.find(query)
@@ -524,7 +529,7 @@ export const getJobOrdersByDate = async (req, res) => {
         },
       })
       .lean();
-    console.log("dailyProductions", dailyProductions);
+    // console.log("dailyProductions", dailyProductions);
 
     // Group by JobOrder to avoid duplicates
     const jobOrderMap = new Map();
@@ -637,9 +642,11 @@ export const getJobOrdersByDate = async (req, res) => {
 
       if (date) {
         categorizedOrders.todayDPR.push(entry);
+        console.log("today DPR",categorizedOrders.todayDPR);
       } else {
         if (dpDate.getTime() === todayUTC.getTime()) {
           categorizedOrders.todayDPR.push(entry);
+          console.log("today DPR*",categorizedOrders.todayDPR);
         } else if (dpDate < todayUTC) {
           categorizedOrders.pastDPR.push(entry);
         } else if (dpDate >= tomorrowUTC) {
@@ -3831,7 +3838,7 @@ export const getProductionLogByProduct = async (req, res) => {
 };
 
 
-export const getUpdatedProductProduction = async (req, res) => {
+export const getUpdatedProductProduction1 = async (req, res) => {
   try {
     // Extract job_order and product_id from request body or query parameters
     const { job_order, product_id } = req.query;
@@ -3925,6 +3932,142 @@ export const getUpdatedProductProduction = async (req, res) => {
     });
   }
 };
+
+// ────────────────────────────────────────────────────────────────
+
+export const getUpdatedProductProduction = async (req, res) => {
+  try {
+    const { job_order, product_id } = req.query;               // 1️⃣ validate IDs
+    if (!job_order || !product_id) {
+      return res.status(400).json({ success: false, message: 'Missing job_order or product_id' });
+    }
+    if (!mongoose.Types.ObjectId.isValid(job_order) || !mongoose.Types.ObjectId.isValid(product_id)) {
+      return res.status(400).json({ success: false, message: 'Invalid ObjectId' });
+    }
+
+    // 2️⃣ Pull the one DailyProduction doc **with exactly the same populates**
+    //    used inside getJobOrdersByDate
+    const dp = await DailyProduction.findOne({
+      job_order,
+      'products.product_id': product_id,
+    })
+      .populate({
+        path: 'job_order',
+        select: 'job_order_id sales_order_number batch_number date status created_by updated_by createdAt updatedAt products work_order',
+        populate: [
+          {
+            path: 'work_order',
+            select: 'project_id work_order_number products client_id',
+            populate: [
+              { path: 'project_id', select: 'name' },
+              { path: 'client_id', select: 'name' },
+            ],
+          },
+          {
+            // machine name for every product inside JobOrder.products
+            path: 'products.machine_name',
+            select: 'name',
+          },
+        ],
+      })
+      .populate({
+        // details for the **DailyProduction** products array
+        path: 'products.product_id',
+        select: 'material_code description plant',
+        populate: { path: 'plant', select: 'plant_name' },
+      })
+      .lean();
+
+    if (!dp) {
+      return res.status(404).json({
+        success: false,
+        message: `No production data for job_order:${job_order} & product_id:${product_id}`,
+      });
+    }
+
+    // 3️⃣ Grab the first (and only) matching product in DailyProduction.products
+    const dpProduct = dp.products.find(p => p.product_id._id.toString() === product_id);
+    if (!dpProduct) {
+      return res.status(404).json({ success: false, message: 'Product not found in DailyProduction' });
+    }
+
+    const jobOrder = dp.job_order;
+    const workOrder  = jobOrder?.work_order ?? null;
+
+    // locate the **same product entry** inside JobOrder.products + WorkOrder.products
+    const jobOrderProduct  = jobOrder?.products?.find(p => p.product.toString() === product_id) || {};
+    const workOrderProduct = workOrder?.products?.find(p => p.product_id.toString() === product_id) || {};
+
+    // latest start/stop times (same logic you used before)
+    let started_at = null, stopped_at = null;
+    if (dp.production_logs?.length) {
+      const startLog = dp.production_logs.filter(l => l.action === 'Start')
+                                         .sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp))[0];
+      const stopLog  = dp.production_logs.filter(l => l.action === 'Stop')
+                                         .sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp))[0];
+      started_at = startLog?.timestamp ?? null;
+      stopped_at = stopLog?.timestamp ?? null;
+    }
+
+    // 4️⃣ Build the exact same object shape you already emit elsewhere
+    const responseObj = {
+      _id:            jobOrder?._id || dp._id,
+      work_order: {
+        _id:               workOrder?._id || null,
+        work_order_number: workOrder?.work_order_number || 'N/A',
+        project_name:      workOrder?.project_id?.name       || 'N/A',
+        client_name:       workOrder?.client_id?.name        || 'N/A',
+      },
+      sales_order_number: jobOrder?.sales_order_number || 'N/A',
+      batch_number:       jobOrder?.batch_number       || 'N/A',
+      date:               jobOrder?.date              || { from: null, to: null },
+      status:             jobOrder?.status            || dp.status,
+      created_by:         jobOrder?.created_by        || dp.created_by,
+      updated_by:         jobOrder?.updated_by        || dp.updated_by,
+      createdAt:          jobOrder?.createdAt         || dp.createdAt,
+      updatedAt:          jobOrder?.updatedAt         || dp.updatedAt,
+      job_order:          jobOrder?._id               || dp._id,
+      job_order_id:       jobOrder?.job_order_id,
+      product_id:         dpProduct.product_id._id,
+      plant_name:         dpProduct.product_id.plant?.plant_name || 'N/A',
+      machine_name:       jobOrderProduct?.machine_name?.name    || 'N/A',
+      material_code:      dpProduct.product_id.material_code     || 'N/A',
+      description:        dpProduct.product_id.description       || 'N/A',
+      po_quantity:        workOrderProduct?.po_quantity          || 0,
+      planned_quantity:   jobOrderProduct?.planned_quantity      || 0,
+      scheduled_date:     jobOrderProduct?.scheduled_date        || dp.date,
+      achieved_quantity:  dpProduct.achieved_quantity            || 0,
+      rejected_quantity:  dpProduct.rejected_quantity            || 0,
+      recycled_quantity:  dpProduct.recycled_quantity            || 0,
+      started_at,
+      stopped_at,
+      submitted_by:       dp.submitted_by || null,
+      daily_production: {
+        _id:          dp._id,
+        status:       dp.status,
+        date:         dp.date,
+        qc_checked_by:dp.qc_checked_by,
+        downtime:     dp.downtime,
+        created_by:   dp.created_by,
+        updated_by:   dp.updated_by,
+        createdAt:    dp.createdAt,
+        updatedAt:    dp.updatedAt,
+      },
+      latestDate: dp.date,
+    };
+
+    return res.status(200).json({
+      success: true,
+      message: 'Production data fetched successfully.',
+      data:    responseObj,
+    });
+
+  } catch (err) {
+    console.error('Error fetching production logs:', err);
+    return res.status(500).json({ success: false, message: 'Internal Server Error', error: err.message });
+  }
+};
+
 
 
 
