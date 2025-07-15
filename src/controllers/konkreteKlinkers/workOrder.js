@@ -101,7 +101,7 @@ const createWorkOrderSchema = z.object({
       product_id: z.string().refine((val) => mongoose.isValidObjectId(val), {
         message: 'Invalid product ID',
       }),
-      uom: z.enum(['sqmt', 'nos', 'metre'], { message: 'UOM must be "sqmt" or "nos"' }),
+      uom: z.enum(['sqmt', 'nos', 'meter'], { message: 'UOM must be "sqmt" or "nos"' }),
       po_quantity: z.number().min(0, 'PO quantity must be non-negative'),
       qty_in_nos: z.number().min(0, 'Original square meters must be non-negative').refine((val) => !isNaN(val), { message: 'qty_in_nos cannot be NaN' }),      // plant_code: z.string().refine((val) => mongoose.isValidObjectId(val), {
       //   message: 'Invalid plant code',
@@ -600,8 +600,8 @@ export const createWorkOrder = async (req, res) => {
         // Normalize submitted UOM for validation
         const uomLower = product.uom.toLowerCase();
         const uomMap = {
-          sqmt: 'square metre',
-          metre: 'metre',
+          sqmt: 'square meter',
+          meter: 'meter',
           nos: 'nos',
         };
         const normalizedUOM = uomMap[uomLower] || uomLower;
@@ -614,8 +614,8 @@ export const createWorkOrder = async (req, res) => {
         }
 
         // Handle UOM
-        if (uomLower === 'sqmt' || uomLower === 'metre') {
-          const areaKey = uomLower === 'sqmt' ? 'Square Metre/No' : 'Metre/No';
+        if (uomLower === 'sqmt' || uomLower === 'meter') {
+          const areaKey = uomLower === 'sqmt' ? 'Square Meter/No' : 'Meter/No';
           const areaValue = parseFloat(productDetails.areas?.get(areaKey) || '0');
           if (!areaValue || areaValue <= 0) {
             throw new Error(
@@ -2067,8 +2067,8 @@ export const updateWorkOrder = async (req, res) => {
           // Normalize UOM and determine area
           const uomLower = product.uom.toLowerCase();
           const uomMap = {
-            sqmt: 'Square Metre/No',
-            metre: 'Metre/No',
+            sqmt: 'Square Meter/No',
+            meter: 'Meter/No',
             nos: null, // No area conversion for 'nos'
           };
           const areaKey = uomMap[uomLower];

@@ -224,17 +224,17 @@ const productSchema = Joi.object({
             'any.required': 'Description is required',
         }),
     uom: Joi.array()
-        .items(Joi.string().valid('Square Metre/No', 'Metre/No'))
+        .items(Joi.string().valid('Square Meter/No', 'Meter/No'))
         .min(1)
         .required()
         .messages({
             'array.min': 'At least one UOM must be provided',
             'array.base': 'UOM must be an array of valid values',
             'any.required': 'UOM is required',
-            'string.valid': 'UOM must be either "Square Metre/No" or "Metre/No"',
+            'string.valid': 'UOM must be either "Square Meter/No" or "Meter/No"',
         }),
     areas: Joi.object()
-        .pattern(Joi.string().valid('Square Metre/No', 'Metre/No'), Joi.number().required())
+        .pattern(Joi.string().valid('Square Meter/No', 'Meter/No'), Joi.number().required())
         .required()
         .custom((value, helpers) => {
             const uom = helpers.state.ancestors[0].uom;
@@ -388,16 +388,16 @@ const updateProductSchema = Joi.object({
     //     }),
 
     uom: Joi.array()
-        .items(Joi.string().valid('Square Metre/No', 'Metre/No')) // Allow only these values
+        .items(Joi.string().valid('Square Meter/No', 'Meter/No')) // Allow only these values
         .min(1) // Ensure at least one UOM is provided if uom is updated
         .optional()
         .messages({
             'array.min': 'At least one UOM must be provided if updating UOM',
             'array.base': 'UOM must be an array of valid values',
-            'string.valid': 'UOM must be either "Square Metre/No" or "Metre/No"',
+            'string.valid': 'UOM must be either "Square Meter/No" or "Meter/No"',
         }),
-    area: Joi.number().when('uom', {
-        is: 'Square Metre',
+    areas: Joi.number().when('uom', {
+        is: 'Square Meter',
         then: Joi.number()
             .required()
             .messages({

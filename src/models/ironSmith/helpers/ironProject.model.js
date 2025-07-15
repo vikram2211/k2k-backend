@@ -10,7 +10,7 @@ const projectSchema = new mongoose.Schema(
 
     client: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: 'Client', // Reference to the Client schema
+      ref: 'ironClient', // Reference to the Client schema
       required: true,
     },
     address: {

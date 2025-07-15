@@ -240,7 +240,7 @@ const productSchema = new mongoose.Schema(
         },
         uom: {
             type: [String],
-            enum: ['Square Metre/No', 'Metre/No'],
+            enum: ['Square Meter/No', 'Meter/No'],
             required: true,
             validate: {
                 validator: (value) => value.length > 0,
