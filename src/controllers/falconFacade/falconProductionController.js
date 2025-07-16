@@ -134,7 +134,7 @@ const getProductionsByProcess = asyncHandler(async (req, res) => {
                     name: '$productDetails.name', // Product name from falconProduct
                     po_quantity: '$product.po_quantity',
                     achieved_quantity: '$product.achieved_quantity',
-                    // rejected_quantity: '$product.rejected_quantity',
+                    rejected_quantity: '$product.rejected_quantity',
                     // recycled_quantity: '$product.recycled_quantity'
                     // },
                     process_name: 1,

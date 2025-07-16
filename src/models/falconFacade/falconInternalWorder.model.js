@@ -8,11 +8,11 @@ const processSchema = new mongoose.Schema({
     },
     file_url: {
         type: String,
-        required: true,
+        required: false,
     },
     remarks: {
         type: String,
-        required: true,
+        required: false,
         trim: true,
     },
 });
@@ -26,11 +26,11 @@ const semifinishedDetailSchema = new mongoose.Schema({
     },
     file_url: {
         type: String,
-        required: true,
+        required: false,
     },
     remarks: {
         type: String,
-        required: true,
+        required: false,
         trim: true,
     },
     processes: [processSchema],
@@ -77,7 +77,7 @@ const falconInternalWorkOrderSchema = new mongoose.Schema(
         },
         sales_order_no: {
             type: String,
-            required: true,
+            required: false,
             trim: true,
         },
         date: {
