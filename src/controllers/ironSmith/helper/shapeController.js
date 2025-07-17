@@ -183,6 +183,7 @@ const getAllIronShapes = asyncHandler(async (req, res) => {
   const shapes = await ironShape
     .find({ isDeleted: false })
     .populate('created_by', 'username email')
+    .populate('dimension', 'dimension_name')
     .lean();
 
   if (!shapes || shapes.length === 0) {
@@ -205,6 +206,7 @@ const getIronShapeById = asyncHandler(async (req, res) => {
   const shape = await ironShape
     .findOne({ _id: shapeId, isDeleted: false })
     .populate('created_by', 'username email')
+    .populate('dimension', 'dimension_name') 
     .lean();
 
   if (!shape) {

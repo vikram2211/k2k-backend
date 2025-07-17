@@ -3,9 +3,9 @@ import mongoose from "mongoose";
 const shapeSchema = new mongoose.Schema(
   {
     dimension: {
-      type: String,
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'ironDimension',
       required: true,
-      trim: true,
     },
     description: {
       type: String,
@@ -16,6 +16,7 @@ const shapeSchema = new mongoose.Schema(
       type: String,
       required: true,
       trim: true,
+      unique:true
     },
     file: {
       file_name: {

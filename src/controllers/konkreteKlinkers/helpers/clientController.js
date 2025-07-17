@@ -74,16 +74,57 @@ const updateClient = asyncHandler(async (req, res, next) => {
 
   return res.status(200).json(new ApiResponse(200, client, 'Client updated successfully'));
 });
+
 // Fetch all clients
+// const getAllClients = asyncHandler(async (req, res, next) => {
+//   const clients = await Client.find({ isDeleted: false }).populate('created_by', 'username email');
+
+//   if (!clients || clients.length === 0) {
+//     return next(new ApiError(404, 'No active clients available'));
+//   }
+
+//   return res.status(200).json(new ApiResponse(200, clients, 'Clients fetched successfully'));
+// });
+
+
+// Fetch all clients with pagination
 const getAllClients = asyncHandler(async (req, res, next) => {
-  const clients = await Client.find({ isDeleted: false }).populate('created_by', 'username email');
+  // Default values
+  const page = parseInt(req.query.page) || 1;
+  const limit = parseInt(req.query.limit) || 10;
+
+  const skip = (page - 1) * limit;
+
+  // Count total
+  const totalClients = await Client.countDocuments({ isDeleted: false });
+
+  // Fetch paginated clients
+  const clients = await Client.find({ isDeleted: false })
+    .populate('created_by', 'username email')
+    .skip(skip)
+    .limit(limit)
+    .sort({ createdAt: -1 }); // Optional: Sort newest first
 
   if (!clients || clients.length === 0) {
     return next(new ApiError(404, 'No active clients available'));
   }
 
-  return res.status(200).json(new ApiResponse(200, clients, 'Clients fetched successfully'));
+  // Respond with pagination metadata
+  return res.status(200).json(
+    new ApiResponse(200, {
+      clients,
+      pagination: {
+        total: totalClients,
+        page,
+        limit,
+        totalPages: Math.ceil(totalClients / limit),
+      },
+    }, 'Clients fetched successfully')
+  );
 });
+
+
+////////////////////////////////////////////////////////////////////////////////////////////
 
 // Fetch client by ID
 const getClientById = asyncHandler(async (req, res, next) => {
