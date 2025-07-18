@@ -569,6 +569,7 @@ export const createWorkOrder = async (req, res) => {
   try {
     // 1. Parse form-data
     const bodyData = req.body;
+    console.log("bodyData",bodyData);
     const userId = req.user._id.toString();
 
     // 2. Parse stringified fields if needed

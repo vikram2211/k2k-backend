@@ -102,6 +102,7 @@ const createIronWorkOrder = asyncHandler(async (req, res) => {
 
     // 2. Parse form-data
     const bodyData = req.body;
+    console.log("bodyData",bodyData);
     const userId = req.user?._id?.toString();
 
     // Validate userId
@@ -192,6 +193,7 @@ const createIronWorkOrder = asyncHandler(async (req, res) => {
                 if (fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath);
             });
         }
+        console.log("errorrrrr",error.details);
         throw new ApiError(400, 'Validation failed for work order creation', error.details);
     }
 
@@ -277,57 +279,160 @@ const createIronWorkOrder = asyncHandler(async (req, res) => {
 //////////////////GET API - To get all the iron work order data
 
 
+// const getAllIronWorkOrders = asyncHandler(async (req, res) => {
+//     // 1. Validation schema for query parameters
+//     const querySchema = Joi.object({
+//         page: Joi.number().integer().min(1).default(1).messages({
+//             'number.base': 'Page must be a number',
+//             'number.min': 'Page must be at least 1',
+//         }),
+//         limit: Joi.number().integer().min(1).max(100).default(10).messages({
+//             'number.base': 'Limit must be a number',
+//             'number.min': 'Limit must be at least 1',
+//             'number.max': 'Limit cannot exceed 100',
+//         }),
+//         sortBy: Joi.string()
+//             .valid('workOrderDate', 'createdAt', 'updatedAt')
+//             .default('createdAt')
+//             .messages({
+//                 'any.only': 'SortBy must be one of workOrderDate, createdAt, updatedAt',
+//             }),
+//         sortOrder: Joi.string()
+//             .valid('asc', 'desc')
+//             .default('desc')
+//             .messages({
+//                 'any.only': 'SortOrder must be asc or desc',
+//             }),
+//     });
+
+//     // 2. Validate query parameters
+//     const { error, value } = querySchema.validate(req.query, { abortEarly: false });
+//     if (error) {
+//         throw new ApiError(400, 'Invalid query parameters', error.details);
+//     }
+
+//     const { page, limit, sortBy, sortOrder } = value;
+
+//     // 3. Validate user authentication
+//     const userId = req.user?._id?.toString();
+//     if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
+//         throw new ApiError(401, 'Invalid or missing user ID in request');
+//     }
+
+//     // 4. Build query
+//     const query = {};
+
+//     // 5. Calculate pagination
+//     const skip = (page - 1) * limit;
+
+//     // 6. Build sort options
+//     const sortOptions = {};
+//     sortOptions[sortBy] = sortOrder === 'asc' ? 1 : -1;
+
+//     // 7. Fetch work orders with pagination, sorting, and population
+//     const [workOrders, totalCount] = await Promise.all([
+//         ironWorkOrder
+//             .find(query)
+//             .sort(sortOptions)
+//             .skip(skip)
+//             .limit(limit)
+//             .populate({
+//                 path: 'clientId',
+//                 select: 'name address',
+//                 match: { isDeleted: false },
+//             })
+//             .populate({
+//                 path: 'projectId',
+//                 select: 'name address',
+//                 match: { isDeleted: false },
+//             })
+//             .populate({
+//                 path: 'products.shapeId',
+//                 select: 'name',
+//                 match: { isDeleted: false },
+//             })
+//             .populate({
+//                 path: 'created_by',
+//                 select: 'username email',
+//             })
+//             .populate({
+//                 path: 'updated_by',
+//                 select: 'username email',
+//             })
+//             .lean(),
+//         ironWorkOrder.countDocuments(query),
+//     ]);
+
+//     // 8. Format timestamps to IST
+//     const formatDateToIST = (data) => {
+//         const convertToIST = (date) => {
+//             if (!date) return null;
+//             return new Date(date).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
+//         };
+//         return data.map((item) => ({
+//             ...item,
+//             workOrderDate: convertToIST(item.workOrderDate),
+//             createdAt: convertToIST(item.createdAt),
+//             updatedAt: convertToIST(item.createdAt),
+//             products: item.products.map((p) => ({
+//                 ...p,
+//                 deliveryDate: convertToIST(p.deliveryDate),
+//             })),
+//             files: item.files.map((f) => ({
+//                 ...f,
+//                 uploaded_at: convertToIST(f.uploaded_at),
+//             })),
+//         }));
+//     };
+
+//     const formattedWorkOrders = formatDateToIST(workOrders);
+
+//     // 9. Prepare pagination metadata
+//     const pagination = {
+//         currentPage: page,
+//         totalPages: Math.ceil(totalCount / limit),
+//         totalItems: totalCount,
+//         limit,
+//     };
+
+//     // 10. Return response
+//     return res.status(200).json(
+//         new ApiResponse(
+//             200,
+//             {
+//                 workOrders: formattedWorkOrders,
+//                 pagination,
+//             },
+//             'Work orders retrieved successfully'
+//         )
+//     );
+// });
+
+
+
+
 const getAllIronWorkOrders = asyncHandler(async (req, res) => {
-    // 1. Validation schema for query parameters
+    // 1. Validate query params
     const querySchema = Joi.object({
-        page: Joi.number().integer().min(1).default(1).messages({
-            'number.base': 'Page must be a number',
-            'number.min': 'Page must be at least 1',
-        }),
-        limit: Joi.number().integer().min(1).max(100).default(10).messages({
-            'number.base': 'Limit must be a number',
-            'number.min': 'Limit must be at least 1',
-            'number.max': 'Limit cannot exceed 100',
-        }),
-        sortBy: Joi.string()
-            .valid('workOrderDate', 'createdAt', 'updatedAt')
-            .default('createdAt')
-            .messages({
-                'any.only': 'SortBy must be one of workOrderDate, createdAt, updatedAt',
-            }),
-        sortOrder: Joi.string()
-            .valid('asc', 'desc')
-            .default('desc')
-            .messages({
-                'any.only': 'SortOrder must be asc or desc',
-            }),
+        page: Joi.number().integer().min(1).default(1),
+        limit: Joi.number().integer().min(1).max(100).default(10),
+        sortBy: Joi.string().valid('workOrderDate', 'createdAt', 'updatedAt').default('createdAt'),
+        sortOrder: Joi.string().valid('asc', 'desc').default('desc'),
     });
 
-    // 2. Validate query parameters
     const { error, value } = querySchema.validate(req.query, { abortEarly: false });
     if (error) {
         throw new ApiError(400, 'Invalid query parameters', error.details);
     }
 
     const { page, limit, sortBy, sortOrder } = value;
-
-    // 3. Validate user authentication
-    const userId = req.user?._id?.toString();
-    if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
-        throw new ApiError(401, 'Invalid or missing user ID in request');
-    }
-
-    // 4. Build query
-    const query = {};
-
-    // 5. Calculate pagination
     const skip = (page - 1) * limit;
 
-    // 6. Build sort options
-    const sortOptions = {};
-    sortOptions[sortBy] = sortOrder === 'asc' ? 1 : -1;
+    // 2. Build query and sort options
+    const query = {}; // you can customize filters here
+    const sortOptions = { [sortBy]: sortOrder === 'asc' ? 1 : -1 };
 
-    // 7. Fetch work orders with pagination, sorting, and population
+    // 3. Fetch data & total count
     const [workOrders, totalCount] = await Promise.all([
         ironWorkOrder
             .find(query)
@@ -361,17 +466,18 @@ const getAllIronWorkOrders = asyncHandler(async (req, res) => {
         ironWorkOrder.countDocuments(query),
     ]);
 
-    // 8. Format timestamps to IST
+    if (!workOrders || workOrders.length === 0) {
+        throw new ApiError(404, 'No work orders available');
+    }
+
+    // 4. Format dates
     const formatDateToIST = (data) => {
-        const convertToIST = (date) => {
-            if (!date) return null;
-            return new Date(date).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
-        };
+        const convertToIST = (date) => date ? new Date(date).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }) : null;
         return data.map((item) => ({
             ...item,
             workOrderDate: convertToIST(item.workOrderDate),
             createdAt: convertToIST(item.createdAt),
-            updatedAt: convertToIST(item.createdAt),
+            updatedAt: convertToIST(item.updatedAt),
             products: item.products.map((p) => ({
                 ...p,
                 deliveryDate: convertToIST(p.deliveryDate),
@@ -385,26 +491,21 @@ const getAllIronWorkOrders = asyncHandler(async (req, res) => {
 
     const formattedWorkOrders = formatDateToIST(workOrders);
 
-    // 9. Prepare pagination metadata
-    const pagination = {
-        currentPage: page,
-        totalPages: Math.ceil(totalCount / limit),
-        totalItems: totalCount,
-        limit,
-    };
-
-    // 10. Return response
+    // 5. Send response
     return res.status(200).json(
-        new ApiResponse(
-            200,
-            {
-                workOrders: formattedWorkOrders,
-                pagination,
+        new ApiResponse(200, {
+            workOrders: formattedWorkOrders,
+            pagination: {
+                total: totalCount,
+                page,
+                limit,
+                totalPages: Math.ceil(totalCount / limit),
             },
-            'Work orders retrieved successfully'
-        )
+        }, 'Work orders retrieved successfully')
     );
 });
+
+
 
 
 //////////////////API to get work order by id -

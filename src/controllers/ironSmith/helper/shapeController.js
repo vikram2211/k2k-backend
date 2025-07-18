@@ -179,11 +179,35 @@ const updateIronShape = asyncHandler(async (req, res) => {
   });
 
 // Fetch all shapes
+// const getAllIronShapes = asyncHandler(async (req, res) => {
+//   const shapes = await ironShape
+//     .find({ isDeleted: false })
+//     .populate('created_by', 'username email')
+//     .populate('dimension', 'dimension_name')
+//     .lean();
+
+//   if (!shapes || shapes.length === 0) {
+//     throw new ApiError(404, 'No non-deleted shapes available');
+//   }
+
+//   const formattedShapes = formatDateToIST(shapes);
+
+//   return sendResponse(res, new ApiResponse(200, formattedShapes, 'Shapes fetched successfully'));
+// });
+
+
 const getAllIronShapes = asyncHandler(async (req, res) => {
-  const shapes = await ironShape
-    .find({ isDeleted: false })
+  const page = parseInt(req.query.page) || 1;
+  const limit = parseInt(req.query.limit) || 10;
+  const skip = (page - 1) * limit;
+
+  const totalShapes = await ironShape.countDocuments({ isDeleted: false });
+
+  const shapes = await ironShape.find({ isDeleted: false })
     .populate('created_by', 'username email')
     .populate('dimension', 'dimension_name')
+    .skip(skip)
+    .limit(limit)
     .lean();
 
   if (!shapes || shapes.length === 0) {
@@ -192,8 +216,21 @@ const getAllIronShapes = asyncHandler(async (req, res) => {
 
   const formattedShapes = formatDateToIST(shapes);
 
-  return sendResponse(res, new ApiResponse(200, formattedShapes, 'Shapes fetched successfully'));
+  return sendResponse(
+    res,
+    new ApiResponse(200, {
+      shapes: formattedShapes,
+      pagination: {
+        total: totalShapes,
+        page,
+        limit,
+        totalPages: Math.ceil(totalShapes / limit),
+      },
+    }, 'Shapes fetched successfully')
+  );
 });
+
+
 
 // Fetch shape by ID
 const getIronShapeById = asyncHandler(async (req, res) => {
