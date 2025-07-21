@@ -86,13 +86,22 @@ const updateProject = asyncHandler(async (req, res, next) => {
 
 // Fetch all projects
 const getAllProjects = asyncHandler(async (req, res, next) => {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
+
+    // Count total projects that meet the criteria
+    const totalProjects = await Project.countDocuments({ isDeleted: false });
     const projects = await Project.find({ isDeleted: false })
         .populate({
             path: 'client',
             select: 'name address',
             match: { isDeleted: false }, // Only include non-deleted clients
         })
-        .populate('created_by', 'username email');
+        .populate('created_by', 'username email')
+        .skip(skip)
+        .limit(limit)
+        .sort({ createdAt: -1 });;
 
     // Filter out projects where client is null (i.e., client was deleted)
     const validProjects = projects.filter((project) => project.client !== null);
@@ -101,7 +110,15 @@ const getAllProjects = asyncHandler(async (req, res, next) => {
         return next(new ApiError(404, 'No active projects with non-deleted clients available'));
     }
 
-    return res.status(200).json(new ApiResponse(200, validProjects, 'Projects fetched successfully'));
+    return res.status(200).json(new ApiResponse(200,{
+        projects: validProjects,
+        pagination: {
+            total: totalProjects,
+            page,
+            limit,
+            totalPages: Math.ceil(totalProjects / limit),
+        },
+    }, 'Projects fetched successfully'));
 });
 
 // Fetch project by ID

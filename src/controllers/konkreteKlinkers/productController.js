@@ -324,13 +324,25 @@ const createProduct = asyncHandler(async (req, res, next) => {
 });
 
 const getAllProducts = asyncHandler(async (req, res, next) => {
+    // Default values for pagination
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
+
+    // Count total products that meet the criteria
+    const totalProducts = await Product.countDocuments({ isDeleted: false });
+
+
     const products = await Product.find({ isDeleted: false })
         .populate({
             path: 'plant',
             select: 'plant_name plant_code',
             match: { isDeleted: false }, // Only include non-deleted plants
         })
-        .populate('created_by', 'username email');
+        .populate('created_by', 'username email')
+        .skip(skip)
+        .limit(limit)
+        .sort({ createdAt: -1 });;
 
     // Filter out products where plant is null (i.e., plant was deleted)
     const validProducts = products.filter((product) => product.plant !== null);
@@ -339,7 +351,15 @@ const getAllProducts = asyncHandler(async (req, res, next) => {
         return next(new ApiError(404, 'No active products with non-deleted plants available'));
     }
 
-    return res.status(200).json(new ApiResponse(200, validProducts, 'Products fetched successfully'));
+    return res.status(200).json(new ApiResponse(200, {
+        products: validProducts,
+        pagination: {
+            total: totalProducts,
+            page,
+            limit,
+            totalPages: Math.ceil(totalProducts / limit),
+        },
+    }, 'Products fetched successfully'));
 });
 
 // **Get Product by ID**
