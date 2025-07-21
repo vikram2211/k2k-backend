@@ -14,6 +14,7 @@ import { falconProduct } from '../../models/falconFacade/helpers/falconProduct.m
 import { Employee } from "../../models/employee.model.js";
 import { falconProduction } from '../../models/falconFacade/falconProduction.model.js';
 import { ApiResponse } from '../../utils/ApiResponse.js';
+import { ApiError } from '../../utils/ApiError.js';
 
 
 // Helper function to format date to DD-MM-YYYY
@@ -801,6 +802,39 @@ const createInternalWorkOrder = asyncHandler(async (req, res) => {
             filesMap[fieldName] = file;
         });
     }
+
+
+
+
+    for (const product of bodyData.products) {
+        const totalQuantityUsed = await falconInternalWorkOrder.aggregate([
+            { $match: { job_order_id: job_order_id } },
+            { $unwind: "$products" },
+            { $match: { "products.product": product.product } },
+            { $group: { _id: "$products.product", totalQuantity: { $sum: "$products.po_quantity" } } }
+        ]);
+
+        const originalProduct = jobOrder.products.find(p => p.product.toString() === product.product);
+        if (!originalProduct) {
+            return res.status(400).json({
+                success: false,
+                message: `Product ${product.product} not found in the job order.`
+            });
+        }
+
+        const originalQuantity = originalProduct.po_quantity;
+        const totalQuantityUsedForProduct = totalQuantityUsed.length > 0 ? totalQuantityUsed[0].totalQuantity : 0;
+        const remainingQuantity = originalQuantity - totalQuantityUsedForProduct;
+
+        if (product.po_quantity > remainingQuantity) {
+            return res.status(400).json({
+                success: false,
+                message: `Quantity exceeds the remaining available quantity for product ${product.product}. Remaining quantity: ${remainingQuantity}`
+            });
+        }
+    }
+
+
 
     // 7. Construct the internal work order data
     const jobOrderData = {
