@@ -412,103 +412,294 @@ const createIronWorkOrder = asyncHandler(async (req, res) => {
 
 
 const getAllIronWorkOrders = asyncHandler(async (req, res) => {
-    // 1. Validate query params
+    // 1. Validation schema for query parameters
     const querySchema = Joi.object({
-        page: Joi.number().integer().min(1).default(1),
-        limit: Joi.number().integer().min(1).max(100).default(10),
-        sortBy: Joi.string().valid('workOrderDate', 'createdAt', 'updatedAt').default('createdAt'),
-        sortOrder: Joi.string().valid('asc', 'desc').default('desc'),
+      page: Joi.number().integer().min(1).default(1).messages({
+        'number.base': 'Page must be a number',
+        'number.min': 'Page must be at least 1',
+      }),
+      limit: Joi.number().integer().min(1).max(100).default(10).messages({
+        'number.base': 'Limit must be a number',
+        'number.min': 'Limit must be at least 1',
+        'number.max': 'Limit cannot exceed 100',
+      }),
+      sortBy: Joi.string()
+        .valid('workOrderNumber', 'clientId.name', 'projectId.name', 'createdAt', 'updatedAt', 'status')
+        .default('createdAt')
+        .messages({
+          'any.only': 'SortBy must be one of workOrderNumber, clientId.name, projectId.name, createdAt, updatedAt, status',
+        }),
+      sortOrder: Joi.string()
+        .valid('asc', 'desc')
+        .default('desc')
+        .messages({
+          'any.only': 'SortOrder must be asc or desc',
+        }),
+      search: Joi.string().allow('').default('').messages({
+        'string.base': 'Search must be a string',
+      }),
+      fromDate: Joi.string().allow('').default('').messages({
+        'string.base': 'FromDate must be a string',
+      }),
+      toDate: Joi.string().allow('').default('').messages({
+        'string.base': 'ToDate must be a string',
+      }),
     });
-
+  
+    // 2. Validate query parameters
     const { error, value } = querySchema.validate(req.query, { abortEarly: false });
     if (error) {
-        throw new ApiError(400, 'Invalid query parameters', error.details);
+      throw new ApiError(400, 'Invalid query parameters', error.details);
     }
-
-    const { page, limit, sortBy, sortOrder } = value;
+  
+    const { page, limit, sortBy, sortOrder, search, fromDate, toDate } = value;
+  
+    // 3. Validate user authentication
+    const userId = req.user?._id?.toString();
+    if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
+      throw new ApiError(401, 'Invalid or missing user ID in request');
+    }
+  
+    // 4. Build query
+    const query = {};
+    if (search) {
+      query.$or = [
+        { workOrderNumber: { $regex: search, $options: 'i' } },
+        { 'clientId.name': { $regex: search, $options: 'i' } },
+        { 'projectId.name': { $regex: search, $options: 'i' } },
+        { status: { $regex: search, $options: 'i' } },
+      ];
+    }
+    if (fromDate || toDate) {
+      query.workOrderDate = {};
+      if (fromDate) query.workOrderDate.$gte = new Date(fromDate);
+      if (toDate) query.workOrderDate.$lte = new Date(toDate);
+    }
+  
+    // 5. Calculate pagination
     const skip = (page - 1) * limit;
-
-    // 2. Build query and sort options
-    const query = {}; // you can customize filters here
-    const sortOptions = { [sortBy]: sortOrder === 'asc' ? 1 : -1 };
-
-    // 3. Fetch data & total count
+  
+    // 6. Build sort options
+    const sortOptions = {};
+    sortOptions[sortBy] = sortOrder === 'asc' ? 1 : -1;
+  
+    // 7. Fetch work orders with pagination, sorting, and population
     const [workOrders, totalCount] = await Promise.all([
-        ironWorkOrder
-            .find(query)
-            .sort(sortOptions)
-            .skip(skip)
-            .limit(limit)
-            .populate({
-                path: 'clientId',
-                select: 'name address',
-                match: { isDeleted: false },
-            })
-            .populate({
-                path: 'projectId',
-                select: 'name address',
-                match: { isDeleted: false },
-            })
-            .populate({
-                path: 'products.shapeId',
-                select: 'name',
-                match: { isDeleted: false },
-            })
-            .populate({
-                path: 'created_by',
-                select: 'username email',
-            })
-            .populate({
-                path: 'updated_by',
-                select: 'username email',
-            })
-            .lean(),
-        ironWorkOrder.countDocuments(query),
+      ironWorkOrder
+        .find(query)
+        .sort(sortOptions)
+        .skip(skip)
+        .limit(limit)
+        .populate({
+          path: 'clientId',
+          select: 'name address',
+        //   match: { isDeleted: false },
+        })
+        .populate({
+          path: 'projectId',
+          select: 'name address',
+        //   match: { isDeleted: false },
+        })
+        .populate({
+          path: 'products.shapeId',
+          select: 'name',
+          match: { isDeleted: false },
+        })
+        .populate({
+          path: 'created_by',
+          select: 'username email',
+        })
+        .populate({
+          path: 'updated_by',
+          select: 'username email',
+        })
+        .lean(),
+      ironWorkOrder.countDocuments(query),
     ]);
-
-    if (!workOrders || workOrders.length === 0) {
-        throw new ApiError(404, 'No work orders available');
-    }
-
-    // 4. Format dates
+  
+    // 8. Format timestamps to IST
     const formatDateToIST = (data) => {
-        const convertToIST = (date) => date ? new Date(date).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }) : null;
-        return data.map((item) => ({
-            ...item,
-            workOrderDate: convertToIST(item.workOrderDate),
-            createdAt: convertToIST(item.createdAt),
-            updatedAt: convertToIST(item.updatedAt),
-            products: item.products.map((p) => ({
-                ...p,
-                deliveryDate: convertToIST(p.deliveryDate),
-            })),
-            files: item.files.map((f) => ({
-                ...f,
-                uploaded_at: convertToIST(f.uploaded_at),
-            })),
-        }));
+      const convertToIST = (date) => {
+        if (!date) return null;
+        return new Date(date).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
+      };
+      return data.map((item) => ({
+        ...item,
+        workOrderDate: convertToIST(item.workOrderDate),
+        createdAt: convertToIST(item.createdAt),
+        updatedAt: convertToIST(item.createdAt),
+        products: item.products.map((p) => ({
+          ...p,
+          deliveryDate: convertToIST(p.deliveryDate),
+        })),
+        files: item.files.map((f) => ({
+          ...f,
+          uploaded_at: convertToIST(f.uploaded_at),
+        })),
+      }));
     };
-
+  
     const formattedWorkOrders = formatDateToIST(workOrders);
-
-    // 5. Send response
+  
+    // 9. Prepare pagination metadata
+    const pagination = {
+      total: totalCount,
+      page,
+      limit,
+      totalPages: Math.ceil(totalCount / limit),
+    };
+  
+    // 10. Return response
     return res.status(200).json(
-        new ApiResponse(200, {
-            workOrders: formattedWorkOrders,
-            pagination: {
-                total: totalCount,
-                page,
-                limit,
-                totalPages: Math.ceil(totalCount / limit),
-            },
-        }, 'Work orders retrieved successfully')
+      new ApiResponse(
+        200,
+        {
+          workOrders: formattedWorkOrders,
+          pagination,
+        },
+        'Work orders retrieved successfully'
+      )
     );
-});
+  });
 
 
 
 
 //////////////////API to get work order by id -
+// const getIronWorkOrderById = asyncHandler(async (req, res) => {
+//     // 1. Validation schema for params
+//     const paramsSchema = Joi.object({
+//         workOrderId: Joi.string()
+//             .required()
+//             .custom((value, helpers) => {
+//                 if (!mongoose.Types.ObjectId.isValid(value)) {
+//                     return helpers.error('any.invalid', { message: `Work order ID (${value}) is not a valid ObjectId` });
+//                 }
+//                 return value;
+//             }, 'ObjectId validation'),
+//     });
+
+//     // 2. Validate params
+//     const { error, value } = paramsSchema.validate(req.params, { abortEarly: false });
+//     if (error) {
+//         throw new ApiError(400, 'Invalid work order ID', error.details);
+//     }
+
+//     const { workOrderId } = value;
+
+//     // 3. Validate user authentication
+//     const userId = req.user?._id?.toString();
+//     if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
+//         throw new ApiError(401, 'Invalid or missing user ID in request');
+//     }
+
+//     // 4. Fetch work order with population
+//     const workOrder = await ironWorkOrder
+//         .findById(workOrderId)
+//         .populate({
+//             path: 'clientId',
+//             select: 'name address',
+//             // match: { isDeleted: false },
+//         })
+//         .populate({
+//             path: 'projectId',
+//             select: 'name address',
+//             // match: { isDeleted: false },
+//         })
+//         .populate({
+//             path: 'products.shapeId',
+//             select: 'shape_code description',
+//             // match: { isDeleted: false },
+//         })
+//         .populate({
+//             path: 'created_by',
+//             select: 'username',
+//         })
+//         .lean();
+
+//     if (!workOrder) {
+//         throw new ApiError(404, `Work order not found with ID: ${workOrderId}`);
+//     }
+
+//     // 5. Format timestamps to IST (DD-MM-YYYY HH:MM AM/PM)
+//     const formatDateToIST = (date) => {
+//         if (!date) return null;
+//         const istDate = new Date(date).toLocaleString('en-IN', {
+//             timeZone: 'Asia/Kolkata',
+//             day: '2-digit',
+//             month: '2-digit',
+//             year: 'numeric',
+//             hour: '2-digit',
+//             minute: '2-digit',
+//             hour12: true,
+//         });
+//         // Convert to desired format: DD-MM-YYYY HH:MM AM/PM
+//         const [datePart, timePart] = istDate.split(', ');
+//         const [day, month, year] = datePart.split('/');
+//         const [time, period] = timePart.split(' ');
+//         return `${day}-${month}-${year} ${time} ${period}`;
+//     };
+
+//     // 6. Structure response to match desired format
+//     const formattedWorkOrder = {
+//         client_id: workOrder.clientId
+//             ? {
+//                   _id: workOrder.clientId._id,
+//                   name: workOrder.clientId.name,
+//                   address: workOrder.clientId.address,
+//               }
+//             : null,
+//         project_id: workOrder.projectId
+//             ? {
+//                   _id: workOrder.projectId._id,
+//                   name: workOrder.projectId.name,
+//                   address: workOrder.projectId.address,
+//               }
+//             : null,
+//         work_order_details: {
+//             _id: workOrder._id,
+//             work_order_number: workOrder.workOrderNumber,
+//             created_at: formatDateToIST(workOrder.createdAt),
+//             created_by: workOrder.created_by?.username || 'Unknown',
+//             date: formatDateToIST(workOrder.workOrderDate),
+//             status: workOrder.status,
+//         },
+//         products: workOrder.products.map((product) => ({
+//             shapeId: product.shapeId
+//                 ? {
+//                       _id: product.shapeId._id,
+//                       shape_code: product.shapeId.shape_code,
+//                       description: product.shapeId.description,
+//                   }
+//                 : null,
+//             barMark: product.barMark || '',
+//             uom: product.uom,
+//             quantity: product.quantity,
+//             memberDetails: product.memberDetails || '',
+//             deliveryDate: formatDateToIST(product.deliveryDate),
+//             _id: product._id,
+//         })),
+//     };
+
+//     // 7. Check if populated fields are null (due to isDeleted: true or non-existent references)
+//     if (!formattedWorkOrder.client_id) {
+//         throw new ApiError(404, `Client not found or deleted for work order ID: ${workOrderId}`);
+//     }
+//     if (!formattedWorkOrder.project_id) {
+//         throw new ApiError(404, `Project not found or deleted for work order ID: ${workOrderId}`);
+//     }
+//     if (formattedWorkOrder.products.some((p) => !p.shapeId)) {
+//         throw new ApiError(404, `One or more shapes not found or deleted for work order ID: ${workOrderId}`);
+//     }
+
+//     // 8. Return response
+//     return res.status(200).json(
+//         new ApiResponse(200, formattedWorkOrder, 'Work order retrieved successfully')
+//     );
+// });
+
+
+
 const getIronWorkOrderById = asyncHandler(async (req, res) => {
     // 1. Validation schema for params
     const paramsSchema = Joi.object({
@@ -542,17 +733,17 @@ const getIronWorkOrderById = asyncHandler(async (req, res) => {
         .populate({
             path: 'clientId',
             select: 'name address',
-            match: { isDeleted: false },
+            // match: { isDeleted: false },
         })
         .populate({
             path: 'projectId',
             select: 'name address',
-            match: { isDeleted: false },
+            // match: { isDeleted: false },
         })
         .populate({
             path: 'products.shapeId',
             select: 'shape_code description',
-            match: { isDeleted: false },
+            // match: { isDeleted: false },
         })
         .populate({
             path: 'created_by',
@@ -620,8 +811,13 @@ const getIronWorkOrderById = asyncHandler(async (req, res) => {
             quantity: product.quantity,
             memberDetails: product.memberDetails || '',
             deliveryDate: formatDateToIST(product.deliveryDate),
+            memberQuantity: product.memberQuantity || null,
+            diameter: product.diameter || null,
+            weight: product.weight || '',
+            dimensions: product.dimensions || [],
             _id: product._id,
         })),
+        files: workOrder.files || [], // Add files array to the response
     };
 
     // 7. Check if populated fields are null (due to isDeleted: true or non-existent references)
@@ -653,6 +849,7 @@ const updateIronWorkOrder = asyncHandler(async (req, res) => {
     }
 
     const bodyData = req.body;
+    console.log("bodyData",bodyData.products.dimensions);
     const userId = req.user?._id?.toString();
 
     if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {

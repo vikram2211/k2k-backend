@@ -39,14 +39,15 @@ const createFalconWorkOrder = asyncHandler(async (req, res) => {
     try {
         // 1. Validation schema
         const productSchema = Joi.object({
-            product_id: Joi.string()
-                .required()
-                .custom((value, helpers) => {
-                    if (!mongoose.Types.ObjectId.isValid(value)) {
-                        return helpers.error('any.invalid', { message: `Product ID (${value}) is not a valid ObjectId` });
-                    }
-                    return value;
-                }, 'ObjectId validation'),
+            // product_id: Joi.string()
+            //     .required()
+            //     .custom((value, helpers) => {
+            //         if (!mongoose.Types.ObjectId.isValid(value)) {
+            //             return helpers.error('any.invalid', { message: `Product ID (${value}) is not a valid ObjectId` });
+            //         }
+            //         return value;
+            //     }, 'ObjectId validation'),
+            product_name: Joi.string().required().messages({ 'string.empty': 'Product name is required' }),
             sac_code: Joi.string().required().messages({ 'string.empty': 'SAC code is required' }),
             uom: Joi.string().required().messages({ 'string.empty': 'UOM is required' }),
             po_quantity: Joi.number().min(0).required().messages({
@@ -66,6 +67,57 @@ const createFalconWorkOrder = asyncHandler(async (req, res) => {
             uploaded_at: Joi.date().optional(), // Allow uploaded_at
         });
 
+        // const workOrderSchema = Joi.object({
+        //     client_id: Joi.string()
+        //         .required()
+        //         .custom((value, helpers) => {
+        //             if (!mongoose.Types.ObjectId.isValid(value)) {
+        //                 return helpers.error('any.invalid', { message: `Client ID (${value}) is not a valid ObjectId` });
+        //             }
+        //             return value;
+        //         }, 'ObjectId validation'),
+        //     project_id: Joi.string()
+        //         .required()
+        //         .custom((value, helpers) => {
+        //             if (!mongoose.Types.ObjectId.isValid(value)) {
+        //                 return helpers.error('any.invalid', { message: `Project ID (${value}) is not a valid ObjectId` });
+        //             }
+        //             return value;
+        //         }, 'ObjectId validation'),
+        //     work_order_number: Joi.string().required().messages({ 'string.empty': 'Work order number is required' }),
+        //     date: Joi.date().required().messages({ 'date.base': 'Date is required and must be a valid date' }),
+        //     remarks: Joi.string().required().messages({ 'string.empty': 'Remarks are required' }),
+        //     products: Joi.array().items(productSchema).min(1).required().messages({
+        //         'array.min': 'At least one product is required',
+        //     }),
+        //     files: Joi.array().items(fileSchema).optional(),
+        //     status: Joi.string()
+        //         .valid('Pending', 'In Progress', 'Completed', 'Cancelled')
+        //         .default('Pending')
+        //         .messages({ 'any.only': 'Status must be Pending, In Progress, Completed, or Cancelled' }).optional(),
+        //     created_by: Joi.string()
+        //         .required()
+        //         .custom((value, helpers) => {
+        //             if (!mongoose.Types.ObjectId.isValid(value)) {
+        //                 return helpers.error('any.invalid', { message: `Created by ID (${value}) is not a valid ObjectId` });
+        //             }
+        //             return value;
+        //         }, 'ObjectId validation'),
+        //     updated_by: Joi.string()
+        //         .required()
+        //         .custom((value, helpers) => {
+        //             if (!mongoose.Types.ObjectId.isValid(value)) {
+        //                 return helpers.error('any.invalid', { message: `Updated by ID (${value}) is not a valid ObjectId` });
+        //             }
+        //             return value;
+        //         }, 'ObjectId validation'),
+        // });
+
+        // 2. Parse form-data
+       
+       
+       
+       
         const workOrderSchema = Joi.object({
             client_id: Joi.string()
                 .required()
@@ -111,8 +163,9 @@ const createFalconWorkOrder = asyncHandler(async (req, res) => {
                     return value;
                 }, 'ObjectId validation'),
         });
-
-        // 2. Parse form-data
+       
+       
+       
         const bodyData = req.body;
         console.log("bodyData", bodyData);
         const userId = req.user?._id?.toString();
@@ -206,9 +259,9 @@ const createFalconWorkOrder = asyncHandler(async (req, res) => {
         if (!client) throw new ApiError(404, `Client not found with ID: ${value.client_id}`);
         if (!project) throw new ApiError(404, `Project not found with ID: ${value.project_id}`);
         const invalidProduct = products.findIndex((p) => !p);
-        if (invalidProduct !== -1) {
-            throw new ApiError(404, `Product not found with ID: ${value.products[invalidProduct].product_id}`);
-        }
+        // if (invalidProduct !== -1) {
+        //     throw new ApiError(404, `Product not found with ID: ${value.products[invalidProduct].product_id}`);
+        // }
 
         // 8. Save to MongoDB
         const workOrder = await falconWorkOrder.create(value);
@@ -226,11 +279,11 @@ const createFalconWorkOrder = asyncHandler(async (req, res) => {
                 select: 'name address',
                 match: { isDeleted: false },
             })
-            .populate({
-                path: 'products.product_id',
-                select: 'name',
-                match: { isDeleted: false },
-            })
+            // .populate({
+            //     path: 'products.product_id',
+            //     select: 'name',
+            //     match: { isDeleted: false },
+            // })
             .populate('created_by', 'username email')
             .populate('updated_by', 'username email')
             .lean();
@@ -330,62 +383,116 @@ const updateFalconWorkOrder = asyncHandler(async (req, res) => {
     }
 
     // 1. Validation schema (all fields optional except updated_by)
-    const productSchema = Joi.object({
-        product_id: Joi.string()
-            .custom((value, helpers) => {
-                if (!mongoose.Types.ObjectId.isValid(value)) {
-                    return helpers.error('any.invalid', { message: `Product ID (${value}) is not a valid ObjectId` });
-                }
-                return value;
-            }, 'ObjectId validation'),
-        sac_code: Joi.string(),
-        uom: Joi.string(),
-        po_quantity: Joi.number().min(0).messages({
-            'number.base': 'PO quantity must be a number',
-            'number.min': 'PO quantity must be non-negative',
-        }),
-    });
+    // const productSchema = Joi.object({
+    //     product_id: Joi.string()
+    //         .custom((value, helpers) => {
+    //             if (!mongoose.Types.ObjectId.isValid(value)) {
+    //                 return helpers.error('any.invalid', { message: `Product ID (${value}) is not a valid ObjectId` });
+    //             }
+    //             return value;
+    //         }, 'ObjectId validation'),
+    //     sac_code: Joi.string(),
+    //     uom: Joi.string(),
+    //     po_quantity: Joi.number().min(0).messages({
+    //         'number.base': 'PO quantity must be a number',
+    //         'number.min': 'PO quantity must be non-negative',
+    //     }),
+    // });
 
-    const fileSchema = Joi.object({
-        file_name: Joi.string().messages({ 'string.empty': 'File name is required' }),
-        file_url: Joi.string().uri().messages({ 'string.uri': 'File URL must be a valid URL' }),
-        uploaded_at: Joi.date().optional(),
-    });
+    // const fileSchema = Joi.object({
+    //     file_name: Joi.string().messages({ 'string.empty': 'File name is required' }),
+    //     file_url: Joi.string().uri().messages({ 'string.uri': 'File URL must be a valid URL' }),
+    //     uploaded_at: Joi.date().optional(),
+    // });
 
-    const updateWorkOrderSchema = Joi.object({
-        client_id: Joi.string()
-            .custom((value, helpers) => {
-                if (!mongoose.Types.ObjectId.isValid(value)) {
-                    return helpers.error('any.invalid', { message: `Client ID (${value}) is not a valid ObjectId` });
-                }
-                return value;
-            }, 'ObjectId validation'),
-        project_id: Joi.string()
-            .custom((value, helpers) => {
-                if (!mongoose.Types.ObjectId.isValid(value)) {
-                    return helpers.error('any.invalid', { message: `Project ID (${value}) is not a valid ObjectId` });
-                }
-                return value;
-            }, 'ObjectId validation'),
-        work_order_number: Joi.string(),
-        date: Joi.date(),
-        remarks: Joi.string(),
-        products: Joi.array().items(productSchema).min(1).messages({
-            'array.min': 'At least one product is required',
-        }),
-        files: Joi.array().items(fileSchema),
-        status: Joi.string()
-            .valid('Pending', 'In Progress', 'Completed', 'Cancelled')
-            .messages({ 'any.only': 'Status must be Pending, In Progress, Completed, or Cancelled' }),
-        updated_by: Joi.string()
-            .required()
-            .custom((value, helpers) => {
-                if (!mongoose.Types.ObjectId.isValid(value)) {
-                    return helpers.error('any.invalid', { message: `Updated by ID (${value}) is not a valid ObjectId` });
-                }
-                return value;
-            }, 'ObjectId validation'),
-    });
+    // const updateWorkOrderSchema = Joi.object({
+    //     client_id: Joi.string()
+    //         .custom((value, helpers) => {
+    //             if (!mongoose.Types.ObjectId.isValid(value)) {
+    //                 return helpers.error('any.invalid', { message: `Client ID (${value}) is not a valid ObjectId` });
+    //             }
+    //             return value;
+    //         }, 'ObjectId validation'),
+    //     project_id: Joi.string()
+    //         .custom((value, helpers) => {
+    //             if (!mongoose.Types.ObjectId.isValid(value)) {
+    //                 return helpers.error('any.invalid', { message: `Project ID (${value}) is not a valid ObjectId` });
+    //             }
+    //             return value;
+    //         }, 'ObjectId validation'),
+    //     work_order_number: Joi.string(),
+    //     date: Joi.date(),
+    //     remarks: Joi.string(),
+    //     products: Joi.array().items(productSchema).min(1).messages({
+    //         'array.min': 'At least one product is required',
+    //     }),
+    //     files: Joi.array().items(fileSchema),
+    //     status: Joi.string()
+    //         .valid('Pending', 'In Progress', 'Completed', 'Cancelled')
+    //         .messages({ 'any.only': 'Status must be Pending, In Progress, Completed, or Cancelled' }),
+    //     updated_by: Joi.string()
+    //         .required()
+    //         .custom((value, helpers) => {
+    //             if (!mongoose.Types.ObjectId.isValid(value)) {
+    //                 return helpers.error('any.invalid', { message: `Updated by ID (${value}) is not a valid ObjectId` });
+    //             }
+    //             return value;
+    //         }, 'ObjectId validation'),
+    // });
+
+
+    // 1. Validation schema (all fields optional except updated_by)
+const productSchema = Joi.object({
+    product_name: Joi.string().messages({ 'string.empty': 'Product name is required' }),
+    sac_code: Joi.string(),
+    uom: Joi.string(),
+    po_quantity: Joi.number().min(0).messages({
+        'number.base': 'PO quantity must be a number',
+        'number.min': 'PO quantity must be non-negative',
+    }),
+});
+
+const fileSchema = Joi.object({
+    file_name: Joi.string().messages({ 'string.empty': 'File name is required' }),
+    file_url: Joi.string().uri().messages({ 'string.uri': 'File URL must be a valid URL' }),
+    uploaded_at: Joi.date().optional(),
+});
+
+const updateWorkOrderSchema = Joi.object({
+    client_id: Joi.string()
+        .custom((value, helpers) => {
+            if (!mongoose.Types.ObjectId.isValid(value)) {
+                return helpers.error('any.invalid', { message: `Client ID (${value}) is not a valid ObjectId` });
+            }
+            return value;
+        }, 'ObjectId validation'),
+    project_id: Joi.string()
+        .custom((value, helpers) => {
+            if (!mongoose.Types.ObjectId.isValid(value)) {
+                return helpers.error('any.invalid', { message: `Project ID (${value}) is not a valid ObjectId` });
+            }
+            return value;
+        }, 'ObjectId validation'),
+    work_order_number: Joi.string(),
+    date: Joi.date(),
+    remarks: Joi.string(),
+    products: Joi.array().items(productSchema).min(1).messages({
+        'array.min': 'At least one product is required',
+    }),
+    files: Joi.array().items(fileSchema).optional(),
+    existing_files: Joi.array().items(Joi.string()).optional(), // Added to allow existing file IDs
+    status: Joi.string()
+        .valid('Pending', 'In Progress', 'Completed', 'Cancelled')
+        .messages({ 'any.only': 'Status must be Pending, In Progress, Completed, or Cancelled' }),
+    updated_by: Joi.string()
+        .required()
+        .custom((value, helpers) => {
+            if (!mongoose.Types.ObjectId.isValid(value)) {
+                return helpers.error('any.invalid', { message: `Updated by ID (${value}) is not a valid ObjectId` });
+            }
+            return value;
+        }, 'ObjectId validation'),
+});
 
     // 2. Parse form-data
     const bodyData = req.body;
@@ -404,6 +511,14 @@ const updateFalconWorkOrder = asyncHandler(async (req, res) => {
             bodyData.products = JSON.parse(bodyData.products);
         } catch (e) {
             throw new ApiError(400, 'Invalid products JSON format');
+        }
+    }
+
+    if (typeof bodyData.existing_files === 'string') {
+        try {
+            bodyData.existing_files = JSON.parse(bodyData.existing_files);
+        } catch (e) {
+            throw new ApiError(400, 'Invalid existing_files JSON format');
         }
     }
 
@@ -491,11 +606,11 @@ const updateFalconWorkOrder = asyncHandler(async (req, res) => {
     if (value.project_id) {
         validationPromises.push(mongoose.model('falconProject').findById(value.project_id));
     }
-    if (value.products && value.products.length) {
-        validationPromises.push(
-            Promise.all(value.products.map((p) => mongoose.model('falconProduct').findById(p.product_id)))
-        );
-    }
+    // if (value.products && value.products.length) {
+    //     validationPromises.push(
+    //         Promise.all(value.products.map((p) => mongoose.model('falconProduct').findById(p.product_id)))
+    //     );
+    // }
 
     if (validationPromises.length) {
         const results = await Promise.all(validationPromises);
@@ -513,13 +628,13 @@ const updateFalconWorkOrder = asyncHandler(async (req, res) => {
             }
             resultIndex++;
         }
-        if (value.products && value.products.length) {
-            const products = results[resultIndex];
-            const invalidProduct = products.findIndex((p) => !p);
-            if (invalidProduct !== -1) {
-                throw new ApiError(404, `Product not found with ID: ${value.products[invalidProduct].product_id}`);
-            }
-        }
+        // if (value.products && value.products.length) {
+        //     const products = results[resultIndex];
+        //     // const invalidProduct = products.findIndex((p) => !p);
+        //     // if (invalidProduct !== -1) {
+        //     //     throw new ApiError(404, `Product not found with ID: ${value.products[invalidProduct].product_id}`);
+        //     // }
+        // }
     }
 
     // 8. Find and update work order
@@ -539,11 +654,11 @@ const updateFalconWorkOrder = asyncHandler(async (req, res) => {
             select: 'name address',
             match: { isDeleted: false },
         })
-        .populate({
-            path: 'products.product_id',
-            select: 'name',
-            match: { isDeleted: false },
-        })
+        // .populate({
+        //     path: 'products.product_id',
+        //     select: 'name',
+        //     match: { isDeleted: false },
+        // })
         .populate('created_by', 'username email')
         .populate('updated_by', 'username email')
         .lean();
@@ -628,7 +743,7 @@ const getFalconWorkOrderById = asyncHandler(async (req, res) => {
         .select('work_order_number client_id project_id products files date remarks createdAt updatedAt')
         .populate({ path: 'client_id', select: 'name address', match: { isDeleted: false } })
         .populate({ path: 'project_id', select: 'name address', match: { isDeleted: false } })
-        .populate({ path: 'products.product_id', select: 'name', match: { isDeleted: false } })
+        // .populate({ path: 'products.product_id', select: 'name', match: { isDeleted: false } })
         .lean();
 
     if (!workOrder) {

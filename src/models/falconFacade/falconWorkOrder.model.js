@@ -30,9 +30,13 @@ const falconWorkOrderSchema = new mongoose.Schema(
         // 2. Products Array
         products: [
             {
-                product_id: {
-                    type: mongoose.Schema.Types.ObjectId,
-                    ref: "falconProduct",
+                // product_id: {
+                //     type: mongoose.Schema.Types.ObjectId,
+                //     ref: "falconProduct",
+                //     required: true,
+                // },
+                product_name: {
+                    type: String,
                     required: true,
                 },
                 sac_code: {

@@ -88,13 +88,23 @@ const updateMachine = asyncHandler(async (req, res, next) => {
 // });
 
 const getAllMachines = asyncHandler(async (req, res, next) => {
+
+  // Default values for pagination
+  const page = parseInt(req.query.page) || 1;
+  const limit = parseInt(req.query.limit) || 10;
+  const skip = (page - 1) * limit;
+
+  const totalMachines = await Machine.countDocuments({ isDeleted: false });
+
+
   const machines = await Machine.find({ isDeleted: false })
     .populate({
       path: 'plant_id',
       select: 'plant_name plant_code',
       match: { isDeleted: false }, // Only include non-deleted plants
     })
-    .populate('created_by', 'username email').sort({ createdAt: -1 });;
+    .populate('created_by', 'username email').skip(skip)
+    .limit(limit).sort({ createdAt: -1 });;
 
   // Filter out machines where plant_id is null (i.e., plant was deleted)
   const validMachines = machines.filter((machine) => machine.plant_id !== null);
@@ -103,7 +113,15 @@ const getAllMachines = asyncHandler(async (req, res, next) => {
     return next(new ApiError(404, 'No active machines with non-deleted plants available'));
   }
 
-  return res.status(200).json(new ApiResponse(200, validMachines, 'Machines fetched successfully'));
+  return res.status(200).json(new ApiResponse(200, {
+    machines: validMachines,
+    pagination: {
+      total: totalMachines,
+      page,
+      limit,
+      totalPages: Math.ceil(totalMachines / limit),
+    },
+  }, 'Machines fetched successfully'));
 });
 // Fetch machine by ID
 const getMachineById = asyncHandler(async (req, res, next) => {
