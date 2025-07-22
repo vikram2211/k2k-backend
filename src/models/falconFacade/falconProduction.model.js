@@ -16,6 +16,18 @@ const productionSchema = new mongoose.Schema(
         ref: 'falconProduct',
         required: true,
       },
+      code: {
+        type: String,
+        required: true, // Make required if code is always provided
+      },
+      width: {
+        type: Number,
+        required: false, // Optional, as you mentioned width may not always be provided
+      },
+      height: {
+        type: Number,
+        required: false, // Optional, as you mentioned height may not always be provided
+      },
       po_quantity: {
         type: Number,
         required: true,

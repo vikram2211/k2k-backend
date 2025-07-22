@@ -3,8 +3,8 @@ import { Router } from 'express';
 import { verifyJWT } from '../../middlewares/auth.middleware.js';
 import { upload } from '../../middlewares/multer.middleware.js';
 import {
-    getJobOrderAutoFetch, getJobOrderProductDetails, getJobOrderTotalProductDetail, getProductSystem, createInternalWorkOrder, getInternalWorkOrderDetails, getInternalWorkOrderById,updateInternalWorkOrder,deleteInternalWorkOrder
-} from '../../controllers/falconFacade/internalWorkOrderController.js';
+    getJobOrderAutoFetch, getJobOrderProductDetails, getJobOrderTotalProductDetail, getProductSystem, createInternalWorkOrder, getInternalWorkOrderDetails, getInternalWorkOrderById,updateInternalWorkOrder,deleteInternalWorkOrder,
+    getJobOrderRemainingQuantities} from '../../controllers/falconFacade/internalWorkOrderController.js';
 
 const router = Router();
 
@@ -19,6 +19,7 @@ router.route('/client-product/details').get(getJobOrderAutoFetch);
 router.route('/product/details').get(getJobOrderProductDetails);
 router.route('/products/details').get(getJobOrderTotalProductDetail);
 router.route('/productsystem').get(getProductSystem);
+router.route('/remaining-qty').get(getJobOrderRemainingQuantities);
 // .put(upload.array('files'), updateFalconJobOrder); //
 // // 
 // router.route('/workorders-getProject').get(getFalconProjectBasedOnClient);
