@@ -103,8 +103,10 @@ const getAllMachines = asyncHandler(async (req, res, next) => {
       select: 'plant_name plant_code',
       match: { isDeleted: false }, // Only include non-deleted plants
     })
-    .populate('created_by', 'username email').skip(skip)
-    .limit(limit).sort({ createdAt: -1 });;
+    .populate('created_by', 'username email')
+    .skip(skip)
+    // .limit(limit)
+    .sort({ createdAt: -1 });;
 
   // Filter out machines where plant_id is null (i.e., plant was deleted)
   const validMachines = machines.filter((machine) => machine.plant_id !== null);

@@ -747,6 +747,16 @@ export const createWorkOrder = async (req, res) => {
 
 export const getWorkOrder = async (req, res) => {
   try {
+
+      // 1. Read pagination params
+      const page = parseInt(req.query.page) || 1;
+      const limit = parseInt(req.query.limit) || 10;
+      const skip = (page - 1) * limit;
+  
+      // 2. Count total documents
+      const totalWorkOrders = await WorkOrder.countDocuments({});
+
+
     const workOrders = await WorkOrder.find()
       .populate('client_id', 'name')
       .populate('project_id', 'name')
@@ -759,10 +769,21 @@ export const getWorkOrder = async (req, res) => {
       });
     }
 
+    // return res.status(200).json({
+    //   success: true,
+    //   message: "Work orders fetched successfully.",
+    //   data: workOrders
+    // });
     return res.status(200).json({
       success: true,
       message: "Work orders fetched successfully.",
-      data: workOrders
+      data: workOrders,
+      pagination: {
+        total: totalWorkOrders,
+        page,
+        limit,
+        totalPages: Math.ceil(totalWorkOrders / limit),
+      },
     });
 
   } catch (error) {

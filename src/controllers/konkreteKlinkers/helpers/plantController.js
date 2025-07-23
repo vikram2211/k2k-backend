@@ -86,7 +86,7 @@ const getAllPlants = asyncHandler(async (req, res, next) => {
   const plants = await Plant.find({ isDeleted: false })
     .populate('created_by', 'username email')
     .skip(skip)
-    .limit(limit)
+    // .limit(limit)
     .sort({ createdAt: -1 }); // Optional: sort newest first
 
   if (!plants || plants.length === 0) {

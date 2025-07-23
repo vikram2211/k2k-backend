@@ -341,7 +341,7 @@ const getAllProducts = asyncHandler(async (req, res, next) => {
         })
         .populate('created_by', 'username email')
         .skip(skip)
-        .limit(limit)
+        // .limit(limit)
         .sort({ createdAt: -1 });;
 
     // Filter out products where plant is null (i.e., plant was deleted)

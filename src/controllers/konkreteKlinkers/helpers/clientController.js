@@ -102,16 +102,18 @@ const getAllClients = asyncHandler(async (req, res, next) => {
   const clients = await Client.find({ isDeleted: false })
     .populate('created_by', 'username email')
     .skip(skip)
-    .limit(limit)
+    // .limit(limit)
     .sort({ createdAt: -1 }); // Optional: Sort newest first
 
   if (!clients || clients.length === 0) {
     return next(new ApiError(404, 'No active clients available'));
   }
+  let length = clients.length;
 
   // Respond with pagination metadata
   return res.status(200).json(
     new ApiResponse(200, {
+      length,
       clients,
       pagination: {
         total: totalClients,
