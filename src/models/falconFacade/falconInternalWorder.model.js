@@ -49,6 +49,11 @@ const productSchema = new mongoose.Schema({
         type: mongoose.Schema.Types.ObjectId,
         required: true,
     },
+    code: { // Added code field
+        type: String,
+        required: true,
+        trim: true,
+    },
     po_quantity: {
         type: Number,
         required: true,

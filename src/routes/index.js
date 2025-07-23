@@ -80,12 +80,16 @@ import ironShapesRouter from './ironSmithRoutes/dimension.routes.js';
 import ironWorkOrderRouter from './ironSmithRoutes/ironworkorder.routes.js';
 
 
+import ironJobOrderRouter from './ironSmithRoutes/ironjoborder.routes.js';
+
+
 
 router.use('/ironSmith', ironClientRouter);
 router.use('/ironSmith', ironMachineRouter);
 router.use('/ironSmith', ironProjectRouter);
 router.use('/ironSmith', ironShapesRouter);
 router.use('/ironSmith', ironWorkOrderRouter);
+router.use('/ironSmith', ironJobOrderRouter);
 
 
 
