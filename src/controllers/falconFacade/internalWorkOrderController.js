@@ -1854,7 +1854,7 @@ const createInternalWorkOrder_22_07_2025_11AM = asyncHandler(async (req, res) =>
           allocatedQuantities[key] = (allocatedQuantities[key] || 0) + prod.po_quantity;
         });
       });
-  
+      ///
       // Validate requested quantities
       for (const product of bodyData.products) {
         const productId = product.product;
