@@ -247,18 +247,42 @@ const productSchema = new mongoose.Schema(
                 message: 'At least one UOM must be provided',
             },
         },
+        // areas: {
+        //     type: Map,
+        //     of: Number,
+        //     required: true,
+        //     validate: {
+        //         validator: function (value) {
+        //             const uoms = this.uom;
+        //             return uoms.every((uom) => value.has(uom));
+        //         },
+        //         message: 'Areas must include an entry for each selected UOM',
+        //     },
+        // },
         areas: {
             type: Map,
             of: Number,
-            required: true,
             validate: {
-                validator: function (value) {
-                    const uoms = this.uom;
-                    return uoms.every((uom) => value.has(uom));
-                },
-                message: 'Areas must include an entry for each selected UOM',
+              validator: async function (value) {
+                // Get the updated `uom` from the request body (during direct save or update)
+                let updatedUOM = this.uom;
+          
+                // If this is a query update (e.g. findByIdAndUpdate), `this` is the query, not the doc
+                if (!updatedUOM && typeof this.getUpdate === 'function') {
+                  const update = this.getUpdate();
+                  updatedUOM = update.uom || (update.$set && update.$set.uom);
+                }
+          
+                if (!Array.isArray(updatedUOM)) return false;
+          
+                const areaKeys = [...value.keys()];
+                return updatedUOM.every((uom) => areaKeys.includes(uom));
+              },
+              message: 'Areas must include an entry for each selected UOM',
             },
-        },
+          },
+          
+          
         no_of_pieces_per_punch: {
             type: Number,
             required: true,

@@ -332,7 +332,6 @@ const getAllProducts = asyncHandler(async (req, res, next) => {
     // Count total products that meet the criteria
     const totalProducts = await Product.countDocuments({ isDeleted: false });
 
-
     const products = await Product.find({ isDeleted: false })
         .populate({
             path: 'plant',
@@ -341,7 +340,7 @@ const getAllProducts = asyncHandler(async (req, res, next) => {
         })
         .populate('created_by', 'username email')
         .skip(skip)
-        // .limit(limit)
+        .limit(limit)
         .sort({ createdAt: -1 });;
 
     // Filter out products where plant is null (i.e., plant was deleted)
@@ -350,8 +349,10 @@ const getAllProducts = asyncHandler(async (req, res, next) => {
     if (!validProducts || validProducts.length === 0) {
         return next(new ApiError(404, 'No active products with non-deleted plants available'));
     }
+    let coutnt = validProducts.length;
 
     return res.status(200).json(new ApiResponse(200, {
+        coutnt,
         products: validProducts,
         pagination: {
             total: totalProducts,
@@ -383,7 +384,7 @@ const getProductById = asyncHandler(async (req, res, next) => {
 
 
 
-const updateProductSchema = Joi.object({
+const updateProductSchema_14_07_2025 = Joi.object({
     plant: Joi.string()
         .regex(/^[0-9a-fA-F]{24}$/, 'Invalid plant ID')
         .optional()
@@ -450,7 +451,7 @@ const updateProductSchema = Joi.object({
 });
 
 // Update Product API
-const updateProduct = asyncHandler(async (req, res, next) => {
+const updateProduct_24_07_2025 = asyncHandler(async (req, res, next) => {
     const productId = req.params.id;
 
     // Validate product ID
@@ -490,6 +491,125 @@ const updateProduct = asyncHandler(async (req, res, next) => {
     if (!updatedProduct) {
         return next(new ApiError(404, 'No product found with the given ID'));
     }
+
+    return res.status(200).json(new ApiResponse(200, updatedProduct, 'Product updated successfully'));
+});
+
+const updateProductSchema = Joi.object({
+    plant: Joi.string()
+        .regex(/^[0-9a-fA-F]{24}$/, 'Invalid plant ID')
+        .optional()
+        .messages({
+            'string.pattern.base': 'Plant ID must be a valid ObjectId',
+        }),
+    material_code: Joi.string()
+        .optional()
+        .messages({
+            'string.empty': 'Material Code cannot be empty if provided',
+        }),
+    description: Joi.string()
+        .optional()
+        .messages({
+            'string.empty': 'Description cannot be empty if provided',
+        }),
+    uom: Joi.array()
+        .items(Joi.string().valid('Square Meter/No', 'Meter/No'))
+        .min(1)
+        .optional()
+        .messages({
+            'array.min': 'At least one UOM must be provided if updating UOM',
+            'array.base': 'UOM must be an array of valid values',
+            'string.valid': 'UOM must be either "Square Meter/No" or "Meter/No"',
+        }),
+    areas: Joi.object()
+        .pattern(Joi.string().valid('Square Meter/No', 'Meter/No'), Joi.number().required())
+        .optional()
+        .custom((value, helpers) => {
+            const uom = helpers.state.ancestors[0].uom;
+            if (uom) {
+                const areaKeys = Object.keys(value);
+                if (!uom.every((u) => areaKeys.includes(u))) {
+                    return helpers.error('any.custom', { message: 'Areas must include an entry for each selected UOM' });
+                }
+            }
+            return value;
+        })
+        .messages({
+            'object.pattern.base': 'Areas must be an object with valid UOM keys and numeric values',
+            'any.custom': 'Areas must include an entry for each selected UOM',
+        }),
+    no_of_pieces_per_punch: Joi.number()
+        .optional()
+        .messages({
+            'number.base': 'Number of pieces per punch must be a number',
+        }),
+    qty_in_bundle: Joi.number()
+        .optional()
+        .messages({
+            'number.base': 'Quantity in bundle must be a number',
+        }),
+    status: Joi.string()
+        .valid('Active', 'Inactive')
+        .optional()
+        .messages({
+            'any.only': 'Status must be either "Active" or "Inactive"',
+        }),
+});
+
+
+const updateProduct = asyncHandler(async (req, res, next) => {
+    console.log('Product update request:', req.body);
+
+    // Validate request body
+    const { error, value } = updateProductSchema.validate(req.body, { abortEarly: false });
+    if (error) {
+        return next(new ApiError(400, 'Validation failed for product update', error.details));
+    }
+
+    const {
+        plant,
+        material_code,
+        description,
+        uom,
+        areas,
+        no_of_pieces_per_punch,
+        qty_in_bundle,
+        status,
+    } = value;
+
+    // Check if product exists
+    const product = await Product.findById(req.params.id);
+    if (!product || product.isDeleted) {
+        return next(new ApiError(404, 'Product not found or has been deleted'));
+    }
+
+    // Verify that the plant exists and is not deleted if provided
+    if (plant) {
+        const plantExists = await Plant.findOne({ _id: plant, isDeleted: false });
+        if (!plantExists) {
+            return next(new ApiError(400, 'Plant not found or has been deleted'));
+        }
+    }
+
+    // Convert areas object to Map for Mongoose schema if areas is provided
+    const updateData = {
+        ...(plant && { plant }),
+        ...(material_code && { material_code }),
+        ...(description && { description }),
+        ...(uom && { uom }),
+        ...(areas && { areas: new Map(Object.entries(areas)) }),
+        ...(no_of_pieces_per_punch !== undefined && { no_of_pieces_per_punch }),
+        ...(qty_in_bundle !== undefined && { qty_in_bundle }),
+        ...(status && { status }),
+        updated_by: req.user._id,
+    };
+
+    // Update product
+    const updatedProduct = await Product.findByIdAndUpdate(
+        req.params.id,
+        updateData,
+        { new: true, runValidators: true }
+    );
 
     return res.status(200).json(new ApiResponse(200, updatedProduct, 'Product updated successfully'));
 });
