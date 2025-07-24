@@ -105,7 +105,7 @@ const getAllMachines = asyncHandler(async (req, res, next) => {
     })
     .populate('created_by', 'username email')
     .skip(skip)
-    // .limit(limit)
+    .limit(limit)
     .sort({ createdAt: -1 });;
 
   // Filter out machines where plant_id is null (i.e., plant was deleted)

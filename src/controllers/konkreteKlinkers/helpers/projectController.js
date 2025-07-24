@@ -87,7 +87,11 @@ const updateProject = asyncHandler(async (req, res, next) => {
 // Fetch all projects
 const getAllProjects = asyncHandler(async (req, res, next) => {
     const page = parseInt(req.query.page) || 1;
+    console.log("page",page);
+
     const limit = parseInt(req.query.limit) || 10;
+    console.log("limit",limit);
+
     const skip = (page - 1) * limit;
 
     // Count total projects that meet the criteria
@@ -100,7 +104,7 @@ const getAllProjects = asyncHandler(async (req, res, next) => {
         })
         .populate('created_by', 'username email')
         .skip(skip)
-        // .limit(limit)
+        .limit(limit)
         .sort({ createdAt: -1 });;
 
     // Filter out projects where client is null (i.e., client was deleted)
