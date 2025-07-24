@@ -600,6 +600,7 @@ export const getJobOrders = async (req, res) => {
     //   message: "Job Order data fetched successfully",
     //   data: transformedOrders
     // });
+    ////UP
 
     return res.status(200).json({
       success: true,
