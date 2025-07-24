@@ -88,12 +88,20 @@ const updateClient = asyncHandler(async (req, res, next) => {
 
 
 // Fetch all clients with pagination
-const getAllClients = asyncHandler(async (req, res, next) => {
+const getAllClients_24_07_25 = asyncHandler(async (req, res, next) => {
   // Default values
   const page = parseInt(req.query.page) || 1;
   const limit = parseInt(req.query.limit) || 10;
 
   const skip = (page - 1) * limit;
+  const search = req.query.search || '';
+
+  if (search) {
+    filter.$or = [
+      { name: { $regex: search, $options: 'i' } },  // Change fields as needed
+      { email: { $regex: search, $options: 'i' } },
+    ];
+  }
 
   // Count total
   const totalClients = await Client.countDocuments({ isDeleted: false });
@@ -102,7 +110,7 @@ const getAllClients = asyncHandler(async (req, res, next) => {
   const clients = await Client.find({ isDeleted: false })
     .populate('created_by', 'username email')
     .skip(skip)
-    // .limit(limit)
+    .limit(limit)
     .sort({ createdAt: -1 }); // Optional: Sort newest first
 
   if (!clients || clients.length === 0) {
@@ -124,6 +132,53 @@ const getAllClients = asyncHandler(async (req, res, next) => {
     }, 'Clients fetched successfully')
   );
 });
+const getAllClients = asyncHandler(async (req, res, next) => {
+  const page = parseInt(req.query.page) || 1;
+  console.log("page",page);
+
+  const limit = parseInt(req.query.limit) || 10;
+  console.log("limit",limit);
+
+  const skip = (page - 1) * limit;
+  const search = req.query.search?.trim();
+  console.log("search",search);
+
+  // Base query
+  const searchQuery = {
+    isDeleted: false,
+  };
+
+  // Add search condition only if search string exists
+  if (search) {
+    searchQuery.$or = [
+      { name: { $regex: search, $options: 'i' } },
+      { address: { $regex: search, $options: 'i' } },
+    ];
+  }
+
+  const totalClients = await Client.countDocuments(searchQuery);
+
+  const clients = await Client.find(searchQuery)
+    .populate('created_by', 'username email')
+    .skip(skip)
+    .limit(limit)
+    .sort({ createdAt: -1 });
+
+  return res.status(200).json(
+    new ApiResponse(200, {
+      length: clients.length,
+      clients,
+      pagination: {
+        total: totalClients,
+        page,
+        limit,
+        totalPages: Math.ceil(totalClients / limit),
+      },
+    }, 'Clients fetched successfully')
+  );
+});
+
+
 
 
 ////////////////////////////////////////////////////////////////////////////////////////////
