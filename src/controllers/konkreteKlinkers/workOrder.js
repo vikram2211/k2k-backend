@@ -760,7 +760,11 @@ export const getWorkOrder = async (req, res) => {
     const workOrders = await WorkOrder.find()
       .populate('client_id', 'name')
       .populate('project_id', 'name')
-      .populate('created_by', 'username');
+      .populate('created_by', 'username')
+      .skip(skip)
+      .limit(limit)
+      .sort({ createdAt: -1 });
+      
     if (!workOrders?.length) {
       return res.status(404).json({
         success: true,

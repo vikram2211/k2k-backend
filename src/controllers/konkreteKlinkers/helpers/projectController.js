@@ -105,7 +105,7 @@ const getAllProjects = asyncHandler(async (req, res, next) => {
         .populate('created_by', 'username email')
         .skip(skip)
         .limit(limit)
-        .sort({ createdAt: -1 });;
+        .sort({ createdAt: -1 });
 
     // Filter out projects where client is null (i.e., client was deleted)
     const validProjects = projects.filter((project) => project.client !== null);
