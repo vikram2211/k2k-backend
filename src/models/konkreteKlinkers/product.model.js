@@ -281,7 +281,7 @@ const productSchema = new mongoose.Schema(
               message: 'Areas must include an entry for each selected UOM',
             },
           },
-          
+          //
           
         no_of_pieces_per_punch: {
             type: Number,
