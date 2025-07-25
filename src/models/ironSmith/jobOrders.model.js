@@ -7,12 +7,12 @@ const ironJobOrderSchema = new mongoose.Schema(
       ref: 'ironWorkOrder',
       required: [true, 'Work order ID is required'],
     },
-    
+
     job_order_number: {
       type: String,
       required: true,
       unique: true,
-  },
+    },
     sales_order_number: {
       type: String,
       trim: true,
@@ -71,6 +71,20 @@ const ironJobOrderSchema = new mongoose.Schema(
             ref: 'Machine',
           },
         ],
+        qr_code_id: {
+          type: String,
+          default: '',
+          required: false,
+          unique: true, // Ensure QR codes are unique for traceability
+          sparse: true,
+        },
+        qr_code_url: {
+          type: String,
+          default: '',
+          required: false,
+          unique: true, // Ensure QR codes are unique for traceability
+          sparse: true,
+        },
       },
     ],
     created_by: {

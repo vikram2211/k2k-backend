@@ -61,18 +61,18 @@ const updatePlant = asyncHandler(async (req, res, next) => {
 });
 
 // Fetch all plants
-// const getAllPlants = asyncHandler(async (req, res, next) => {
-//   const plants = await Plant.find({ isDeleted: false }).populate('created_by', 'username email');
-
-//   if (!plants || plants.length === 0) {
-//     return next(new ApiError(404, 'No active plants available'));
-//   }
-
-//   return res.status(200).json(new ApiResponse(200, plants, 'Plants fetched successfully'));
-// });
-
-
 const getAllPlants = asyncHandler(async (req, res, next) => {
+  const plants = await Plant.find({ isDeleted: false }).populate('created_by', 'username email');
+
+  if (!plants || plants.length === 0) {
+    return next(new ApiError(404, 'No active plants available'));
+  }
+
+  return res.status(200).json(new ApiResponse(200, plants, 'Plants fetched successfully'));
+});
+
+
+const getAllPlants_25_07_2025 = asyncHandler(async (req, res, next) => {
   // Extract page and limit from query params (defaults to page 1, 10 items per page)
   const page = parseInt(req.query.page) || 1;
   const limit = parseInt(req.query.limit) || 10;

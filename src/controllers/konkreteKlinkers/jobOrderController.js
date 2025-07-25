@@ -541,13 +541,13 @@ export const createJobOrder = async (req, res, next) => {
 
 export const getJobOrders = async (req, res) => {
   try {
-     // 1. Read pagination params
-     const page = parseInt(req.query.page) || 1;
-     const limit = parseInt(req.query.limit) || 10;
-     const skip = (page - 1) * limit;
+    //  // 1. Read pagination params
+    //  const page = parseInt(req.query.page) || 1;
+    //  const limit = parseInt(req.query.limit) || 10;
+    //  const skip = (page - 1) * limit;
  
-     // 2. Count total documents
-     const totalJobOrders = await JobOrder.countDocuments({});
+    //  // 2. Count total documents
+    //  const totalJobOrders = await JobOrder.countDocuments({});
     const jobOrders = await JobOrder.find()
       .populate({
         path: 'work_order',
@@ -578,10 +578,10 @@ export const getJobOrders = async (req, res) => {
       //     select: 'username'
       //   }
       // })
-      .populate({ path: 'created_by', select: 'username' })
-      .skip(skip)
-      .limit(limit)
-      .sort({ createdAt: -1 });
+      .populate({ path: 'created_by', select: 'username' });
+      // .skip(skip)
+      // .limit(limit)
+      // .sort({ createdAt: -1 });
 
     // Transform the response to include project_name at the top level
     const transformedOrders = jobOrders.map(order => {
@@ -595,24 +595,24 @@ export const getJobOrders = async (req, res) => {
     });
 
     // console.log("jobOrders", transformedOrders);
-    // return res.status(200).json({
-    //   success: true,
-    //   message: "Job Order data fetched successfully",
-    //   data: transformedOrders
-    // });
-    ////UP
-
     return res.status(200).json({
       success: true,
-      message: "Job orders fetched successfully.",
-      data: transformedOrders,
-      pagination: {
-        total: totalJobOrders,
-        page,
-        limit,
-        totalPages: Math.ceil(totalJobOrders / limit),
-      },
+      message: "Job Order data fetched successfully",
+      data: transformedOrders
     });
+    ////UP
+
+    // return res.status(200).json({
+    //   success: true,
+    //   message: "Job orders fetched successfully.",
+    //   data: transformedOrders,
+    //   pagination: {
+    //     total: totalJobOrders,
+    //     page,
+    //     limit,
+    //     totalPages: Math.ceil(totalJobOrders / limit),
+    //   },
+    // });
 
 
   } catch (error) {

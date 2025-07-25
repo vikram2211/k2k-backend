@@ -77,17 +77,17 @@ const updateMachine = asyncHandler(async (req, res, next) => {
 });
 
 // Fetch all machines
-// const getAllMachines = asyncHandler(async (req, res, next) => {
-//     const machines = await Machine.find().populate("plant_id", "plant_name").populate("created_by", "name email");
-
-//     if (!machines || machines.length === 0) {
-//         return next(new ApiError(404, "No machines available"));
-//     }
-
-//     return res.status(200).json(new ApiResponse(200, machines, "Machines fetched successfully"));
-// });
-
 const getAllMachines = asyncHandler(async (req, res, next) => {
+    const machines = await Machine.find().populate("plant_id", "plant_name").populate("created_by", "name email");
+
+    if (!machines || machines.length === 0) {
+        return next(new ApiError(404, "No machines available"));
+    }
+
+    return res.status(200).json(new ApiResponse(200, machines, "Machines fetched successfully"));
+});
+
+const getAllMachines_25_07_2025 = asyncHandler(async (req, res, next) => {
 
   // Default values for pagination
   const page = parseInt(req.query.page) || 1;

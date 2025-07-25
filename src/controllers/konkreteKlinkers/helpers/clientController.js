@@ -76,15 +76,15 @@ const updateClient = asyncHandler(async (req, res, next) => {
 });
 
 // Fetch all clients
-// const getAllClients = asyncHandler(async (req, res, next) => {
-//   const clients = await Client.find({ isDeleted: false }).populate('created_by', 'username email');
+const getAllClients = asyncHandler(async (req, res, next) => {
+  const clients = await Client.find({ isDeleted: false }).populate('created_by', 'username email');
 
-//   if (!clients || clients.length === 0) {
-//     return next(new ApiError(404, 'No active clients available'));
-//   }
+  if (!clients || clients.length === 0) {
+    return next(new ApiError(404, 'No active clients available'));
+  }
 
-//   return res.status(200).json(new ApiResponse(200, clients, 'Clients fetched successfully'));
-// });
+  return res.status(200).json(new ApiResponse(200, clients, 'Clients fetched successfully'));
+});
 
 
 // Fetch all clients with pagination
@@ -132,7 +132,7 @@ const getAllClients_24_07_25 = asyncHandler(async (req, res, next) => {
     }, 'Clients fetched successfully')
   );
 });
-const getAllClients = asyncHandler(async (req, res, next) => {
+const getAllClients_25_07_2025 = asyncHandler(async (req, res, next) => {
   const page = parseInt(req.query.page) || 1;
   console.log("page",page);
 
