@@ -78,9 +78,8 @@ import ironMachineRouter from './ironSmithRoutes/machine.routes.js';
 import ironProjectRouter from './ironSmithRoutes/project.routes.js';
 import ironShapesRouter from './ironSmithRoutes/dimension.routes.js';
 import ironWorkOrderRouter from './ironSmithRoutes/ironworkorder.routes.js';
-
-
 import ironJobOrderRouter from './ironSmithRoutes/ironjoborder.routes.js';
+import ironProductionRouter from './ironSmithRoutes/ironproduction.routes.js';
 
 
 
@@ -90,6 +89,7 @@ router.use('/ironSmith', ironProjectRouter);
 router.use('/ironSmith', ironShapesRouter);
 router.use('/ironSmith', ironWorkOrderRouter);
 router.use('/ironSmith', ironJobOrderRouter);
+router.use('/ironSmith', ironProductionRouter);
 
 
 

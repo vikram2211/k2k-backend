@@ -1,24 +1,34 @@
 import mongoose from 'mongoose';
 
-const dailyProductionSchema = new mongoose.Schema(
+const ironDailyProductionSchema = new mongoose.Schema(
   {
     work_order: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: 'WorkOrder',
+      ref: 'ironWorkOrder',
       required: true,
     },
     job_order: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: 'JobOrder',
+      ref: 'ironJobOrder',
       required: true,
     },
     products: [
       {
-        product_id: {
+        shape_id: {
           type: mongoose.Schema.Types.ObjectId,
-          ref: 'Product',
+          ref: 'ironShape',
           required: true,
         },
+        planned_quantity: {
+          type: Number,
+          required: true,
+        },
+        machines: [
+          {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'ironMachine',
+          },
+        ],
         achieved_quantity: {
           type: Number,
           required: true,
@@ -46,14 +56,44 @@ const dailyProductionSchema = new mongoose.Schema(
 
     status: {
       type: String,
-      enum: ['Pending QC', 'Approved', 'Rejected', 'In Progress'],
-      default: 'Pending QC',
+      enum: ['Pending', 'Pending QC', 'Approved', 'Rejected', 'In Progress', 'Paused'],
+      default: 'Pending',
     },
     submitted_by: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
       required: true,
     },
+    started_at: {
+      type: Date,
+      required: false,
+    },
+    stopped_at: {
+      type: Date,
+      required: false,
+    },
+    production_logs: [
+      {
+        action: {
+          type: String,
+          enum: ['Start', 'Pause', 'Resume', 'Stop'],
+          required: true,
+        },
+        timestamp: {
+          type: Date,
+          required: true,
+          default: Date.now,
+        },
+        user: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: 'User',
+          required: true,
+        },
+        description: {
+          type: String,
+        },
+      },
+    ],
     downtime: [
       {
         description: {
@@ -83,4 +123,4 @@ const dailyProductionSchema = new mongoose.Schema(
   { timestamps: true },
 );
 
-export const DailyProduction = mongoose.model('DailyProduction', dailyProductionSchema);
+export const ironDailyProduction = mongoose.model('ironDailyProduction', ironDailyProductionSchema);

@@ -68,7 +68,7 @@ const ironJobOrderSchema = new mongoose.Schema(
         selected_machines: [
           {
             type: mongoose.Schema.Types.ObjectId,
-            ref: 'Machine',
+            ref: 'ironMachine',
           },
         ],
         qr_code_id: {
