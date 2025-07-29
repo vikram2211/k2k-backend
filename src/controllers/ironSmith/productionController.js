@@ -13,7 +13,7 @@ const getProductionData = asyncHandler(async (req, res) => {
     const [month, day, year] = todayDate.split('/');
     const currentDate = new Date(`${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}T00:00:00Z`).toISOString();
   
-    // Fetch all production records
+    ///// Fetch all production records /////
     const productions = await ironDailyProduction
       .find()
       .populate({
