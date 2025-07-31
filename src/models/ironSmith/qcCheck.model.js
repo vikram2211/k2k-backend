@@ -1,25 +1,25 @@
 import mongoose from 'mongoose';
 
-const qcCheckSchema = new mongoose.Schema(
+const ironQcCheckSchema = new mongoose.Schema(
   {
     work_order: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: 'WorkOrder',
+      ref: 'ironWorkOrder',
       required: true,
     },
     job_order: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: 'JobOrder',
+      ref: 'ironJobOrder',
       required: true,
     },
-    product_order: {
+    // product_order: {
+    //   type: mongoose.Schema.Types.ObjectId,
+    //   ref: 'ProductOrder', // Assuming a separate product order schema exists
+    //   required: true,
+    // },
+    shape_id: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: 'ProductOrder', // Assuming a separate product order schema exists
-      required: true,
-    },
-    product_id: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'Product',
+      ref: 'ironShape',
       required: true,
     },
     rejected_quantity: {
@@ -30,7 +30,7 @@ const qcCheckSchema = new mongoose.Schema(
     recycled_quantity: {
       type: Number,
       default: 0, // Recycled products after rejection
-      required: true,
+      required: false,
     },
     remarks: {
       type: String, // Additional comments on QC check
@@ -54,4 +54,4 @@ const qcCheckSchema = new mongoose.Schema(
   { timestamps: true } // Auto tracks createdAt and updatedAt
 );
 
-export const QCCheck = mongoose.model('QCCheck', qcCheckSchema);
+export const ironQCCheck = mongoose.model('ironQCCheck', ironQcCheckSchema);

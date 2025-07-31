@@ -354,6 +354,7 @@ export const getScannedProductsData = async(req,res)=>{
     if(!qrId){
       return res.status(400).json({success:false,message:"Please give QR Id"})
     }
+    console.log("qrId",qrId);
 
     let getScannedProducts = await (await Packing.findOne({qr_id:qrId})).populate('product','description');
     console.log("getScannedProducts",getScannedProducts);
