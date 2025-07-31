@@ -17,6 +17,7 @@ import { ApiError } from '../../utils/ApiError.js';
 import { Inventory } from '../../models/konkreteKlinkers/inventory.model.js';
 import { DailyProduction } from '../../models/konkreteKlinkers/dailyProductionPlanning.js';
 import { Packing } from '../../models/konkreteKlinkers/packing.model.js';
+import { deleteObject } from '../../../util/deleteObject.js';
 
 // const logger = winston.createLogger({
 //   level: 'info',
@@ -2025,6 +2026,18 @@ export const getWorkOrderById = async (req, res) => {
 //     });
 //   }
 // };
+<<<<<<< Updated upstream
+=======
+export const updateWorkOrder = async (req, res) => {
+  console.log('=== UPDATE WORK ORDER CALLED ===');
+  console.log('Request method:', req.method);
+  console.log('Request params:', req.params);
+  console.log('Request body keys:', Object.keys(req.body));
+  console.log('Files received:', req.files ? req.files.length : 0);
+  
+  const bodyData = req.body;
+  console.log('deleted_files received:', bodyData.deleted_files);
+>>>>>>> Stashed changes
 
 
 
@@ -2043,6 +2056,7 @@ export const updateWorkOrder = async (req, res) => {
       });
     }
 
+<<<<<<< Updated upstream
     // 3. Parse form-data
     const bodyData = req.body;
 
@@ -2050,6 +2064,42 @@ export const updateWorkOrder = async (req, res) => {
     const updateData = {};
 
     // 5. Handle date update if provided
+=======
+    // 3. Initialize update data object
+    const updateData = {};
+
+    // Handle deleted files
+    let deletedFileIds = [];
+    if (bodyData.deleted_files) {
+      if (Array.isArray(bodyData.deleted_files)) {
+        deletedFileIds = bodyData.deleted_files;
+      } else {
+        deletedFileIds = [bodyData.deleted_files];
+      }
+      console.log('Files to delete:', deletedFileIds);
+      console.log('Existing files before deletion:', existingWorkOrder.files.map(f => ({ id: f._id?.toString(), url: f.file_url, name: f.file_name })));
+      
+      // Remove files from the work order's files array
+      const filesToDelete = existingWorkOrder.files.filter(f => deletedFileIds.includes(f._id?.toString()) || deletedFileIds.includes(f.file_url));
+      console.log('Files found for deletion:', filesToDelete.map(f => ({ id: f._id?.toString(), url: f.file_url, name: f.file_name })));
+      
+      // Remove from DB array
+      updateData.files = (updateData.files || existingWorkOrder.files).filter(f => !deletedFileIds.includes(f._id?.toString()) && !deletedFileIds.includes(f.file_url));
+      console.log('Files after deletion:', updateData.files.map(f => ({ id: f._id?.toString(), url: f.file_url, name: f.file_name })));
+      
+      // Delete from S3
+      for (const file of filesToDelete) {
+        if (file.file_url) {
+          const urlParts = file.file_url.split('/');
+          const key = urlParts.slice(3).join('/');
+          console.log('Deleting from S3:', key);
+          await deleteObject(key);
+        }
+      }
+    }
+
+    // 5. Handle date update if provided (keep as string for validation)
+>>>>>>> Stashed changes
     if (bodyData.date) {
       const dateObj = new Date(bodyData.date);
       if (isNaN(dateObj.getTime())) {
@@ -2145,7 +2195,18 @@ export const updateWorkOrder = async (req, res) => {
           file_url: url,
         });
       }
+<<<<<<< Updated upstream
       updateData.files = [...existingWorkOrder.files, ...uploadedFiles];
+=======
+      
+      // If files were deleted, use the already filtered files, otherwise use existing files
+      const currentFiles = updateData.files || existingWorkOrder.files;
+      console.log('Current files before adding new uploads:', currentFiles.map(f => ({ id: f._id?.toString(), url: f.file_url, name: f.file_name })));
+      console.log('New uploaded files:', uploadedFiles.map(f => ({ url: f.file_url, name: f.file_name })));
+      
+      updateData.files = [...currentFiles, ...uploadedFiles];
+      console.log('Final files array:', updateData.files.map(f => ({ id: f._id?.toString(), url: f.file_url, name: f.file_name })));
+>>>>>>> Stashed changes
     }
 
     // 9. Check if there's anything to update
@@ -2171,11 +2232,15 @@ export const updateWorkOrder = async (req, res) => {
     }
 
     // 12. Update work order
+    console.log('Data being saved to MongoDB:', JSON.stringify(mongoData, null, 2));
+    
     const updatedWorkOrder = await WorkOrder.findByIdAndUpdate(
       id,
       { $set: mongoData },
       { new: true, runValidators: true }
     );
+
+    console.log('Updated work order files from DB:', updatedWorkOrder.files.map(f => ({ id: f._id?.toString(), url: f.file_url, name: f.file_name })));
 
     res.status(200).json({
       success: true,

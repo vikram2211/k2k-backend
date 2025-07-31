@@ -36,7 +36,13 @@ console.log("inside app file!!!");
 
 // Debug middleware for request body
 app.use((req, res, next) => {
-  console.log('Request Body:', req.body);
+  if (req.url.includes('workorders') && req.method === 'PUT') {
+    console.log('=== WORK ORDER UPDATE REQUEST ===');
+    console.log('URL:', req.url);
+    console.log('Method:', req.method);
+    console.log('Request Body:', req.body);
+    console.log('Files:', req.files ? req.files.length : 0);
+  }
   next();
 });
 

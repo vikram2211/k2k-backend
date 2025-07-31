@@ -84,6 +84,7 @@
       // 3. Files Array
       files: [
         {
+          _id: { type: mongoose.Schema.Types.ObjectId, auto: true },
           file_name: {
             type: String,
             required: true,
