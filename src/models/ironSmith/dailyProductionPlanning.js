@@ -72,11 +72,12 @@ const ironDailyProductionSchema = new mongoose.Schema(
       type: Date,
       required: false,
     },
+   
     production_logs: [
       {
         action: {
           type: String,
-          enum: ['Start', 'Pause', 'Resume', 'Stop'],
+          enum: ['Start', 'Pause', 'Resume', 'Stop', 'UpdateQuantity','QCCheck'], // Added UpdateQuantity
           required: true,
         },
         timestamp: {
@@ -87,15 +88,27 @@ const ironDailyProductionSchema = new mongoose.Schema(
         user: {
           type: mongoose.Schema.Types.ObjectId,
           ref: 'User',
-          required: true,
+          required: true, 
         },
         description: {
           type: String,
+        },
+        achieved_quantity: { // New field to track the updated quantity
+          type: Number,
+          required: false,
+        },
+        rejected_quantity: { // New field to track rejected quantity
+          type: Number,
+          required: false,
         },
       },
     ],
     downtime: [
       {
+        downtime_start_time: {
+          type: Date,
+          required: false,
+        },
         description: {
           type: String,
           required: true, // Brief description of the issue
