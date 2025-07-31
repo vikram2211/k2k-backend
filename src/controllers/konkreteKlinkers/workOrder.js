@@ -2026,8 +2026,7 @@ export const getWorkOrderById = async (req, res) => {
 //     });
 //   }
 // };
-<<<<<<< Updated upstream
-=======
+
 export const updateWorkOrder = async (req, res) => {
   console.log('=== UPDATE WORK ORDER CALLED ===');
   console.log('Request method:', req.method);
@@ -2037,12 +2036,7 @@ export const updateWorkOrder = async (req, res) => {
   
   const bodyData = req.body;
   console.log('deleted_files received:', bodyData.deleted_files);
->>>>>>> Stashed changes
 
-
-
-
-export const updateWorkOrder = async (req, res) => {
   try {
     // 1. Get work order ID from params
     const { id } = req.params;
@@ -2056,15 +2050,6 @@ export const updateWorkOrder = async (req, res) => {
       });
     }
 
-<<<<<<< Updated upstream
-    // 3. Parse form-data
-    const bodyData = req.body;
-
-    // 4. Initialize update data object
-    const updateData = {};
-
-    // 5. Handle date update if provided
-=======
     // 3. Initialize update data object
     const updateData = {};
 
@@ -2098,8 +2083,7 @@ export const updateWorkOrder = async (req, res) => {
       }
     }
 
-    // 5. Handle date update if provided (keep as string for validation)
->>>>>>> Stashed changes
+        // 5. Handle date update if provided (keep as string for validation)
     if (bodyData.date) {
       const dateObj = new Date(bodyData.date);
       if (isNaN(dateObj.getTime())) {
@@ -2195,9 +2179,6 @@ export const updateWorkOrder = async (req, res) => {
           file_url: url,
         });
       }
-<<<<<<< Updated upstream
-      updateData.files = [...existingWorkOrder.files, ...uploadedFiles];
-=======
       
       // If files were deleted, use the already filtered files, otherwise use existing files
       const currentFiles = updateData.files || existingWorkOrder.files;
@@ -2206,7 +2187,6 @@ export const updateWorkOrder = async (req, res) => {
       
       updateData.files = [...currentFiles, ...uploadedFiles];
       console.log('Final files array:', updateData.files.map(f => ({ id: f._id?.toString(), url: f.file_url, name: f.file_name })));
->>>>>>> Stashed changes
     }
 
     // 9. Check if there's anything to update
