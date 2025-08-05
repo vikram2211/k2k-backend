@@ -75,6 +75,7 @@ const updateMachine = asyncHandler(async (req, res, next) => {
 
   return res.status(200).json(new ApiResponse(200, machine, "Machine updated successfully"));
 });
+//UPDATED
 
 // Fetch all machines
 const getAllMachines = asyncHandler(async (req, res, next) => {

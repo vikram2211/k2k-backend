@@ -35,11 +35,11 @@ const ironPackingSchema = new mongoose.Schema(
       required: false,
       unique: true, // Ensure QR codes are unique for traceability
       sparse: true,  
-      default: '',
+      // default: '',
       },
     qr_code_url: {
       type: String,
-      default: '',
+      // default: '',
       required: false,
       unique: true, // Ensure QR codes are unique for traceability
       sparse: true,

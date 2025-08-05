@@ -304,7 +304,7 @@ const createIronWorkOrder = asyncHandler(async (req, res) => {
             'number.base': 'Quantity must be a number',
             'number.min': 'Quantity must be non-negative',
         }),
-        deliveryDate: Joi.date().optional().allow(null).messages({ 'date.base': 'Delivery date must be a valid date' }),
+        deliveryDate: Joi.date().optional().allow(null).messages({ 'date.base': 'Delivery date must be a valid date' }).optional(),
         barMark: Joi.string().optional().allow(''),
         memberDetails: Joi.string().optional().allow(''),
         memberQuantity: Joi.number().min(0).required().messages({

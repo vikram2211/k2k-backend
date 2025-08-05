@@ -104,6 +104,7 @@ import { z } from 'zod';
 import { Packing } from '../../models/konkreteKlinkers/packing.model.js';
 import QRCode from 'qrcode';
 import { putObject } from '../../../util/putObject.js';
+import { deleteObject } from '../../../util/deleteObject.js';
 import mongoose from 'mongoose';
 import { WorkOrder } from '../../models/konkreteKlinkers/workOrder.model.js';
 import { Product } from '../../models/konkreteKlinkers/product.model.js';
@@ -994,7 +995,7 @@ export const getPackingByWorkOrderAndProduct = async (req, res) => {
     const packingRecords = await Packing.find({
       work_order: work_order_id,
       product: product_id,
-      // delivery_stage: 'Packed', // Uncomment if filtering by Packed is needed
+      delivery_stage: 'Packed', // Uncomment if filtering by Packed is needed
     })
       .populate({
         path: 'work_order',

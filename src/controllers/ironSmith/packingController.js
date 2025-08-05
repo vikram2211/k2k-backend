@@ -105,7 +105,7 @@ const createPackingBundle1 = async (req, res) => {
 };
 
 
-const createPackingBundle = async (req, res) => {
+const createPackingBundle_05_08_2025 = async (req, res) => {
   try {
     const { work_order, shape_id, product_quantity, bundle_size, weight, qr_code } = req.body;
 
@@ -145,6 +145,89 @@ const createPackingBundle = async (req, res) => {
     res.status(201).json({
       success: true,
       message: `${totalBundles} packing records created successfully`,
+      data: savedRecords,
+    });
+  } catch (error) {
+    console.error('Error creating packing records:', error);
+    res.status(error.statusCode || 500).json({
+      success: false,
+      message: error.message || 'Internal server error',
+    });
+  }
+};
+
+
+const createPackingBundle = async (req, res) => {
+  try {
+    const { work_order, shape_id, product_quantity, bundle_size, weight } = req.body;
+    console.log("product_quantity",product_quantity);
+
+    // Validate required fields
+    if (!shape_id || !product_quantity || !bundle_size) {
+      throw new ApiError(400, 'shape_id, product_quantity, and bundle_size are required');
+    }
+
+    // Validate numeric fields
+    if (
+      isNaN(product_quantity) ||
+      isNaN(bundle_size) ||
+      (weight && isNaN(weight))
+    ) {
+      throw new ApiError(400, 'product_quantity, bundle_size, and weight must be numbers');
+    }
+
+    // Validate positive values
+    if (product_quantity <= 0) {
+      throw new ApiError(400, 'product_quantity must be greater than 0');
+    }
+    if (bundle_size <= 0) {
+      throw new ApiError(400, 'bundle_size must be greater than 0');
+    }
+
+    // Calculate number of bundles
+    const fullBundles = Math.ceil(product_quantity / bundle_size);
+    const remainingItems = product_quantity % bundle_size;
+    const numberOfBundles = remainingItems > 0 ? Math.max(1, fullBundles) : fullBundles;
+
+    // Create packing records
+    const packingRecords = [];
+    let itemsAssigned = 0;
+
+    for (let i = 0; i < numberOfBundles; i++) {
+      let bundleQuantity;
+      if (i < numberOfBundles - 1) {
+        // Full bundles
+        bundleQuantity = bundle_size;
+      } else {
+        // Last bundle gets remainder or all items if fewer than bundle_size
+        bundleQuantity = product_quantity - itemsAssigned;
+      }
+
+      const packingRecord = new iornPacking({
+        work_order: work_order || null,
+        shape_id,
+        product_quantity: bundleQuantity,
+        bundle_size,
+        weight: weight || 0,
+        // delivery_stage: 'Packed',
+        packed_by: req.user._id,
+      });
+
+      packingRecords.push(packingRecord);
+      itemsAssigned += bundleQuantity;
+    }
+
+    // Validate total items assigned
+    if (itemsAssigned !== product_quantity) {
+      throw new ApiError(400, 'Total items in bundles do not match product_quantity');
+    }
+
+    // Save all packing records to the database
+    const savedRecords = await iornPacking.insertMany(packingRecords);
+
+    res.status(201).json({
+      success: true,
+      message: `${numberOfBundles} packing records created successfully`,
       data: savedRecords,
     });
   } catch (error) {

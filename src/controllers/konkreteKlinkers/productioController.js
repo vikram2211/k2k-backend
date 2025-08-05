@@ -464,9 +464,9 @@ export const getJobOrdersByDate = async (req, res) => {
 
     // Query parameters
     const { date } = req.query;
-    console.log("date", date);
+    // console.log("date", date);
     let query = {};
-    console.log("query", query);
+    // console.log("query", query);
 
     // If a specific date is provided, filter by that date
     if (date) {
@@ -642,11 +642,11 @@ export const getJobOrdersByDate = async (req, res) => {
 
       if (date) {
         categorizedOrders.todayDPR.push(entry);
-        console.log("today DPR",categorizedOrders.todayDPR);
+        // console.log("today DPR",categorizedOrders.todayDPR);
       } else {
         if (dpDate.getTime() === todayUTC.getTime()) {
           categorizedOrders.todayDPR.push(entry);
-          console.log("today DPR*",categorizedOrders.todayDPR);
+          // console.log("today DPR*",categorizedOrders.todayDPR);
         } else if (dpDate < todayUTC) {
           categorizedOrders.pastDPR.push(entry);
         } else if (dpDate >= tomorrowUTC) {
