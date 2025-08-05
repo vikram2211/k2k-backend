@@ -80,6 +80,9 @@ import ironShapesRouter from './ironSmithRoutes/dimension.routes.js';
 import ironWorkOrderRouter from './ironSmithRoutes/ironworkorder.routes.js';
 import ironJobOrderRouter from './ironSmithRoutes/ironjoborder.routes.js';
 import ironProductionRouter from './ironSmithRoutes/ironproduction.routes.js';
+import ironQCCheckRouter from './ironSmithRoutes/ironqc.routes.js';
+import ironPackingRouter from './ironSmithRoutes/ironpacking.routes.js';
+import ironDispatchRouter from './ironSmithRoutes/irondispatch.routes.js';
 
 
 
@@ -90,6 +93,9 @@ router.use('/ironSmith', ironShapesRouter);
 router.use('/ironSmith', ironWorkOrderRouter);
 router.use('/ironSmith', ironJobOrderRouter);
 router.use('/ironSmith', ironProductionRouter);
+router.use('/ironSmith', ironQCCheckRouter);
+router.use('/ironSmith', ironPackingRouter);
+router.use('/ironSmith', ironDispatchRouter);
 
 
 

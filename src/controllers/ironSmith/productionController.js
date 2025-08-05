@@ -331,7 +331,7 @@ const getProductionData = asyncHandler(async (req, res) => {
   );
 });
 
-const manageIronProductionActions = asyncHandler(async (req, res) => {
+const manageIronProductionActions1 = asyncHandler(async (req, res) => {
   try {
     const { action, job_order, shape_id, _id } = req.body;
 
@@ -543,6 +543,211 @@ const manageIronProductionActions = asyncHandler(async (req, res) => {
   }
 });
 
+const manageIronProductionActions = asyncHandler(async (req, res) => {
+  try {
+    const { action, job_order, shape_id, object_id } = req.body;
+
+    if (!['start', 'pause', 'resume', 'stop'].includes(action)) {
+      return res.status(400).json(
+        new ApiResponse(400, null, 'Invalid action. Must be "start", "pause", "resume", or "stop".')
+      );
+    }
+
+    if (!req.user || !req.user._id) {
+      return res.status(401).json(
+        new ApiResponse(401, null, 'Unauthorized: User not authenticated.')
+      );
+    }
+
+    if (!job_order || !shape_id || !object_id) {
+      return res.status(400).json(
+        new ApiResponse(400, null, 'Missing required fields: job_order, shape_id, object_id.')
+      );
+    }
+
+    const jobOrder = await ironJobOrder.findById(job_order).populate('work_order', 'work_order_number');
+    if (!jobOrder) {
+      return res.status(404).json(
+        new ApiResponse(404, null, 'Job order not found.')
+      );
+    }
+    console.log("jobOrder.products",jobOrder.products);
+
+    const jobOrderProduct = jobOrder.products.find((product) =>
+      product.shape.equals(shape_id) && product._id.equals(object_id)
+    );
+    if (!jobOrderProduct) {
+      return res.status(400).json(
+        new ApiResponse(400, null, 'Shape ID or object_id not found in job order.')
+      );
+    }
+
+    let dailyProduction = await ironDailyProduction.findOne({
+      job_order,
+      'products.shape_id': shape_id,
+      'products.object_id': object_id,
+    });
+
+    if (action === 'start') {
+      if (dailyProduction) {
+        if (dailyProduction.started_at) {
+          return res.status(400).json(
+            new ApiResponse(400, null, 'Production already started for this job order and shape.')
+          );
+        }
+        dailyProduction.started_at = new Date();
+        dailyProduction.submitted_by = req.user._id;
+        dailyProduction.updated_by = req.user._id;
+        dailyProduction.status = 'In Progress';
+        dailyProduction.production_logs.push({
+          action: 'Start',
+          timestamp: new Date(),
+          user: req.user._id,
+          description: 'Production started',
+        });
+        const updatedProduction = await dailyProduction.save();
+        return res.status(200).json(
+          new ApiResponse(200, updatedProduction, 'Production started successfully for the specified shape.')
+        );
+      } else {
+        const schemaProducts = jobOrder.products
+          .filter((product) => product.shape.equals(shape_id) && product._id.equals(object_id))
+          .map((product) => ({
+            object_id: product._id,
+            shape_id: product.shape,
+            planned_quantity: product.planned_quantity,
+            machines: product.selected_machines || [],
+            achieved_quantity: 0,
+            rejected_quantity: 0,
+            recycled_quantity: 0,
+          }));
+
+        if (schemaProducts.length === 0) {
+          return res.status(400).json(
+            new ApiResponse(400, null, 'No matching shape and object_id found to start production.')
+          );
+        }
+
+        const newProduction = new ironDailyProduction({
+          work_order: jobOrder.work_order._id,
+          job_order,
+          products: schemaProducts,
+          submitted_by: req.user._id,
+          started_at: new Date(),
+          created_by: req.user._id,
+          updated_by: req.user._id,
+          status: 'In Progress',
+          production_logs: [
+            {
+              action: 'Start',
+              timestamp: new Date(),
+              user: req.user._id,
+              description: 'Production started',
+            },
+          ],
+        });
+
+        const savedProduction = await newProduction.save();
+        return res.status(201).json(
+          new ApiResponse(201, savedProduction, 'Production started successfully.')
+        );
+      }
+    } else {
+      if (!dailyProduction) {
+        return res.status(404).json(
+          new ApiResponse(404, null, 'Daily production document not found for this job order and shape.')
+        );
+      }
+      if (!dailyProduction.started_at) {
+        return res.status(400).json(
+          new ApiResponse(400, null, 'Production has not started for this job order and shape.')
+        );
+      }
+      if (dailyProduction.stopped_at && action !== 'resume') {
+        return res.status(400).json(
+          new ApiResponse(400, null, 'Production already stopped for this job order and shape.')
+        );
+      }
+
+      const productIndex = dailyProduction.products.findIndex((p) => p.object_id.equals(object_id));
+      if (productIndex === -1) {
+        return res.status(404).json(
+          new ApiResponse(404, 'object_id not found in the products array.')
+        );
+      }
+
+      if (action === 'pause') {
+        if (dailyProduction.status === 'Paused') {
+          return res.status(400).json(
+            new ApiResponse(400, null, 'Production is already paused.')
+          );
+        }
+        dailyProduction.status = 'Paused';
+        dailyProduction.updated_by = req.user._id;
+        dailyProduction.production_logs.push({
+          action: 'Pause',
+          timestamp: new Date(),
+          user: req.user._id,
+          description: req.body.pause_description || 'Production paused',
+        });
+      } else if (action === 'resume') {
+        if (dailyProduction.status !== 'Paused') {
+          return res.status(400).json(
+            new ApiResponse(400, null, 'Production is not paused.')
+          );
+        }
+        if (!dailyProduction.stopped_at) {
+          dailyProduction.status = 'In Progress';
+          dailyProduction.updated_by = req.user._id;
+          dailyProduction.production_logs.push({
+            action: 'Resume',
+            timestamp: new Date(),
+            user: req.user._id,
+            description: 'Production resumed',
+          });
+        } else {
+          return res.status(400).json(
+            new ApiResponse(400, null, 'Cannot resume a stopped production.')
+          );
+        }
+      } else if (action === 'stop') {
+        if (dailyProduction.status === 'Pending QC') {
+          return res.status(400).json(
+            new ApiResponse(400, null, 'Production is already stopped and pending QC.')
+          );
+        }
+        dailyProduction.stopped_at = new Date();
+        dailyProduction.updated_by = req.user._id;
+        dailyProduction.status = 'Pending QC';
+        dailyProduction.production_logs.push({
+          action: 'Stop',
+          timestamp: new Date(),
+          user: req.user._id,
+          description: 'Production stopped',
+        });
+      }
+
+      if (req.body.downtime && req.body.downtime.description && req.body.downtime.minutes !== undefined) {
+        const downtimeEntry = {
+          description: req.body.downtime.description,
+          minutes: Number(req.body.downtime.minutes),
+          remarks: req.body.downtime.remarks,
+        };
+        dailyProduction.downtime.push(downtimeEntry);
+      }
+
+      const updatedProduction = await dailyProduction.save();
+      return res.status(200).json(
+        new ApiResponse(200, updatedProduction, `Production ${action}ed successfully for the specified shape.`)
+      );
+    }
+  } catch (error) {
+    console.error('Error managing iron production action:', error);
+    return res.status(500).json(
+      new ApiResponse(500, null, 'Internal Server Error', error.message)
+    );
+  }
+});
 
 
 // const updateIronProductionQuantities = asyncHandler(async (req, res) => {
@@ -639,7 +844,7 @@ const manageIronProductionActions = asyncHandler(async (req, res) => {
 // });
 
 
-const updateIronProductionQuantities = asyncHandler(async (req, res) => {
+const updateIronProductionQuantities1 = asyncHandler(async (req, res) => {
   try {
     const { job_order, shape_id, _id, achieved_quantity ,remarks} = req.body;
 
@@ -746,7 +951,107 @@ const updateIronProductionQuantities = asyncHandler(async (req, res) => {
   }
 });
 
-const addIronDowntime = async (req, res, next) => {
+
+const updateIronProductionQuantities = asyncHandler(async (req, res) => {
+  try {
+    const { job_order, shape_id, object_id, achieved_quantity, remarks } = req.body;
+
+    if (!job_order || !shape_id || !object_id) {
+      return res.status(400).json(
+        new ApiResponse(400, null, 'Missing required fields: job_order, shape_id, object_id.')
+      );
+    }
+
+    if (!req.user || !req.user._id) {
+      return res.status(401).json(
+        new ApiResponse(401, null, 'Unauthorized: User not authenticated.')
+      );
+    }
+
+    const jobOrder = await ironJobOrder.findById(job_order).populate('work_order', 'work_order_number');
+    if (!jobOrder) {
+      return res.status(404).json(
+        new ApiResponse(404, null, 'Job order not found.')
+      );
+    }
+
+    const jobOrderShape = jobOrder.products.find((product) =>
+      product.shape.equals(shape_id) && product._id.equals(object_id)
+    );
+    if (!jobOrderShape) {
+      return res.status(400).json(
+        new ApiResponse(400, null, 'Shape ID or object_id not found in job order.')
+      );
+    }
+
+    const plannedQuantity = jobOrderShape.planned_quantity;
+
+    const dailyProduction = await ironDailyProduction.findOne({
+      job_order,
+      'products.shape_id': shape_id,
+      'products.object_id': object_id,
+    });
+
+    if (!dailyProduction) {
+      return res.status(404).json(
+        new ApiResponse(404, null, 'Daily production document not found for this job order and shape.')
+      );
+    }
+
+    if (!dailyProduction.started_at) {
+      return res.status(400).json(
+        new ApiResponse(400, null, 'Cannot update quantity. Production has not started.')
+      );
+    }
+
+    const productIndex = dailyProduction.products.findIndex((p) => p.object_id.equals(object_id));
+    if (productIndex === -1) {
+      return res.status(404).json(
+        new ApiResponse(404, null, 'object_id not found in the products array.')
+      );
+    }
+
+    if (achieved_quantity !== undefined) {
+      if (isNaN(achieved_quantity) || achieved_quantity < 0) {
+        return res.status(400).json(
+          new ApiResponse(400, null, 'Achieved quantity must be a non-negative number.')
+        );
+      }
+      const currentAchievedQuantity = dailyProduction.products[productIndex].achieved_quantity || 0;
+      const newAchievedQuantity = currentAchievedQuantity + achieved_quantity;
+      if (newAchievedQuantity > plannedQuantity) {
+        return res.status(400).json(
+          new ApiResponse(400, null, 'Achieved quantity cannot exceed planned quantity.')
+        );
+      }
+      dailyProduction.products[productIndex].achieved_quantity = newAchievedQuantity;
+      dailyProduction.production_logs.push({
+        action: 'UpdateQuantity',
+        user: req.user._id,
+        achieved_quantity: achieved_quantity,
+        description: remarks,
+      });
+    } else {
+      return res.status(400).json(
+        new ApiResponse(400, null, 'Achieved quantity is required for update.')
+      );
+    }
+
+    dailyProduction.updated_by = req.user._id;
+    const updatedProduction = await dailyProduction.save();
+
+    return res.status(200).json(
+      new ApiResponse(200, updatedProduction, 'Production quantities updated successfully.')
+    );
+  } catch (error) {
+    console.error('Error updating iron production quantities:', error);
+    return res.status(500).json(
+      new ApiResponse(500, null, 'Internal Server Error', error.message)
+    );
+  }
+});
+
+const addIronDowntime1 = async (req, res, next) => {
   try {
     const { job_order, shape_id, _id, description, minutes, remarks, downtime_start_time } = req.body;
 
@@ -836,7 +1141,82 @@ const addIronDowntime = async (req, res, next) => {
   }
 };
 
-const getIronDowntime = async (req, res, next) => {
+const addIronDowntime = async (req, res, next) => {
+  try {
+    const { job_order, shape_id, object_id, description, minutes, remarks, downtime_start_time } = req.body;
+
+    if (!job_order || !shape_id || !object_id || !description || minutes === undefined) {
+      return next(
+        new ApiError(400, 'Missing required fields: job_order, shape_id, object_id, description, minutes')
+      );
+    }
+
+    if (isNaN(minutes) || minutes < 0) {
+      return next(new ApiError(400, 'Minutes must be a non-negative number'));
+    }
+
+    let parsedDowntimeStartTime;
+    if (downtime_start_time) {
+      try {
+        const today = new Date(2025, 7, 1); // August 01, 2025 (month is 0-indexed)
+        console.log('Base date:', today);
+        parsedDowntimeStartTime = parse(
+          downtime_start_time,
+          'HH:mm',
+          today
+        );
+        if (isNaN(parsedDowntimeStartTime.getTime())) {
+          parsedDowntimeStartTime = parse(
+            downtime_start_time,
+            'h:mm a',
+            today
+          );
+        }
+        if (isNaN(parsedDowntimeStartTime.getTime())) {
+          return next(new ApiError(400, 'Invalid downtime_start_time format. Use e.g., "14:30" or "2:30 PM"'));
+        }
+      } catch (error) {
+        console.error('Error parsing downtime_start_time:', error);
+        return next(new ApiError(400, 'Invalid downtime_start_time format'));
+      }
+    }
+
+    const dailyProduction = await ironDailyProduction.findOne({
+      job_order: job_order,
+      'products.shape_id': shape_id,
+      'products.object_id': object_id,
+    });
+
+    if (!dailyProduction) {
+      return next(
+        new ApiError(404, 'DailyProduction document not found for the specified job order, shape, and object_id')
+      );
+    }
+
+    const downtimeEntry = {
+      downtime_start_time: parsedDowntimeStartTime || undefined,
+      description,
+      minutes: Number(minutes),
+      remarks,
+    };
+
+    dailyProduction.downtime.push(downtimeEntry);
+    dailyProduction.updated_by = req.user?._id || null;
+
+    const updatedProduction = await dailyProduction.save();
+
+    return res.status(200).json({
+      success: true,
+      message: 'Downtime added successfully',
+      data: updatedProduction,
+    });
+  } catch (error) {
+    console.error('Error adding downtime:', error);
+    next(new ApiError(500, 'Internal Server Error', error.message));
+  }
+};
+
+const getIronDowntime1 = async (req, res, next) => {
   try {
     const { shape_id, _id, job_order } = req.query;
 
@@ -899,7 +1279,71 @@ const getIronDowntime = async (req, res, next) => {
   }
 };
 
-const getProductionLog = async (req, res, next) => {
+const getIronDowntime = async (req, res, next) => {
+  try {
+    const { shape_id, object_id, job_order } = req.query;
+
+    // Validate shape_id, object_id, and job_order
+    if (!shape_id || !mongoose.isValidObjectId(shape_id)) {
+      return res.status(400).json({ success: false, message: 'Valid shape_id is required' });
+    }
+    if (!object_id || !mongoose.isValidObjectId(object_id)) {
+      return res.status(400).json({ success: false, message: 'Valid object_id is required' });
+    }
+    if (!job_order || !mongoose.isValidObjectId(job_order)) {
+      return res.status(400).json({ success: false, message: 'Valid job_order is required' });
+    }
+
+    // Fetch DailyProduction document for the shape_id, object_id, and job_order
+    const dailyProduction = await ironDailyProduction.findOne({
+      job_order: job_order,
+      'products.shape_id': shape_id,
+      'products.object_id': object_id, // Use object_id instead of _id
+    }).lean();
+
+    // If no DailyProduction document found
+    if (!dailyProduction) {
+      return res.status(200).json({
+        success: true,
+        message: 'No downtime records found for the specified shape, object_id, and job order',
+        data: [],
+        object_id: object_id, // Include object_id in response
+      });
+    }
+
+    // Prepare the response with only downtime entries
+    const downtimeRecords = dailyProduction.downtime && dailyProduction.downtime.length > 0
+      ? dailyProduction.downtime.map((downtime) => {
+        const start_time = downtime.downtime_start_time || null;
+        const end_time =
+          start_time && downtime.minutes != null
+            ? addMinutes(new Date(start_time), downtime.minutes)
+            : null;
+
+        return {
+          start_time,
+          end_time,
+          reason: downtime.description || 'N/A',
+          total_duration: downtime.minutes != null ? downtime.minutes : null,
+          remarks: downtime.remarks || null,
+          _id: downtime._id,
+        };
+      })
+      : [];
+
+    return res.status(200).json({
+      success: true,
+      message: 'Downtime records fetched successfully',
+      data: downtimeRecords,
+      object_id: object_id, // Include object_id in response
+    });
+  } catch (error) {
+    console.error('Error fetching downtime records:', error);
+    return res.status(500).json({ success: false, message: 'Internal Server Error' });
+  }
+};
+
+const getProductionLog1 = async (req, res, next) => {
   try {
     const { job_order, shape_id, _id } = req.query;
 
@@ -957,7 +1401,73 @@ const getProductionLog = async (req, res, next) => {
   }
 };
 
-const addQcCheck = asyncHandler(async (req, res) => {
+const getProductionLog = async (req, res, next) => {
+  try {
+    const { job_order, shape_id, object_id } = req.query;
+    console.log("job_order",job_order);
+    console.log("shape_id",shape_id);
+    console.log("object_id",object_id);
+
+    // Validate query parameters
+    if (!job_order || !mongoose.isValidObjectId(job_order)) {
+      return res.status(400).json({ success: false, message: 'Valid job_order is required' });
+    }
+    if (!shape_id || !mongoose.isValidObjectId(shape_id)) {
+      return res.status(400).json({ success: false, message: 'Valid shape_id is required' });
+    }
+    if (!object_id || !mongoose.isValidObjectId(object_id)) {
+      return res.status(400).json({ success: false, message: 'Valid object_id is required' });
+    }
+
+    // Fetch the DailyProduction document for the specified job_order, shape_id, and object_id
+    const dailyProduction = await ironDailyProduction.findOne({
+      job_order: job_order,
+      'products.shape_id': shape_id,
+      'products.object_id': object_id, // Use object_id instead of _id
+    }).populate({
+      path: 'production_logs.user',
+      model: 'User',
+      select: 'username',
+    }).lean();
+
+    
+    console.log("dailyProduction",dailyProduction);
+
+    // If no DailyProduction document found
+    if (!dailyProduction) {
+      return res.status(200).json({
+        success: true,
+        message: 'No production log records found for the specified job order, shape, and object_id',
+        data: [],
+        object_id: object_id, // Include object_id in response
+      });
+    }
+
+    // Prepare the response with production log entries
+    const productionLogRecords = dailyProduction.production_logs && dailyProduction.production_logs.length > 0
+      ? dailyProduction.production_logs.map((log) => ({
+          action: log.action,
+          timestamp: log.timestamp,
+          user: log.user._id,
+          username: log.user.username,
+          description: log.description || 'N/A',
+          achieved_quantity: log.achieved_quantity || null,
+        }))
+      : [];
+
+    return res.status(200).json({
+      success: true,
+      message: 'Production log records fetched successfully',
+      data: productionLogRecords,
+      object_id: object_id, // Include object_id in response
+    });
+  } catch (error) {
+    console.error('Error fetching production log records:', error);
+    return res.status(500).json({ success: false, message: 'Internal Server Error' });
+  }
+};
+
+const addQcCheck1 = asyncHandler(async (req, res) => {
   try {
     const { job_order, shape_id, _id, rejected_quantity, remarks } = req.body;
 
@@ -1028,6 +1538,174 @@ const addQcCheck = asyncHandler(async (req, res) => {
       shape_id: shape_id,
       rejected_quantity: rejected_quantity,
       recycled_quantity: 0, // Default to 0 if not provided
+      remarks: remarks,
+      created_by: req.user._id,
+    };
+
+    const newQcCheck = new ironQCCheck(qcCheckData);
+    await newQcCheck.save();
+
+    return res.status(200).json(
+      new ApiResponse(200, {
+        production: updatedProduction,
+        qcCheck: newQcCheck,
+      }, 'QC check added and production record updated successfully.')
+    );
+  } catch (error) {
+    console.error('Error adding QC check:', error);
+    return res.status(500).json(
+      new ApiResponse(500, null, 'Internal Server Error', error.message)
+    );
+  }
+});
+
+const addQcCheck2 = asyncHandler(async (req, res) => {
+  try {
+    const { job_order, shape_id, object_id, rejected_quantity, remarks } = req.body;
+
+    if (!job_order || !shape_id || !object_id || rejected_quantity === undefined) {
+      return res.status(400).json(
+        new ApiResponse(400, null, 'Missing required fields: job_order, shape_id, object_id, rejected_quantity.')
+      );
+    }
+
+    if (!req.user || !req.user._id) {
+      return res.status(401).json(
+        new ApiResponse(401, null, 'Unauthorized: User not authenticated.')
+      );
+    }
+
+    if (isNaN(rejected_quantity) || rejected_quantity < 0) {
+      return res.status(400).json(
+        new ApiResponse(400, null, 'Rejected quantity must be a non-negative number.')
+      );
+    }
+
+    const dailyProduction = await ironDailyProduction.findOne({
+      job_order,
+      'products.shape_id': shape_id,
+      'products.object_id': object_id,
+    });
+
+    if (!dailyProduction) {
+      return res.status(404).json(
+        new ApiResponse(404, null, 'Daily production document not found for this job order and shape.')
+      );
+    }
+
+    const productIndex = dailyProduction.products.findIndex((p) => p.object_id.equals(object_id));
+    if (productIndex === -1) {
+      return res.status(404).json(
+        new ApiResponse(404, null, 'object_id not found in the products array.')
+      );
+    }
+
+    const currentRejectedQuantity = dailyProduction.products[productIndex].rejected_quantity || 0;
+    const newRejectedQuantity = currentRejectedQuantity + rejected_quantity;
+    dailyProduction.products[productIndex].rejected_quantity = newRejectedQuantity;
+
+    dailyProduction.qc_checked_by = req.user._id;
+    dailyProduction.production_logs.push({
+      action: 'QCCheck',
+      user: req.user._id,
+      description: remarks || 'N/A',
+      rejected_quantity: newRejectedQuantity,
+    });
+
+    dailyProduction.updated_by = req.user._id;
+    const updatedProduction = await dailyProduction.save();
+
+    const qcCheckData = {
+      work_order: dailyProduction.work_order,
+      job_order: dailyProduction.job_order,
+      shape_id: shape_id,
+      object_id: object_id,
+      rejected_quantity: rejected_quantity,
+      recycled_quantity: 0,
+      remarks: remarks,
+      created_by: req.user._id,
+    };
+
+    const newQcCheck = new ironQCCheck(qcCheckData);
+    await newQcCheck.save();
+
+    return res.status(200).json(
+      new ApiResponse(200, {
+        production: updatedProduction,
+        qcCheck: newQcCheck,
+      }, 'QC check added and production record updated successfully.')
+    );
+  } catch (error) {
+    console.error('Error adding QC check:', error);
+    return res.status(500).json(
+      new ApiResponse(500, null, 'Internal Server Error', error.message)
+    );
+  }
+});
+
+const addQcCheck = asyncHandler(async (req, res) => {
+  try {
+    const { job_order, shape_id, object_id, rejected_quantity, remarks } = req.body;
+
+    if (!job_order || !shape_id || !object_id || rejected_quantity === undefined) {
+      return res.status(400).json(
+        new ApiResponse(400, null, 'Missing required fields: job_order, shape_id, object_id, rejected_quantity.')
+      );
+    }
+
+    if (!req.user || !req.user._id) {
+      return res.status(401).json(
+        new ApiResponse(401, null, 'Unauthorized: User not authenticated.')
+      );
+    }
+
+    if (isNaN(rejected_quantity) || rejected_quantity < 0) {
+      return res.status(400).json(
+        new ApiResponse(400, null, 'Rejected quantity must be a non-negative number.')
+      );
+    }
+
+    const dailyProduction = await ironDailyProduction.findOne({
+      job_order,
+      'products.shape_id': shape_id,
+      'products.object_id': object_id,
+    });
+
+    if (!dailyProduction) {
+      return res.status(404).json(
+        new ApiResponse(404, null, 'Daily production document not found for this job order and shape.')
+      );
+    }
+
+    const productIndex = dailyProduction.products.findIndex((p) => p.object_id.equals(object_id));
+    if (productIndex === -1) {
+      return res.status(404).json(
+        new ApiResponse(404, null, 'object_id not found in the products array.')
+      );
+    }
+
+    const currentRejectedQuantity = dailyProduction.products[productIndex].rejected_quantity || 0;
+    const newRejectedQuantity = currentRejectedQuantity + rejected_quantity;
+    dailyProduction.products[productIndex].rejected_quantity = newRejectedQuantity;
+    dailyProduction.products[productIndex].achieved_quantity -= rejected_quantity; // Deduct rejected quantity from achieved quantity
+    dailyProduction.qc_checked_by = req.user._id;
+    dailyProduction.production_logs.push({
+      action: 'QCCheck',
+      user: req.user._id,
+      description: remarks || 'N/A',
+      rejected_quantity: newRejectedQuantity,
+    });
+
+    dailyProduction.updated_by = req.user._id;
+    const updatedProduction = await dailyProduction.save();
+
+    const qcCheckData = {
+      work_order: dailyProduction.work_order,
+      job_order: dailyProduction.job_order,
+      shape_id: shape_id,
+      object_id: object_id,
+      rejected_quantity: rejected_quantity,
+      recycled_quantity: 0,
       remarks: remarks,
       created_by: req.user._id,
     };

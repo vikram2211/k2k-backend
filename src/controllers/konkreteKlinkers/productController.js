@@ -271,6 +271,7 @@ const createProduct = asyncHandler(async (req, res, next) => {
     // Validate request body
     const { error, value } = productSchema.validate(req.body, { abortEarly: false });
     if (error) {
+        console.log("error",error);
         return next(new ApiError(400, 'Validation failed for product creation', error.details));
     }
 

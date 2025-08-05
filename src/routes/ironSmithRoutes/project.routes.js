@@ -2,7 +2,7 @@
 import { Router } from 'express';
 import { verifyJWT } from '../../middlewares/auth.middleware.js';
 import {
-    createIronProject, updateIronProject, getAllIronProjects, getIronProjectById, deleteIronProject, addRawMaterial, updateRawMaterial, deleteRawMaterial, getRawMaterialsByProjectId
+    createIronProject, updateIronProject, getAllIronProjects, getIronProjectById, deleteIronProject, addRawMaterial, updateRawMaterial, deleteRawMaterial, getRawMaterialsByProjectId,getRawMaterialConsumption
 } from '../../controllers/ironSmith/helper/projectController.js';
 // import 'mongoose' from "mongoose";
 const router = Router();
@@ -16,6 +16,7 @@ router.route('/helpers/projects/delete').delete(deleteIronProject)
 router.route('/helpers/rawMaterials').post(addRawMaterial);
 router.route('/helpers/rawMaterials/:id').put(updateRawMaterial).delete(deleteRawMaterial);
 router.route('/helpers/rawMaterials/project/:projectId').get(getRawMaterialsByProjectId);
+router.route('/helpers/rawMaterials/consumption').get(getRawMaterialConsumption);
 
 
 export default router;

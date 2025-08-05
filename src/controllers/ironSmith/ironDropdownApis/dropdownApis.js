@@ -1,6 +1,9 @@
 import { ironProject } from "../../../models/ironSmith/helpers/ironProject.model.js";
 import { ironShape } from "../../../models/ironSmith/helpers/ironShape.model.js";
 import { ironDimension } from "../../../models/ironSmith/helpers/ironDimension.model.js";
+import { RawMaterial } from "../../../models/ironSmith/helpers/client-project-qty.model.js";
+import { ironJobOrder } from "../../../models/ironSmith/jobOrders.model.js";
+import { ironWorkOrder } from "../../../models/ironSmith/workOrder.model.js";
 import mongoose from "mongoose";
 
 
@@ -130,4 +133,100 @@ const getDimensions = async (req, res) => {
         });
     }
 };
-export { getIronProjectBasedOnClient, getIronDimensionBasedOnShape, getDimensions  };
+
+const getWorkOrderProductByJobOrder = async (req, res) => {
+  try {
+    let joId = req.params.id;
+    const jobOrders = await ironJobOrder.find({_id:joId }) // Exclude cancelled orders if desired
+      .populate({
+        path: 'work_order',
+        select: 'workOrderNumber _id', // Fetch workOrderNumber and _id
+        model: 'ironWorkOrder',
+      })
+      .populate({
+        path: 'products.shape',
+        select: 'shape_code description', // Fetch shape_code and description
+        model: 'ironShape',
+      })
+      .lean();
+      jobOrders.map(jobOrder => (jobOrder.products.map(product => (console.log("product",product)))))
+      // console.log("jobOrders",jobOrders.products);
+
+    const formattedJobOrders = jobOrders.map(jobOrder => ({
+      jobOrderNumber: jobOrder.job_order_number,
+      workOrderNumber: jobOrder.work_order?.workOrderNumber || 'N/A',
+      workOrderId: jobOrder.work_order?._id?.toString() || 'N/A',
+      products: jobOrder.products.map(product => ({
+        objectId: product._id.toString(), // The _id of the product in the products array
+        shapeId: product.shape._id.toString(), // The _id of the product in the products array
+        shapeName: `${product.shape?.shape_code || ''} - ${product.shape?.description || ''}`.trim() || 'N/A',
+        plannedQuantity: product.planned_quantity,
+        scheduleDate: product.schedule_date,
+        dia: product.dia,
+        achievedQuantity: product.achieved_quantity,
+        rejectedQuantity: product.rejected_quantity,
+      })),
+      status: jobOrder.status,
+      createdAt: jobOrder.createdAt,
+    }));
+
+    return res.status(200).json({
+      success: true,
+      message: 'Job order details retrieved successfully',
+      data: formattedJobOrders,
+    });
+  } catch (error) {
+    console.error('Error fetching job order details:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Internal Server Error',
+      error: error.message,
+    });
+  }
+};
+
+const getRawMaterialDataByProjectId = async (req, res) => {
+  const { projectId } = req.params;
+
+  // Validate projectId
+  if (!mongoose.Types.ObjectId.isValid(projectId)) {
+      // throw new ApiError(400, `Provided Project ID (${projectId}) is not a valid ObjectId`);
+      return res.status(400).json({success:false,message:"Provided Project ID is not a valid ObjectId"})
+  }
+
+  try {
+      // Fetch raw materials for the given project ID, excluding deleted ones
+      const rawMaterials = await RawMaterial.find({ project: projectId, isDeleted: false })
+          .lean();
+
+      // If no raw materials are found, return an empty array
+      if (!rawMaterials || rawMaterials.length === 0) {
+          // return sendResponse(res, new ApiResponse(200, [], 'No raw material data found for the given project ID'));
+          return res.status(200).json({success:false,message:"No raw material data found for the given project ID"})
+
+      }
+
+      // Group quantities by diameter
+      const rawMaterialData = rawMaterials.reduce((acc, material) => {
+          const existingMaterial = acc.find(item => item.diameter === material.diameter);
+          if (existingMaterial) {
+              existingMaterial.qty += material.qty; // Sum quantities for duplicate diameters
+          } else {
+              acc.push({ diameter: material.diameter, qty: material.qty });
+          }
+          return acc;
+      }, []);
+
+      // Return the processed data
+      // return sendResponse(res, new ApiResponse(200, rawMaterialData, 'Raw material data fetched successfully'));
+      return res.status(200).json({success:true,rawMaterialData,message:"Raw material data fetched successfully"})
+
+  } catch (error) {
+      console.error('Error fetching raw material data:', error);
+      // throw new ApiError(500, 'Internal Server Error', error.message);
+      return res.status(500).json({success:false,message:error.message})
+
+  }
+};
+
+export { getIronProjectBasedOnClient, getIronDimensionBasedOnShape, getDimensions, getWorkOrderProductByJobOrder, getRawMaterialDataByProjectId  };

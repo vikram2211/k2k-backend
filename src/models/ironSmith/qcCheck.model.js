@@ -22,6 +22,11 @@ const ironQcCheckSchema = new mongoose.Schema(
       ref: 'ironShape',
       required: true,
     },
+    object_id: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'ironJobOrder.products', // Reference to the products array _id in ironJobOrder
+      required: true,
+    },
     rejected_quantity: {
       type: Number,
       default: 0, // Defective products identified

@@ -6,7 +6,7 @@ import {
     createIronWorkOrder, getAllIronWorkOrders, getIronWorkOrderById, updateIronWorkOrder, deleteIronWorkOrder
 } from '../../controllers/ironSmith/workOrderController.js';
 
-import { getIronProjectBasedOnClient,getIronDimensionBasedOnShape } from '../../controllers/ironSmith/ironDropdownApis/dropdownApis.js'
+import { getIronProjectBasedOnClient,getIronDimensionBasedOnShape,getRawMaterialDataByProjectId } from '../../controllers/ironSmith/ironDropdownApis/dropdownApis.js'
 
 const router = Router();
 router.use(verifyJWT);
@@ -17,6 +17,7 @@ router.route('/workorder/:workOrderId').get(getIronWorkOrderById).put(upload.arr
 router.route('/workorder/:workOrderId').delete(deleteIronWorkOrder);
 router.route('/workorders-getProject').get(getIronProjectBasedOnClient);
 router.route('/dimension-by-shape/:shapeId').get(getIronDimensionBasedOnShape);
+router.route('/raw-data/:projectId').get(getRawMaterialDataByProjectId);
 
 
 export default router;

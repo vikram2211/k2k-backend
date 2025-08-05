@@ -19,6 +19,11 @@ const ironDailyProductionSchema = new mongoose.Schema(
           ref: 'ironShape',
           required: true,
         },
+        object_id: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: 'ironJobOrder.products', // Reference to the products array _id in ironJobOrder
+          required: true,
+        },
         planned_quantity: {
           type: Number,
           required: true,
@@ -77,7 +82,7 @@ const ironDailyProductionSchema = new mongoose.Schema(
       {
         action: {
           type: String,
-          enum: ['Start', 'Pause', 'Resume', 'Stop', 'UpdateQuantity','QCCheck'], // Added UpdateQuantity
+          enum: ['Start', 'Pause', 'Resume', 'Stop', 'UpdateQuantity','QCCheck','QCCheckUpdate'], // Added UpdateQuantity
           required: true,
         },
         timestamp: {

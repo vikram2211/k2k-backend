@@ -207,7 +207,7 @@ const createIronJobOrder_24_07_2025 = asyncHandler(async (req, res) => {
 });
 
 
-const createIronJobOrder = asyncHandler(async (req, res) => {
+const createIronJobOrder1 = asyncHandler(async (req, res) => {
   // 1. Validation schema
   const productSchema = Joi.object({
     shape: Joi.string()
@@ -457,6 +457,265 @@ const savedProductions = await Promise.all(dailyProductionPromises);
   }
 
   // 12. Convert timestamps to IST
+  const formatDateToIST = (data) => {
+    const convertToIST = (date) => {
+      if (!date) return null;
+      return new Date(date).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
+    };
+    return {
+      ...data,
+      date_range: {
+        from: convertToIST(data.date_range.from),
+        to: convertToIST(data.date_range.to),
+      },
+      createdAt: convertToIST(data.createdAt),
+      updatedAt: convertToIST(data.updatedAt),
+      products: data.products.map((p) => ({
+        ...p,
+        schedule_date: convertToIST(p.schedule_date),
+      })),
+    };
+  };
+
+  const formattedJobOrder = formatDateToIST(populatedJobOrder);
+
+  return res.status(201).json(new ApiResponse(201, formattedJobOrder, 'Job order created successfully'));
+});
+
+
+const createIronJobOrder = asyncHandler(async (req, res) => {
+  // 1. Validation schema
+  const productSchema = Joi.object({
+    shape: Joi.string()
+      .required()
+      .custom((value, helpers) => {
+        if (!mongoose.Types.ObjectId.isValid(value)) {
+          return helpers.error('any.invalid', { message: `Shape ID (${value}) is not a valid ObjectId` });
+        }
+        return value;
+      }, 'ObjectId validation'),
+    planned_quantity: Joi.number().min(0).required().messages({
+      'number.base': 'Planned quantity must be a number',
+      'number.min': 'Planned quantity must be non-negative',
+    }),
+    schedule_date: Joi.date().required().messages({
+      'date.base': 'Schedule date must be a valid date',
+    }),
+    dia: Joi.number().min(0).required().messages({
+      'number.base': 'Diameter must be a number',
+      'number.min': 'Diameter must be non-negative',
+    }),
+    selected_machines: Joi.array()
+      .items(
+        Joi.string().custom((value, helpers) => {
+          if (!mongoose.Types.ObjectId.isValid(value)) {
+            return helpers.error('any.invalid', { message: `Machine ID (${value}) is not a valid ObjectId` });
+          }
+          return value;
+        }, 'ObjectId validation')
+      )
+      .optional(),
+  });
+
+  const jobOrderSchema = Joi.object({
+    work_order: Joi.string()
+      .required()
+      .custom((value, helpers) => {
+        if (!mongoose.Types.ObjectId.isValid(value)) {
+          return helpers.error('any.invalid', { message: `Work order ID (${value}) is not a valid ObjectId` });
+        }
+        return value;
+      }, 'ObjectId validation'),
+    sales_order_number: Joi.string().optional().allow(''),
+    date_range: Joi.object({
+      from: Joi.date().required().messages({
+        'date.base': 'Start date must be a valid date',
+      }),
+      to: Joi.date().required().messages({
+        'date.base': 'End date must be a valid date',
+      }),
+    }).required(),
+    products: Joi.array().items(productSchema).min(1).required().messages({
+      'array.min': 'At least one product is required',
+    }),
+  });
+
+  // 2. Parse form-data
+  const bodyData = req.body;
+  console.log("bodyData", bodyData);
+  bodyData.products.map((p) => console.log("product", p));
+  const userId = req.user?._id?.toString();
+  console.log("userId", userId);
+
+  // Validate userId
+  if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
+    throw new ApiError(401, 'Invalid or missing user ID in request');
+  }
+
+  // 3. Parse stringified fields
+  if (typeof bodyData.products === 'string') {
+    try {
+      bodyData.products = JSON.parse(bodyData.products);
+    } catch (e) {
+      throw new ApiError(400, 'Invalid products JSON format');
+    }
+  }
+
+  // 4. Validate request body with Joi
+  const { error, value } = jobOrderSchema.validate(bodyData, { abortEarly: false });
+  if (error) {
+    console.log("error", error);
+    throw new ApiError(400, 'Validation failed for job order creation', error.details);
+  }
+
+  // 5. Generate job order number
+  const counter = await ironCounter.findOneAndUpdate(
+    { _id: 'job_order' },
+    { $inc: { sequence_value: 1 } },
+    { new: true, upsert: true }
+  );
+  const jobOrderNumber = `JO-${String(counter.sequence_value).padStart(3, '0')}`;
+
+  // 6. Generate QR codes and upload to S3 for each product
+  const productsWithQr = await Promise.all(
+    value.products.map(async (product) => {
+      const qrCodeId = `${jobOrderNumber}-${uuidv4()}`;
+      const qrContent = `joborder/${jobOrderNumber}/product/${qrCodeId}`;
+      let qrCodeBuffer;
+      try {
+        qrCodeBuffer = await QRCode.toBuffer(qrContent, {
+          type: 'png',
+          errorCorrectionLevel: 'H',
+          margin: 1,
+          width: 200,
+        });
+      } catch (error) {
+        throw new ApiError(500, `Failed to generate QR code for ${qrCodeId}: ${error.message}`);
+      }
+      const fileName = `qr-codes/${qrCodeId}-${Date.now()}.png`;
+      const file = { data: qrCodeBuffer, mimetype: 'image/png' };
+      let qrCodeUrl;
+      try {
+        const { url } = await putObject(file, fileName);
+        qrCodeUrl = url;
+      } catch (error) {
+        throw new ApiError(500, `Failed to upload QR code to S3 for ${qrCodeId}: ${error.message}`);
+      }
+      return {
+        ...product,
+        qr_code_id: qrCodeId,
+        qr_code_url: qrCodeUrl,
+        schedule_date: product.schedule_date ? new Date(product.schedule_date) : undefined,
+        selected_machines: product.selected_machines || [],
+      };
+    })
+  );
+
+  // 7. Prepare job order data with created_by and updated_by
+  const jobOrderData = {
+    ...value,
+    job_order_number: jobOrderNumber,
+    date_range: {
+      from: value.date_range?.from ? new Date(value.date_range.from) : undefined,
+      to: value.date_range?.to ? new Date(value.date_range.to) : undefined,
+    },
+    products: productsWithQr,
+    created_by: userId,
+    updated_by: userId,
+  };
+
+  // 8. Validate referenced documents
+  const [workOrder, shapes] = await Promise.all([
+    mongoose.model('ironWorkOrder').findById(value.work_order),
+    Promise.all(value.products.map((p) => mongoose.model('ironShape').findById(p.shape))),
+  ]);
+
+  if (!workOrder) throw new ApiError(404, `Work order not found with ID: ${value.work_order}`);
+  const invalidShape = shapes.findIndex((s) => !s);
+  if (invalidShape !== -1) {
+    throw new ApiError(404, `Shape not found with ID: ${value.products[invalidShape].shape}`);
+  }
+
+  // 9. Validate product-specific machines
+  for (const product of value.products) {
+    if (product.selected_machines && product.selected_machines.length) {
+      const productMachines = await mongoose.model('ironMachine').find({ _id: { $in: product.selected_machines } });
+      if (productMachines.length !== product.selected_machines.length) {
+        throw new ApiError(404, `One or more machines not found for shape ID: ${product.shape}`);
+      }
+    }
+  }
+
+  // 10. Save to MongoDB
+  const jobOrder = await ironJobOrder.create(jobOrderData);
+
+  // 11. Check for existing production and create production records
+  const existingProduction = await ironDailyProduction.findOne({
+    job_order: jobOrder._id,
+    status: 'In Progress',
+  });
+  if (existingProduction) {
+    throw new ApiError(400, 'Production is already in progress for this job order');
+  }
+
+  const dailyProductionPromises = jobOrder.products.map(async (product) => {
+    const schemaProduct = {
+      object_id: product._id, // Use the saved product _id
+      shape_id: product.shape,
+      planned_quantity: product.planned_quantity,
+      achieved_quantity: 0,
+      rejected_quantity: 0,
+      recycled_quantity: 0,
+      machines: product.selected_machines || [],
+    };
+
+    const newProduction = new ironDailyProduction({
+      work_order: jobOrderData.work_order,
+      job_order: jobOrder._id,
+      products: [schemaProduct],
+      date: new Date(product.schedule_date),
+      submitted_by: userId,
+      created_by: userId,
+      updated_by: userId,
+      status: 'Pending',
+    });
+
+    return newProduction.save();
+  });
+
+  const savedProductions = await Promise.all(dailyProductionPromises);
+
+  // 12. Populate and format response
+  const populatedJobOrder = await mongoose
+    .model('ironJobOrder')
+    .findById(jobOrder._id)
+    .populate({
+      path: 'work_order',
+      select: '_id po_quantity',
+    })
+    .populate({
+      path: 'products.shape',
+      select: 'name uom',
+    })
+    .populate({
+      path: 'products.selected_machines',
+      select: 'name',
+    })
+    .populate({
+      path: 'created_by',
+      select: 'username email',
+    })
+    .populate({
+      path: 'updated_by',
+      select: 'username email',
+    })
+    .lean();
+
+  if (!populatedJobOrder) {
+    throw new ApiError(404, 'Failed to retrieve created job order');
+  }
+
+  // 13. Convert timestamps to IST
   const formatDateToIST = (data) => {
     const convertToIST = (date) => {
       if (!date) return null;

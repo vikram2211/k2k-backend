@@ -347,6 +347,7 @@ const getRawMaterialsByProjectId = asyncHandler(async (req, res) => {
 
     const rawMaterials = await RawMaterial.find({ project: projectId, isDeleted: false })
         .lean();
+        console.log("rawMaterials",rawMaterials);
 
     if (!rawMaterials || rawMaterials.length === 0) {
         throw new ApiError(404, 'No raw material data found for the given project ID');
@@ -355,4 +356,64 @@ const getRawMaterialsByProjectId = asyncHandler(async (req, res) => {
     return sendResponse(res, new ApiResponse(200, rawMaterials, 'Raw material data fetched successfully'));
 });
 
-export { createIronProject, updateIronProject, getAllIronProjects, getIronProjectById, deleteIronProject, addRawMaterial, updateRawMaterial, deleteRawMaterial, getRawMaterialsByProjectId};
+const getRawMaterialConsumption = asyncHandler(async (req, res) => {
+    const { _id, dia, projectId } = req.query;
+
+    // Validate query parameters
+    const hasId = _id !== undefined && mongoose.Types.ObjectId.isValid(_id);
+    const hasDia = dia !== undefined && !isNaN(parseFloat(dia));
+    const hasProjectId = projectId !== undefined && mongoose.Types.ObjectId.isValid(projectId);
+
+    // Ensure at least one parameter is provided
+    if (!hasId && !hasDia && !hasProjectId) {
+        throw new ApiError(400, 'At least one of _id, dia, or projectId is required');
+    }
+
+    // Build query with all provided parameters
+    let query = { isDeleted: false };
+    if (hasId) query._id = new mongoose.Types.ObjectId(_id);
+    if (hasDia) query.diameter = parseFloat(dia);
+    if (hasProjectId) query.project = new mongoose.Types.ObjectId(projectId);
+
+    // Fetch raw material with populated consumption history
+    const rawMaterial = await RawMaterial.findOne(query)
+        .populate({
+            path: 'consumptionHistory.workOrderId',
+            select: 'workOrderNumber',
+            // match: { isDeleted: false },
+        })
+        .lean();
+
+    if (!rawMaterial) {
+        throw new ApiError(404, 'Raw material not found');
+    }
+
+    // Additional validation to ensure consistency if multiple parameters are provided
+    if (hasId && (hasDia || hasProjectId)) {
+        const expectedDia = hasDia ? parseFloat(dia) : rawMaterial.diameter;
+        const expectedProjectId = hasProjectId ? new mongoose.Types.ObjectId(projectId) : rawMaterial.project;
+        if (rawMaterial.diameter !== expectedDia || !rawMaterial.project.equals(expectedProjectId)) {
+            throw new ApiError(404, 'Raw material does not match the provided dia or projectId');
+        }
+    }
+
+    // Format response
+    const response = {
+        _id: rawMaterial._id,
+        diameter: rawMaterial.diameter,
+        project: rawMaterial.project,
+        qty: rawMaterial.qty,
+        consumptionHistory: rawMaterial.consumptionHistory
+            .filter(ch => ch.workOrderId) // Filter out entries where workOrderId population failed
+            .map(ch => ({
+                workOrderId: ch.workOrderId._id,
+                workOrderNumber: ch.workOrderId.workOrderNumber,
+                quantity: ch.quantity,
+                timestamp: ch.timestamp,
+            })),
+    };
+
+    return res.status(200).json(new ApiResponse(200, response, 'Raw material consumption details retrieved successfully'));
+});
+
+export { createIronProject, updateIronProject, getAllIronProjects, getIronProjectById, deleteIronProject, addRawMaterial, updateRawMaterial, deleteRawMaterial, getRawMaterialsByProjectId, getRawMaterialConsumption};

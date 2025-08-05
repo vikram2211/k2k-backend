@@ -1,0 +1,554 @@
+import mongoose from 'mongoose';
+import { asyncHandler } from '../../utils/asyncHandler.js';
+import { ApiError } from '../../utils/ApiError.js';
+import { ApiResponse } from '../../utils/ApiResponse.js';
+import { ironDispatch } from '../../models/ironSmith/dispatch.model.js';
+import { iornPacking } from '../../models/ironSmith/packing.model.js';
+import { ironWorkOrder } from '../../models/ironSmith/workOrder.model.js';
+import { ironShape } from '../../models/ironSmith/helpers/ironShape.model.js';
+import { ironClient } from '../../models/ironSmith/helpers/ironClient.model.js';
+import { ironProject } from '../../models/ironSmith/helpers/ironProject.model.js';
+import { User } from '../../models/user.model.js';
+import Joi from 'joi';
+import { putObject } from '../../../util/putObject.js';
+import path from 'path';
+import fs from 'fs';
+
+
+
+
+
+// const dispatchSchema = Joi.object({
+//     work_order: Joi.string().required().messages({ 'string.empty': 'Work Order ID is required' }),
+//     invoice_or_sto: Joi.string().required().messages({ 'string.empty': 'Invoice/STO is required' }),
+//     vehicle_number: Joi.string().required().messages({ 'string.empty': 'Vehicle number is required' }),
+//     ticket_number: Joi.string().required().messages({ 'string.empty': 'Ticket number is required' }),
+//     qr_codes: Joi.alternatives()
+//         .try(
+//             Joi.array().items(Joi.string().min(1)).min(1),
+//             Joi.string().custom((value, helpers) => {
+//                 try {
+//                     const parsed = JSON.parse(value);
+//                     if (!Array.isArray(parsed) || parsed.length === 0) {
+//                         return helpers.error('array.min');
+//                     }
+//                     if (!parsed.every((item) => typeof item === 'string' && item.length > 0)) {
+//                         return helpers.error('array.items');
+//                     }
+//                     return parsed;
+//                 } catch (e) {
+//                     return helpers.error('string.base');
+//                 }
+//             })
+//         ),
+//     date: Joi.date()
+//         .iso()
+//         .required()
+//         .messages({
+//             'date.base': 'Date must be a valid ISO date',
+//             'any.required': 'Date is required',
+//         }),
+// });
+
+// const createDispatch = asyncHandler(async (req, res, next) => {
+//     let body = { ...req.body };
+//     console.log("body", body);
+
+//     if (typeof body.qr_codes === 'string') {
+//         try {
+//             body.qr_codes = JSON.parse(body.qr_codes);
+//         } catch (e) {
+//             return next(new ApiError(400, 'Invalid QR codes format: must be a valid JSON array'));
+//         }
+//     }
+
+//     const { error, value } = dispatchSchema.validate(body, { abortEarly: false });
+//     if (error) {
+//         return next(new ApiError(400, 'Validation failed for dispatch creation', error.details));
+//     }
+
+//     const { work_order, invoice_or_sto, vehicle_number, qr_codes, date, ticket_number } = value;
+//     const userId = req.user.id;
+
+//     if (!mongoose.Types.ObjectId.isValid(work_order)) {
+//         return next(new ApiError(400, `Invalid Work Order ID: ${work_order}`));
+//     }
+
+//     // Fetch Packing Entries Based on QR Codes
+//     const packingEntries = await iornPacking.find({ qr_code_url: { $in: qr_codes } })
+//         .populate('shape_id', 'shape_code')
+//         .populate('work_order', 'workOrderNumber');
+//         console.log("packingEntries",packingEntries);
+
+//     if (!packingEntries || packingEntries.length === 0) {
+//         return next(new ApiError(404, 'No packing entries found for scanned QR codes'));
+//     }
+
+//     // Aggregate product data
+//     const productMap = packingEntries.reduce((acc, packing) => {
+//         const shapeId = packing.shape_id._id.toString();
+//         if (!acc[shapeId]) {
+//             acc[shapeId] = {
+//                 shape_id: packing.shape_id._id,
+//                 product_name: packing.shape_id.shape_code,
+//                 dispatch_quantity: 0,
+//                 bundle_size: packing.bundle_size,
+//                 weight: packing.weight,
+//             };
+//         }
+//         acc[shapeId].dispatch_quantity += packing.product_quantity;
+//         return acc;
+//     }, {});
+//     const products = Object.values(productMap);
+
+//     // Handle file uploads
+//     const files = req.files || [];
+//     let invoiceFileUrls = [];
+//     if (files.length > 0) {
+//         for (const file of files) {
+//             const tempFilePath = path.join('./public/temp', file.filename);
+//             const fileBuffer = fs.readFileSync(tempFilePath);
+
+//             const { url } = await putObject(
+//                 { data: fileBuffer, mimetype: file.mimetype },
+//                 `irondispatch/${Date.now()}-${file.originalname}`
+//             );
+//             invoiceFileUrls.push(url);
+//             fs.unlinkSync(tempFilePath);
+//         }
+//     }
+
+//     // Create dispatch entry and update related records
+//     try {
+//         const [dispatchEntry] = await ironDispatch.create([
+//             {
+//                 work_order,
+//                 packing_ids: packingEntries.map((p) => p._id),
+//                 products,
+//                 invoice_or_sto,
+//                 qr_codes:packingEntries.map((p) => p.qr_code),
+//                 qr_code_urls: packingEntries.map((p) => p.qr_code_url).filter(url => url),
+//                 vehicle_number,
+//                 ticket_number,
+//                 created_by: userId,
+//                 invoice_file: invoiceFileUrls,
+//                 date,
+//             },
+//         ]);
+
+//         await iornPacking.updateMany(
+//             { _id: { $in: packingEntries.map((p) => p._id) } },
+//             { delivery_stage: 'Dispatched', updated_by: userId }
+//         );
+
+//         return res.status(201).json(new ApiResponse(201, dispatchEntry, 'Dispatch created successfully'));
+//     } catch (error) {
+//         return next(new ApiError(500, `Failed to create dispatch: ${error.message}`));
+//     }
+// });
+
+
+const dispatchSchema = Joi.object({
+    work_order: Joi.string().required().messages({ 'string.empty': 'Work Order ID is required' }),
+    invoice_or_sto: Joi.string().required().messages({ 'string.empty': 'Invoice/STO is required' }),
+    vehicle_number: Joi.string().required().messages({ 'string.empty': 'Vehicle number is required' }),
+    ticket_number: Joi.string().required().messages({ 'string.empty': 'Ticket number is required' }),
+    qr_code_urls: Joi.alternatives()
+      .try(
+        Joi.array().items(Joi.string().uri()).min(1),
+        Joi.string().custom((value, helpers) => {
+          try {
+            const parsed = JSON.parse(value);
+            if (!Array.isArray(parsed) || parsed.length === 0) {
+              return helpers.error('array.min');
+            }
+            if (!parsed.every((item) => typeof item === 'string' && Joi.string().uri().validate(item).error === null)) {
+              return helpers.error('array.items');
+            }
+            return parsed;
+          } catch (e) {
+            return helpers.error('string.base');
+          }
+        })
+      )
+      .messages({
+        'string.uri': 'Each QR code URL must be a valid URL',
+        'array.min': 'At least one QR code URL is required',
+      }),
+    date: Joi.date()
+      .iso()
+      .required()
+      .messages({
+        'date.base': 'Date must be a valid ISO date',
+        'any.required': 'Date is required',
+      }),
+    invoice_file: Joi.array().items(Joi.string().uri()).optional().messages({
+      'string.uri': 'Each invoice file must be a valid URL',
+    }),
+  }).messages({ 'object.unknown': 'Unknown field detected' });
+  
+  const createDispatch = asyncHandler(async (req, res, next) => {
+    let body = { ...req.body };
+    console.log("body", body);
+  
+    if (typeof body.qr_code_urls === 'string') {
+      try {
+        body.qr_code_urls = JSON.parse(body.qr_code_urls);
+      } catch (e) {
+        return next(new ApiError(400, 'Invalid QR code URLs format: must be a valid JSON array'));
+      }
+    }
+  
+    const { error, value } = dispatchSchema.validate(body, { abortEarly: false });
+    if (error) {
+      return next(new ApiError(400, 'Validation failed for dispatch creation', error.details));
+    }
+  
+    const { work_order, invoice_or_sto, vehicle_number, qr_code_urls, date, ticket_number, invoice_file: preUploadedFiles } = value;
+    const userId = req.user.id;
+  
+    if (!mongoose.Types.ObjectId.isValid(work_order)) {
+      return next(new ApiError(400, `Invalid Work Order ID: ${work_order}`));
+    }
+  
+    // Fetch Packing Entries Based on QR Code URLs
+    const packingEntries = await iornPacking.find({ qr_code_url: { $in: qr_code_urls } })
+      .populate('shape_id', 'shape_code')
+      .populate('work_order', 'workOrderNumber');
+    console.log("packingEntries", packingEntries);
+  
+    if (!packingEntries || packingEntries.length === 0) {
+      return next(new ApiError(404, 'No packing entries found for scanned QR code URLs'));
+    }
+  
+    // Aggregate product data
+    const productMap = packingEntries.reduce((acc, packing) => {
+      const shapeId = packing.shape_id._id.toString();
+      if (!acc[shapeId]) {
+        acc[shapeId] = {
+          shape_id: packing.shape_id._id,
+          product_name: packing.shape_id.shape_code,
+          dispatch_quantity: 0,
+          bundle_size: packing.bundle_size,
+          weight: packing.weight,
+        };
+      }
+      acc[shapeId].dispatch_quantity += packing.product_quantity;
+      return acc;
+    }, {});
+    const products = Object.values(productMap);
+  
+    // Handle file uploads
+    let invoiceFileUrls = [];
+    if (req.files && req.files.length > 0) {
+      for (const file of req.files) {
+        const tempFilePath = path.join('./public/temp', file.filename);
+        const fileBuffer = fs.readFileSync(tempFilePath);
+  
+        const { url } = await putObject(
+          { data: fileBuffer, mimetype: file.mimetype },
+          `irondispatch/${Date.now()}-${file.originalname}`
+        );
+        invoiceFileUrls.push(url);
+        fs.unlinkSync(tempFilePath);
+      }
+    } else if (preUploadedFiles && preUploadedFiles.length > 0) {
+      invoiceFileUrls = preUploadedFiles;
+    }
+  
+    // Create dispatch entry and update related records
+    try {
+      const [dispatchEntry] = await ironDispatch.create([
+        {
+          work_order,
+          packing_ids: packingEntries.map((p) => p._id),
+          products,
+          invoice_or_sto,
+          qr_codes: packingEntries.map((p) => p.qr_code), // Keep qr_codes for reference
+          qr_code_urls, // Use the provided URLs
+          vehicle_number,
+          ticket_number,
+          created_by: userId,
+          invoice_file: invoiceFileUrls,
+          date,
+        },
+      ]);
+  
+      await iornPacking.updateMany(
+        { _id: { $in: packingEntries.map((p) => p._id) } },
+        { delivery_stage: 'Dispatched', updated_by: userId }
+      );
+  
+      return res.status(201).json(new ApiResponse(201, dispatchEntry, 'Dispatch created successfully'));
+    } catch (error) {
+      return next(new ApiError(500, `Failed to create dispatch: ${error.message}`));
+    }
+  });
+
+const getScannedProducts = asyncHandler(async (req, res, next) => {
+    try {
+        console.log("inside backend qr scan");
+        const qrCode = req.query.qr_code;
+        console.log("qrCode", qrCode);
+
+        if (!qrCode) {
+            return res.status(400).json({ success: false, message: "Please provide a QR code" });
+        }
+
+        const getScannedProduct = await iornPacking.findOne({ qr_code: qrCode })
+            .populate('shape_id', 'shape_code')
+            .populate('work_order', 'workOrderNumber')
+            .populate('packed_by', 'username');
+
+        console.log("getScannedProduct", getScannedProduct);
+
+        if (!getScannedProduct) {
+            return res.status(404).json({
+                success: false,
+                message: `No packing entry found for QR code ${qrCode}`,
+            });
+        }
+
+        if (getScannedProduct.delivery_stage === 'Dispatched') {
+            return res.status(400).json({
+                success: false,
+                message: `QR code ${qrCode} has already been scanned and dispatched.`,
+            });
+        }
+
+        res.status(200).json({ success: true, data: getScannedProduct });
+    } catch (error) {
+        // Cleanup: Delete temp files on error (if applicable)
+        if (req.files) {
+            req.files.forEach((file) => {
+                const tempFilePath = path.join('./public/temp', file.filename);
+                if (fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath);
+            });
+        }
+
+        // Handle different error types
+        if (error.name === 'ValidationError') {
+            const formattedErrors = Object.values(error.errors).map((err) => ({
+                field: err.path,
+                message: err.message,
+            }));
+            return res.status(400).json({
+                success: false,
+                errors: formattedErrors,
+            });
+        }
+
+        console.error('Error scanning QR code:', error);
+        res.status(500).json({
+            success: false,
+            message: error.message || 'Internal Server Error',
+        });
+    }
+});
+
+
+const updateDispatchSchema = Joi.object({
+    date: Joi.date().iso().optional().messages({
+        'date.base': 'Date must be a valid ISO date',
+    }),
+    invoice_or_sto: Joi.string().optional().messages({ 'string.empty': 'Invoice/STO cannot be empty' }),
+    vehicle_number: Joi.string().optional().messages({ 'string.empty': 'Vehicle number cannot be empty' }),
+    ticket_number: Joi.string().optional().messages({ 'string.empty': 'Ticket number cannot be empty' }),
+    invoice_file: Joi.array().items(Joi.string()).optional(), // For new file URLs if pre-uploaded
+}).min(1).messages({ 'object.min': 'At least one field (date, invoice_or_sto, vehicle_number, ticket_number, or invoice_file) is required' });
+
+const updateDispatch = asyncHandler(async (req, res, next) => {
+    const { id } = req.params;
+    let body = { ...req.body };
+    // console.log("Update body", body);
+
+    // Validate the request body
+    const { error, value } = updateDispatchSchema.validate(body, { abortEarly: false });
+    if (error) {
+        return next(new ApiError(400, 'Validation failed for dispatch update', error.details));
+    }
+
+    const { date, invoice_or_sto, vehicle_number, ticket_number, invoice_file: newInvoiceFiles } = value;
+    const userId = req.user.id;
+
+    // Handle file uploads for invoice_file if present
+    let invoiceFileUrls = [];
+    if (req.files && req.files.length > 0) {
+        for (const file of req.files) {
+            const tempFilePath = path.join('./public/temp', file.filename);
+            const fileBuffer = fs.readFileSync(tempFilePath);
+
+            const { url } = await putObject(
+                { data: fileBuffer, mimetype: file.mimetype },
+                `dispatch/${Date.now()}-${file.originalname}`
+            );
+            invoiceFileUrls.push(url);
+            fs.unlinkSync(tempFilePath);
+        }
+    } else if (newInvoiceFiles) {
+        // Use pre-uploaded URLs if provided in body
+        invoiceFileUrls = newInvoiceFiles;
+    }
+
+    // Prepare update object with only provided fields
+    const updateData = {
+        ...(date && { date }),
+        ...(invoice_or_sto && { invoice_or_sto }),
+        ...(vehicle_number && { vehicle_number }),
+        ...(ticket_number && { ticket_number }),
+        ...(invoiceFileUrls.length > 0 && { invoice_file: invoiceFileUrls }), // Append or replace invoice_file
+        updated_by: userId,
+    };
+
+    if (Object.keys(updateData).length === 1 && updateData.updated_by) {
+        return next(new ApiError(400, 'At least one field (date, invoice_or_sto, vehicle_number, ticket_number, or invoice_file) must be updated'));
+    }
+
+    // Update the dispatch entry
+    try {
+        const updatedDispatch = await ironDispatch.findByIdAndUpdate(
+            id,
+            { $set: updateData },
+            { new: true, runValidators: true }
+        );
+
+        if (!updatedDispatch) {
+            return next(new ApiError(404, `Dispatch with ID ${id} not found`));
+        }
+
+        return res.status(200).json(new ApiResponse(200, updatedDispatch, 'Dispatch updated successfully'));
+    } catch (error) {
+        return next(new ApiError(500, `Failed to update dispatch: ${error.message}`));
+    }
+});
+
+
+const getAllDispatches = asyncHandler(async (req, res, next) => {
+    try {
+        // Fetch all dispatch records and populate related fields
+        const dispatches = await ironDispatch
+            .find()
+            .populate('work_order', 'workOrderNumber')
+            .populate('created_by', 'username')
+            .lean();
+
+        if (!dispatches || dispatches.length === 0) {
+            return res.status(200).json(new ApiResponse(200, [], 'No dispatch records found'));
+        }
+
+        // Process each dispatch to aggregate shape-wise data
+        const result = await Promise.all(dispatches.map(async (dispatch) => {
+            // Aggregate total dispatched quantity per shape
+            const shapeQuantities = dispatch.products.reduce((acc, product) => {
+                const shapeId = product.shape_id.toString();
+                if (!acc[shapeId]) {
+                    acc[shapeId] = {
+                        shape_id: product.shape_id,
+                        total_quantity: 0,
+                    };
+                }
+                acc[shapeId].total_quantity += product.dispatch_quantity;
+                return acc;
+            }, {});
+
+            // Fetch shape names for each shape_id
+            const shapeIds = Object.keys(shapeQuantities);
+            const shapes = await ironShape.find({ _id: { $in: shapeIds }, isDeleted: false }).select('description');
+
+            // Map shape names to quantities
+            const shapeData = Object.values(shapeQuantities).map((item) => {
+                const shape = shapes.find(s => s._id.toString() === item.shape_id.toString());
+                return {
+                    shape_name: shape ? shape.description : 'Unknown Shape',
+                    total_dispatched_qty: item.total_quantity,
+                };
+            });
+
+            return {
+                _id: dispatch._id,
+                work_order_id: dispatch.work_order?._id,
+                work_order_number: dispatch.work_order?.workOrderNumber || 'Unknown Work Order',
+                shape_data: shapeData, // Array of { shape_name, total_dispatched_qty }
+                created_by: dispatch.created_by?.username || 'Unknown User',
+                timestamp: dispatch.createdAt,
+                status: dispatch.status,
+            };
+        }));
+
+        return res.status(200).json(new ApiResponse(200, result, 'Dispatch records retrieved successfully'));
+    } catch (error) {
+        console.error('Error fetching dispatches:', error);
+        return next(new ApiError(500, `Failed to fetch dispatch records: ${error.message}`));
+    }
+});
+
+const getDispatchById = asyncHandler(async (req, res, next) => {
+    const { id } = req.params;
+
+    try {
+        // Fetch the dispatch record and populate related fields
+        const dispatch = await ironDispatch
+            .findById(id)
+            .populate('work_order', 'workOrderNumber clientId projectId createdAt created_by')
+            .populate('created_by', 'username')
+            .lean();
+            console.log("dispatch",dispatch);
+
+        if (!dispatch) {
+            return next(new ApiError(404, `Dispatch with ID ${id} not found`));
+        }
+
+        // Fetch client details
+        const client = await ironClient.findById(dispatch.work_order.clientId).select('name _id');
+        const project = await ironProject.findById(dispatch.work_order.projectId).select('name _id'); // Adjust if project schema differs
+
+        // Fetch work order creator's username
+        const workOrderCreator = await User.findById(dispatch.work_order.created_by).select('username');
+
+        // Fetch all shapes in bulk
+        const shapeIds = dispatch.products.map(product => product.shape_id.toString());
+        const shapes = await ironShape.find({ _id: { $in: shapeIds }, isDeleted: false }).select('description _id shape_code');
+
+        // Transform dispatched shape details
+        const shapeDetails = dispatch.products.map((product, index) => {
+            const shape = shapes.find(s => s._id.toString() === product.shape_id.toString());
+            // console.log('shape', shape); // Debug log
+            return {
+                sr_no: index + 1,
+                shape_name: shape ? shape.shape_code : 'Unknown Shape',
+                dispatch_qty: product.dispatch_quantity,
+                date: dispatch.date,
+                invoice: dispatch.invoice_or_sto,
+                vehicle_number: dispatch.vehicle_number,
+                ticket_number: dispatch.ticket_number,
+                invoice_file: dispatch.invoice_file.map(file => ({
+                    name: file.split('/').pop() || 'Unnamed File',
+                    url: file,
+                })),
+            };
+        });
+
+        // Prepare response
+        const response = {
+            client_project: {
+                client: client ? { _id: client._id, name: client.name } : { _id: null, name: 'Unknown Client' },
+                project: project ? { _id: project._id, name: project.name } : { _id: null, name: 'Unknown Project' },
+            },
+            work_order: {
+                work_order_id: dispatch.work_order._id,
+                work_order_number: dispatch.work_order.workOrderNumber || 'Unknown Work Order',
+                work_order_created_by: workOrderCreator ? workOrderCreator.username : 'Unknown User',
+                created_at: dispatch.work_order.createdAt || null,
+            },
+            dispatched_shape_details: shapeDetails,
+        };
+
+        return res.status(200).json(new ApiResponse(200, response, 'Dispatch details retrieved successfully'));
+    } catch (error) {
+        console.error('Error fetching dispatch by ID:', error);
+        return next(new ApiError(500, `Failed to fetch dispatch: ${error.message}`));
+    }
+});
+
+
+export {createDispatch, getScannedProducts, updateDispatch, getAllDispatches,getDispatchById}
