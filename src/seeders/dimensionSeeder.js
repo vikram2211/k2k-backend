@@ -3,13 +3,18 @@
 import mongoose from 'mongoose';
 import { ironDimension } from '../models/ironSmith/helpers/ironDimension.model.js';
 import dotenv from 'dotenv';
+dotenv.config({ path: '../../.env' });
 
-dotenv.config();
+
+// dotenv.config();
 
 const seedDimensions = Array.from({ length: 26 }, (_, i) => ({
   dimension_name: String.fromCharCode(65 + i),
   dimension_count: i + 1,
 }));
+// console.log("seedDimensions",seedDimensions);m
+console.log("process.env.MONGODB_URI",process.env.MONGODB_URI);
+console.log("process.env.DB_NAME",process.env.DB_NAME);
 
 const seedDimensionData = async () => {
   try {
@@ -18,18 +23,24 @@ const seedDimensionData = async () => {
       await mongoose.connect(process.env.MONGODB_URI, {
         useNewUrlParser: true,
         useUnifiedTopology: true,
-        dbName: process.env.DB_NAME,
+        // dbName: process.env.DB_NAME,
       });
     }
 
     await ironDimension.deleteMany();
     const created = await ironDimension.insertMany(seedDimensions);
+    console.log("created",created);
 
     console.log('✅ Dimension Data Imported:', created.length, 'documents');
+    process.exit(); // Close the script after completion
+
   } catch (error) {
     console.error('❌ Error importing dimension data:', error);
     throw error;
   }
 };
 
-export default seedDimensionData;
+seedDimensionData();
+
+
+// export default seedDimensionData;
