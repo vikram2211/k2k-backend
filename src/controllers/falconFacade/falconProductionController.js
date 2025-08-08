@@ -979,7 +979,7 @@ const getProductionsByProcess = asyncHandler(async (req, res) => {
 // });
 
 
-const startProduction = asyncHandler(async (req, res) => {
+const startProduction_07_08_2025 = asyncHandler(async (req, res) => {
     try {
         const { id } = req.params; // Production ID
         const { achieved_quantity } = req.body; // Quantity to increment
@@ -1105,6 +1105,164 @@ const startProduction = asyncHandler(async (req, res) => {
                     success: false,
                     message: `Achieved quantity (${newAchieved}) cannot exceed ${previousProcessAchievedQuantity} of previous process`,
                 });
+            }
+
+            production.product.achieved_quantity = newAchieved;
+            production.updated_by = userId;
+
+            await production.save();
+
+            return res.status(200).json({
+                success: true,
+                message: 'Achieved quantity updated successfully',
+                data: {
+                    production_id: production._id,
+                    achieved_quantity: newAchieved,
+                    status: production.status,
+                },
+            });
+        }
+
+        return res.status(400).json({
+            success: false,
+            message: `Production is in ${production.status} status and cannot be started or updated`,
+        });
+    } catch (error) {
+        console.error('Error in startProduction:', error);
+        return res.status(500).json({
+            success: false,
+            message: `Server error: ${error.message}`,
+        });
+    }
+});
+
+
+
+
+const startProduction = asyncHandler(async (req, res) => {
+    try {
+        const { id } = req.params; // Production ID
+        const { achieved_quantity } = req.body; // Quantity to increment
+        const userId = req.user?._id;
+
+        // Input validation
+        if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+            return res.status(400).json({
+                success: false,
+                message: 'Valid Production ID is required',
+            });
+        }
+
+        if (!userId) {
+            return res.status(401).json({
+                success: false,
+                message: 'User not authenticated',
+            });
+        }
+
+        if (
+            achieved_quantity !== undefined &&
+            (typeof achieved_quantity !== 'number' || achieved_quantity < 0)
+        ) {
+            return res.status(400).json({
+                success: false,
+                message: 'Achieved quantity must be a non-negative number',
+            });
+        }
+
+        // Fetch production record
+        const production = await falconProduction.findById(id);
+        if (!production) {
+            return res.status(404).json({
+                success: false,
+                message: 'Production record not found',
+            });
+        }
+
+        const currentProcess = production.process_name.toLowerCase();
+        const currentIndex = production.process_sequence.current.index;
+
+        if (currentIndex === undefined) {
+            return res.status(400).json({
+                success: false,
+                message: `Invalid process sequence for ${currentProcess}.`,
+            });
+        }
+
+        // Check previous process completion
+        let previousProcessAchievedQuantity = null;
+        if (currentIndex > 0 && production.process_sequence.previous) {
+            const previousProduction = await falconProduction.findOne({
+                job_order: production.job_order,
+                semifinished_id: production.semifinished_id,
+                'process_sequence.current.index': currentIndex - 1,
+            });
+
+            if (!previousProduction || previousProduction.product.achieved_quantity === 0) {
+                return res.status(400).json({
+                    success: false,
+                    message: `Cannot start or update ${currentProcess} until the previous process (index ${currentIndex - 1}, ${previousProduction?.process_name || 'unknown'}) has non-zero achieved quantity.`,
+                });
+            }
+
+            previousProcessAchievedQuantity = previousProduction
+                ? previousProduction.product.achieved_quantity
+                : null;
+        }
+
+        // Handle "start" only
+        if (production.status === 'Pending') {
+            if (achieved_quantity !== undefined) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Cannot update achieved quantity before starting the production.',
+                });
+            }
+
+            production.status = 'In Progress';
+            production.started_at = new Date();
+            production.updated_by = userId;
+
+            await production.save();
+
+            return res.status(200).json({
+                success: true,
+                message: 'Production started successfully',
+                data: {
+                    production_id: production._id,
+                    status: production.status,
+                    started_at: production.started_at,
+                },
+            });
+        }
+
+        // Handle "update" quantity
+        if (production.status === 'In Progress' || production.status === 'Pending QC') {
+            if (achieved_quantity === undefined) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Achieved quantity is required for updating production',
+                });
+            }
+
+            const currentAchieved = production.product.achieved_quantity;
+            const newAchieved = currentAchieved + achieved_quantity;
+
+            if (newAchieved > production.product.po_quantity) {
+                return res.status(400).json({
+                    success: false,
+                    message: `Achieved quantity (${newAchieved}) exceeds PO quantity (${production.product.po_quantity})`,
+                });
+            }
+
+            // Validate against previous process quantity
+            if (currentIndex > 0 && production.process_sequence.previous && previousProcessAchievedQuantity !== null) {
+                if (newAchieved > previousProcessAchievedQuantity) {
+                    return res.status(400).json({
+                        success: false,
+                        message: `Achieved quantity (${newAchieved}) cannot exceed ${previousProcessAchievedQuantity} of the previous process (index ${currentIndex - 1}, ${production.process_sequence.previous.name}).`,
+                    });
+                }
             }
 
             production.product.achieved_quantity = newAchieved;
@@ -1512,7 +1670,7 @@ const startProduction_22_07_2025= asyncHandler(async (req, res) => {
   
 
 
-const productionQCCheck = asyncHandler(async (req, res) => {
+const productionQCCheck_08_08_2025 = asyncHandler(async (req, res) => {
     try {
         console.log("came here in qc");
         const { productionId } = req.params;
@@ -1633,6 +1791,136 @@ const productionQCCheck = asyncHandler(async (req, res) => {
         });
     }
 });
+
+
+
+
+
+const productionQCCheck = asyncHandler(async (req, res) => {
+    try {
+        console.log("came here in qc");
+        const { productionId } = req.params;
+        const { rejected_quantity, process_name, remarks } = req.body;
+        const userId = req.user?._id;
+
+        // Validate inputs
+        if (!productionId) {
+            return res.status(400).json({
+                success: false,
+                message: 'Production ID is required',
+            });
+        }
+        if (!userId) {
+            return res.status(401).json({
+                success: false,
+                message: 'User not authenticated',
+            });
+        }
+        if (typeof rejected_quantity !== 'number' || rejected_quantity < 0) {
+            return res.status(400).json({
+                success: false,
+                message: 'Rejected quantity must be a non-negative number',
+            });
+        }
+        // Allow process_name to be optional; use production's process_name for first process
+        const effectiveProcessName = process_name || req.body.process_name_from_production || production.process_name;
+        if (!effectiveProcessName || typeof effectiveProcessName !== 'string') {
+            return res.status(400).json({
+                success: false,
+                message: 'Process name is required and must be a string',
+            });
+        }
+
+        // Find the production record
+        const production = await falconProduction.findById(productionId);
+        if (!production) {
+            return res.status(404).json({
+                success: false,
+                message: 'Production record not found',
+            });
+        }
+
+        // Check if production is in a valid state for QC
+        if (production.status !== 'In Progress') {
+            return res.status(400).json({
+                success: false,
+                message: `Production must be in In Progress status for QC check (current status: ${production.status})`,
+            });
+        }
+
+        // Validate rejected_quantity against achieved_quantity
+        if (rejected_quantity > production.product.achieved_quantity) {
+            return res.status(400).json({
+                success: false,
+                message: `Rejected quantity (${rejected_quantity}) cannot exceed achieved quantity (${production.product.achieved_quantity})`,
+            });
+        }
+        console.log("production", production);
+
+        // Create a new QC Check record
+        const qcCheck = new falconQCCheck({
+            production: productionId,
+            job_order: production.job_order,
+            product_id: production.product.product_id,
+            semifinished_id: production.semifinished_id,
+            rejected_quantity,
+            recycled_quantity: 0,
+            process_name: effectiveProcessName,
+            remarks,
+            checked_by: userId,
+            updated_by: userId,
+        });
+
+        await qcCheck.save();
+
+        // Aggregate rejected and recycled quantities from all QC checks for this production
+        const qcChecks = await falconQCCheck.find({ production: productionId });
+        const totalRejected = qcChecks.reduce((sum, check) => sum + check.rejected_quantity, 0);
+        const totalRecycled = qcChecks.reduce((sum, check) => sum + check.recycled_quantity, 0);
+
+        // Update production record
+        production.product.rejected_quantity = totalRejected;
+        production.product.recycled_quantity = totalRecycled;
+        production.qc_checked_by = userId;
+        production.updated_by = userId;
+        production.status = rejected_quantity > 0 ? 'Pending QC' : production.status;
+
+        await production.save();
+
+        return res.status(200).json({
+            success: true,
+            message: 'QC check completed successfully',
+            data: {
+                qc_check_id: qcCheck._id,
+                production_id: production._id,
+                job_order: production.job_order,
+                semifinished_id: production.semifinished_id,
+                product: {
+                    product_id: production.product.product_id,
+                    po_quantity: production.product.po_quantity,
+                    achieved_quantity: production.product.achieved_quantity,
+                    rejected_quantity: production.product.rejected_quantity,
+                    recycled_quantity: production.product.recycled_quantity,
+                },
+                process_name: effectiveProcessName,
+                remarks,
+                checked_by: userId,
+                status: production.status,
+                created_at: qcCheck.createdAt.toISOString(),
+                updated_at: qcCheck.updatedAt.toISOString(),
+            },
+        });
+    } catch (error) {
+        console.error('Error in production QC check:', error);
+        return res.status(500).json({
+            success: false,
+            message: 'Error performing QC check: ' + error.message,
+        });
+    }
+});
+
+
+
 
 // const getProductionDetailsById = asyncHandler(async (req, res) => {
 //     try {
@@ -1848,8 +2136,54 @@ const getProductionById = asyncHandler(async (req, res) => {
 });
 
 
+const getProductionProcesses = asyncHandler(async (req, res) => {
+    const { productionId } = req.query;
+    // console.log("productionId",productionId);
+
+    // Validate input
+    if (!productionId) {
+        return res.status(400).json({
+            success: false,
+            message: 'productionId is required',
+        });
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(productionId)) {
+        return res.status(400).json({
+            success: false,
+            message: 'Invalid productionId',
+        });
+    }
+
+    // Fetch the production record
+    const production = await falconProduction.findById(productionId);
+    if (!production) {
+        return res.status(404).json({
+            success: false,
+            message: 'Production record not found',
+        });
+    }
+
+    // Determine the previous process
+    let previousProcess = null;
+    const currentIndex = production.process_sequence.current.index;
+    if (currentIndex > 0 && production.process_sequence.previous) {
+        previousProcess = production.process_sequence.previous.name;
+    }
+
+    return res.status(200).json({
+        success: true,
+        data: {
+            previousProcess,
+        },
+    });
+});
+
+
+
+
 export {
-    getProductionsByProcess, startProduction, productionQCCheck, getProductionById
+    getProductionsByProcess, startProduction, productionQCCheck, getProductionById, getProductionProcesses
 }
 
 // {

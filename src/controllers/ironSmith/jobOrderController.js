@@ -11,7 +11,7 @@ import { deleteObject } from '../../../util/deleteObject.js';
 import { v4 as uuidv4 } from 'uuid';
 import { ironWorkOrder } from '../../models/ironSmith/workOrder.model.js';
 import { ironShape } from '../../models/ironSmith/helpers/ironShape.model.js';
-import {ironDailyProduction} from '../../models/ironSmith/dailyProductionPlanning.js';
+import { ironDailyProduction } from '../../models/ironSmith/dailyProductionPlanning.js';
 
 
 const createIronJobOrder_24_07_2025 = asyncHandler(async (req, res) => {
@@ -385,41 +385,41 @@ const createIronJobOrder1 = asyncHandler(async (req, res) => {
 
 
 
-// Check for existing production
-const existingProduction = await ironDailyProduction.findOne({
-  job_order: jobOrder._id,
-  status: 'In Progress',
-});
-if (existingProduction) {
-  throw new ApiError(400, 'Production is already in progress for this job order');
-}
-
-// Create production records
-const dailyProductionPromises = jobOrderData.products.map(async (product) => {
-  const schemaProduct = {
-    shape_id: product.shape,
-    planned_quantity: product.planned_quantity,
-    achieved_quantity: 0,
-    rejected_quantity: 0,
-    recycled_quantity: 0,
-    machines: product.selected_machines || [],
-  };
-
-  const newProduction = new ironDailyProduction({
-    work_order: jobOrderData.work_order,
+  // Check for existing production
+  const existingProduction = await ironDailyProduction.findOne({
     job_order: jobOrder._id,
-    products: [schemaProduct],
-    date: new Date(product.schedule_date),
-    submitted_by: userId,
-    created_by: userId,
-    updated_by: userId,
-    status: 'Pending',
+    status: 'In Progress',
+  });
+  if (existingProduction) {
+    throw new ApiError(400, 'Production is already in progress for this job order');
+  }
+
+  // Create production records
+  const dailyProductionPromises = jobOrderData.products.map(async (product) => {
+    const schemaProduct = {
+      shape_id: product.shape,
+      planned_quantity: product.planned_quantity,
+      achieved_quantity: 0,
+      rejected_quantity: 0,
+      recycled_quantity: 0,
+      machines: product.selected_machines || [],
+    };
+
+    const newProduction = new ironDailyProduction({
+      work_order: jobOrderData.work_order,
+      job_order: jobOrder._id,
+      products: [schemaProduct],
+      date: new Date(product.schedule_date),
+      submitted_by: userId,
+      created_by: userId,
+      updated_by: userId,
+      status: 'Pending',
+    });
+
+    return newProduction.save();
   });
 
-  return newProduction.save();
-});
-
-const savedProductions = await Promise.all(dailyProductionPromises);
+  const savedProductions = await Promise.all(dailyProductionPromises);
 
 
 
@@ -741,77 +741,77 @@ const createIronJobOrder = asyncHandler(async (req, res) => {
   return res.status(201).json(new ApiResponse(201, formattedJobOrder, 'Job order created successfully'));
 });
 
-  const getAllIronJobOrders = asyncHandler(async (req, res) => {
-    // 1. Query all job orders with population
-    const jobOrders = await ironJobOrder
-      .find({})
-      .populate({
-        path: 'work_order',
-        select: '_id workOrderNumber projectId clientId',
-        populate: [
-          {
-            path: 'projectId',
-            model: 'ironProject',
-            select: '_id name',
-            // match: { isDeleted: false }, // Exclude soft-deleted projects
-          },
-          {
-            path: 'clientId',
-            model: 'ironClient',
-            select: '_id name',
-            // match: { isDeleted: false }, // Exclude soft-deleted clients
-          },
-        ],
-      })
-      .lean();
-      console.log("jobOrders",jobOrders);
+const getAllIronJobOrders = asyncHandler(async (req, res) => {
+  // 1. Query all job orders with population
+  const jobOrders = await ironJobOrder
+    .find({})
+    .populate({
+      path: 'work_order',
+      select: '_id workOrderNumber projectId clientId',
+      populate: [
+        {
+          path: 'projectId',
+          model: 'ironProject',
+          select: '_id name',
+          // match: { isDeleted: false }, // Exclude soft-deleted projects
+        },
+        {
+          path: 'clientId',
+          model: 'ironClient',
+          select: '_id name',
+          // match: { isDeleted: false }, // Exclude soft-deleted clients
+        },
+      ],
+    })
+    .lean();
+  console.log("jobOrders", jobOrders);
 
-    // 2. Filter out job orders with missing project or client (due to isDeleted: true)
-    const filteredJobOrders = jobOrders.filter(
-      (jobOrder) => jobOrder.work_order?.projectId && jobOrder.work_order?.clientId
-    );
+  // 2. Filter out job orders with missing project or client (due to isDeleted: true)
+  const filteredJobOrders = jobOrders.filter(
+    (jobOrder) => jobOrder.work_order?.projectId && jobOrder.work_order?.clientId
+  );
 
-    if (!filteredJobOrders.length) {
-      throw new ApiError(404, 'No job orders found with valid project and client');
-    }
-    // filteredJobOrders.map((jobOrder) => {console.log("jobOrder",jobOrder)})
-    // 3. Format the response to include only requested fields
-    const formattedJobOrders = filteredJobOrders.map((jobOrder) => ({
-        _id: jobOrder._id,
-      job_order_number: jobOrder.job_order_number,
-      work_order: {
-        _id: jobOrder.work_order._id,
-        workOrderNumber: jobOrder.work_order.workOrderNumber,
-      },
-      project: {
-        _id: jobOrder.work_order.projectId._id,
-        name: jobOrder.work_order.projectId.name,
-      },
-      client: {
-        _id: jobOrder.work_order.clientId._id,
-        name: jobOrder.work_order.clientId.name,
-      },
-      createdAt: jobOrder.createdAt, // Pass raw timestamps to formatDateToIST
-      updatedAt: jobOrder.updatedAt,
-    }));
+  if (!filteredJobOrders.length) {
+    throw new ApiError(404, 'No job orders found with valid project and client');
+  }
+  // filteredJobOrders.map((jobOrder) => {console.log("jobOrder",jobOrder)})
+  // 3. Format the response to include only requested fields
+  const formattedJobOrders = filteredJobOrders.map((jobOrder) => ({
+    _id: jobOrder._id,
+    job_order_number: jobOrder.job_order_number,
+    work_order: {
+      _id: jobOrder.work_order._id,
+      workOrderNumber: jobOrder.work_order.workOrderNumber,
+    },
+    project: {
+      _id: jobOrder.work_order.projectId._id,
+      name: jobOrder.work_order.projectId.name,
+    },
+    client: {
+      _id: jobOrder.work_order.clientId._id,
+      name: jobOrder.work_order.clientId.name,
+    },
+    createdAt: jobOrder.createdAt, // Pass raw timestamps to formatDateToIST
+    updatedAt: jobOrder.updatedAt,
+  }));
 
-    // 4. Convert timestamps to IST
-    const formatDateToIST = (data) => {
-      const convertToIST = (date) => {
-        if (!date) return null;
-        return new Date(date).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
-      };
-      return data.map((item) => ({
-        ...item,
-        createdAt: convertToIST(item.createdAt),
-        updatedAt: convertToIST(item.updatedAt),
-      }));
+  // 4. Convert timestamps to IST
+  const formatDateToIST = (data) => {
+    const convertToIST = (date) => {
+      if (!date) return null;
+      return new Date(date).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
     };
+    return data.map((item) => ({
+      ...item,
+      createdAt: convertToIST(item.createdAt),
+      updatedAt: convertToIST(item.updatedAt),
+    }));
+  };
 
-    const responseData = formatDateToIST(formattedJobOrders);
+  const responseData = formatDateToIST(formattedJobOrders);
 
-    return res.status(200).json(new ApiResponse(200, responseData, 'Job orders retrieved successfully'));
-  });
+  return res.status(200).json(new ApiResponse(200, responseData, 'Job orders retrieved successfully'));
+});
 
 
 
@@ -1522,7 +1522,7 @@ const getJobOrderById1 = asyncHandler(async (req, res) => {
 
   return res.status(200).json(new ApiResponse(200, formattedJobOrder, 'Job order retrieved successfully'));
 });
-const getJobOrderById = asyncHandler(async (req, res) => {
+const getJobOrderById_07_08_2025 = asyncHandler(async (req, res) => {
   const { id } = req.params;
 
   // 1. Validate job order ID
@@ -1536,15 +1536,24 @@ const getJobOrderById = asyncHandler(async (req, res) => {
     .findById(id)
     .populate({
       path: 'work_order',
-      select: '_id workOrderNumber',
-      populate: {
+      select: '_id workOrderNumber clientId projectId',
+      populate:[   {
+        path: 'clientId',
+        select: 'name address',
+        model: 'ironClient',
+      },
+      {
+        path: 'projectId',
+        select: 'name address',
+        model: 'ironProject',
+      },{
         path: 'products', // Populate the entire products array, including quantity
         select: 'shapeId quantity', // Include shapeId and quantity
-      },
+      },]
     })
     .populate({
       path: 'products.shape',
-      select: 'name uom shape_code', // Include uom and shape_code
+      select: 'name uom shape_code description', // Include uom and shape_code
     })
     .populate({
       path: 'products.selected_machines',
@@ -1559,7 +1568,7 @@ const getJobOrderById = asyncHandler(async (req, res) => {
       select: 'username email',
     })
     .lean();
-  console.log("jobOrder", jobOrder);
+  // console.log("jobOrder", jobOrder);
 
   if (!jobOrder) {
     throw new ApiError(404, `Job order not found with ID: ${id}`);
@@ -1576,6 +1585,20 @@ const getJobOrderById = asyncHandler(async (req, res) => {
     ...jobOrder,
     workOrderId: jobOrder.work_order._id,
     workOrderNumber: jobOrder.work_order.workOrderNumber,
+    client: jobOrder.work_order.clientId
+    ? {
+        _id: jobOrder.work_order.clientId._id,
+        name: jobOrder.work_order.clientId.name,
+        address: jobOrder.work_order.clientId.address,
+      }
+    : null,
+  project: jobOrder.work_order.projectId
+    ? {
+        _id: jobOrder.work_order.projectId._id,
+        name: jobOrder.work_order.projectId.name,
+        address: jobOrder.work_order.projectId.address,
+      }
+    : null,
     date_range: {
       from: convertToIST(jobOrder.date_range.from),
       to: convertToIST(jobOrder.date_range.to),
@@ -1587,12 +1610,142 @@ const getJobOrderById = asyncHandler(async (req, res) => {
         (wp) => wp.shapeId && wp.shapeId._id && product.shape._id && wp.shapeId._id.toString() === product.shape._id.toString()
       );
       console.log("workOrderProduct", workOrderProduct); // Debug log
-      console.log("product", product); // Debug log
+      // console.log("product", product); // Debug log
       return {
         _id: product._id,
         shape_id: product.shape._id,
         shape_code: product.shape.shape_code,
         uom: workOrderProduct.uom, // Add uom from shape
+        member: workOrderProduct.memberDetails, // Add uom from shape
+        barMark: workOrderProduct.barMark, // Add uom from shape
+        weight: workOrderProduct.weight, 
+        description: product.shape.description,
+        planned_quantity: product.planned_quantity,
+        schedule_date: convertToIST(product.schedule_date),
+        dia: product.dia,
+        achieved_quantity: product.achieved_quantity,
+        rejected_quantity: product.rejected_quantity,
+        selected_machines: product.selected_machines.map((machine) => ({
+          _id: machine._id,
+          _id: machine._id,
+          name: machine.name,
+        })),
+        qr_code_id: product.qr_code_id,
+        qr_code_url: product.qr_code_url,
+        po_quantity: workOrderProduct ? workOrderProduct.quantity : 0, // Map po_quantity from quantity
+      };
+    }),
+  };
+  // console.log("formattedJobOrder",formattedJobOrder);
+
+  // Remove only the unnecessary nested fields
+  // delete formattedJobOrder.work_order;
+  // formattedJobOrder.products.forEach((p) => {
+  //   delete p.shape; // Remove the nested shape object
+  // });
+
+  return res.status(200).json(new ApiResponse(200, formattedJobOrder, 'Job order retrieved successfully'));
+});
+
+
+const getJobOrderById = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+
+  // 1. Validate job order ID
+  if (!mongoose.Types.ObjectId.isValid(id)) {
+    throw new ApiError(400, `Invalid job order ID: ${id}`);
+  }
+
+  // 2. Find the job order and populate related fields
+  const jobOrder = await mongoose
+    .model('ironJobOrder')
+    .findById(id)
+    .populate({
+      path: 'work_order',
+      select: '_id workOrderNumber clientId projectId products',
+      populate: [
+        {
+          path: 'clientId',
+          select: 'name address',
+          model: 'ironClient',
+        },
+        {
+          path: 'projectId',
+          select: 'name address',
+          model: 'ironProject',
+        },
+        {
+          path: 'products',
+          select: 'shapeId quantity uom memberDetails barMark weight dimensions',
+        },
+      ],
+    })
+    .populate({
+      path: 'products.shape',
+      select: 'name uom shape_code description',
+    })
+    .populate({
+      path: 'products.selected_machines',
+      select: '_id name',
+    })
+    .populate({
+      path: 'created_by',
+      select: 'username email',
+    })
+    .populate({
+      path: 'updated_by',
+      select: 'username email',
+    })
+    .lean();
+
+  if (!jobOrder) {
+    throw new ApiError(404, `Job order not found with ID: ${id}`);
+  }
+
+  // 3. Format dates to IST
+  const convertToIST = (date) => {
+    if (!date) return null;
+    return new Date(date).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
+  };
+
+  // 4. Map PO quantity and dimensions to products based on shape relationship
+  const formattedJobOrder = {
+    ...jobOrder,
+    workOrderId: jobOrder.work_order._id,
+    workOrderNumber: jobOrder.work_order.workOrderNumber,
+    client: jobOrder.work_order.clientId
+      ? {
+          _id: jobOrder.work_order.clientId._id,
+          name: jobOrder.work_order.clientId.name,
+          address: jobOrder.work_order.clientId.address,
+        }
+      : null,
+    project: jobOrder.work_order.projectId
+      ? {
+          _id: jobOrder.work_order.projectId._id,
+          name: jobOrder.work_order.projectId.name,
+          address: jobOrder.work_order.projectId.address,
+        }
+      : null,
+    date_range: {
+      from: convertToIST(jobOrder.date_range.from),
+      to: convertToIST(jobOrder.date_range.to),
+    },
+    createdAt: convertToIST(jobOrder.createdAt),
+    updatedAt: convertToIST(jobOrder.updatedAt),
+    products: jobOrder.products.map((product) => {
+      const workOrderProduct = jobOrder.work_order.products.find(
+        (wp) => wp.shapeId && wp.shapeId._id && product.shape._id && wp.shapeId._id.toString() === product.shape._id.toString()
+      );
+      return {
+        _id: product._id,
+        shape_id: product.shape._id,
+        shape_code: product.shape.shape_code,
+        uom: workOrderProduct ? workOrderProduct.uom : product.shape.uom,
+        member: workOrderProduct ? workOrderProduct.memberDetails : null,
+        barMark: workOrderProduct ? workOrderProduct.barMark : null,
+        weight: workOrderProduct ? workOrderProduct.weight : null,
+        description: product.shape.description,
         planned_quantity: product.planned_quantity,
         schedule_date: convertToIST(product.schedule_date),
         dia: product.dia,
@@ -1604,15 +1757,21 @@ const getJobOrderById = asyncHandler(async (req, res) => {
         })),
         qr_code_id: product.qr_code_id,
         qr_code_url: product.qr_code_url,
-        po_quantity: workOrderProduct ? workOrderProduct.quantity : 0, // Map po_quantity from quantity
+        po_quantity: workOrderProduct ? workOrderProduct.quantity : 0,
+        dimensions: workOrderProduct && workOrderProduct.dimensions
+          ? workOrderProduct.dimensions.map((dim) => ({
+              name: dim.name,
+              value: dim.value,
+            }))
+          : [],
       };
     }),
   };
 
-  // Remove only the unnecessary nested fields
+  // Remove unnecessary nested fields
   delete formattedJobOrder.work_order;
   formattedJobOrder.products.forEach((p) => {
-    delete p.shape; // Remove the nested shape object
+    delete p.shape;
   });
 
   return res.status(200).json(new ApiResponse(200, formattedJobOrder, 'Job order retrieved successfully'));
@@ -1720,6 +1879,7 @@ const workOrderData = asyncHandler(async (req, res) => {
 
     // 6. Map work order products with job order data and shape name
     const enrichedProducts = workOrder.products.map((workProduct) => {
+      console.log("workProduct", workProduct);
       const matchingJobProducts = jobOrders.flatMap((jobOrder) =>
         jobOrder.products.filter((jobProduct) => jobProduct.shape.toString() === workProduct.shapeId.toString())
       );
@@ -1729,6 +1889,7 @@ const workOrderData = asyncHandler(async (req, res) => {
       const rejectedQuantity = matchingJobProducts.reduce((sum, jobProduct) => sum + jobProduct.rejected_quantity, 0);
 
       return {
+        objId: workProduct._id,
         shapeId: workProduct.shapeId,
         shapeName: shapeMap[workProduct.shapeId.toString()] || 'Unknown', // Use shape_code as shapeName
         uom: workProduct.uom,
