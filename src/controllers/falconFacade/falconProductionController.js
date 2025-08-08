@@ -1796,7 +1796,7 @@ const productionQCCheck_08_08_2025 = asyncHandler(async (req, res) => {
 
 
 
-const productionQCCheck = asyncHandler(async (req, res) => {
+const productionQCCheck1 = asyncHandler(async (req, res) => {
     try {
         console.log("came here in qc");
         const { productionId } = req.params;
@@ -1879,6 +1879,135 @@ const productionQCCheck = asyncHandler(async (req, res) => {
         const totalRecycled = qcChecks.reduce((sum, check) => sum + check.recycled_quantity, 0);
 
         // Update production record
+        production.product.rejected_quantity = totalRejected;
+        production.product.recycled_quantity = totalRecycled;
+        production.qc_checked_by = userId;
+        production.updated_by = userId;
+        production.status = rejected_quantity > 0 ? 'Pending QC' : production.status;
+
+        await production.save();
+
+        return res.status(200).json({
+            success: true,
+            message: 'QC check completed successfully',
+            data: {
+                qc_check_id: qcCheck._id,
+                production_id: production._id,
+                job_order: production.job_order,
+                semifinished_id: production.semifinished_id,
+                product: {
+                    product_id: production.product.product_id,
+                    po_quantity: production.product.po_quantity,
+                    achieved_quantity: production.product.achieved_quantity,
+                    rejected_quantity: production.product.rejected_quantity,
+                    recycled_quantity: production.product.recycled_quantity,
+                },
+                process_name: effectiveProcessName,
+                remarks,
+                checked_by: userId,
+                status: production.status,
+                created_at: qcCheck.createdAt.toISOString(),
+                updated_at: qcCheck.updatedAt.toISOString(),
+            },
+        });
+    } catch (error) {
+        console.error('Error in production QC check:', error);
+        return res.status(500).json({
+            success: false,
+            message: 'Error performing QC check: ' + error.message,
+        });
+    }
+});
+
+const productionQCCheck = asyncHandler(async (req, res) => {
+    try {
+        console.log("came here in qc");
+        const { productionId } = req.params;
+        const { rejected_quantity, process_name, remarks } = req.body;
+        const userId = req.user?._id;
+
+        // Validate inputs
+        if (!productionId) {
+            return res.status(400).json({
+                success: false,
+                message: 'Production ID is required',
+            });
+        }
+        if (!userId) {
+            return res.status(401).json({
+                success: false,
+                message: 'User not authenticated',
+            });
+        }
+        if (typeof rejected_quantity !== 'number' || rejected_quantity < 0) {
+            return res.status(400).json({
+                success: false,
+                message: 'Rejected quantity must be a non-negative number',
+            });
+        }
+        // Allow process_name to be optional; use production's process_name for first process
+        const effectiveProcessName = process_name || req.body.process_name_from_production || req.body.process;
+        if (!effectiveProcessName || typeof effectiveProcessName !== 'string') {
+            return res.status(400).json({
+                success: false,
+                message: 'Process name is required and must be a string',
+            });
+        }
+
+        // Find the production record
+        const production = await falconProduction.findById(productionId);
+        if (!production) {
+            return res.status(404).json({
+                success: false,
+                message: 'Production record not found',
+            });
+        }
+
+        // Check if production is in a valid state for QC
+        // if (production.status !== 'In Progress') {
+        //     return res.status(400).json({
+        //         success: false,
+        //         message: `Production must be in In Progress status for QC check (current status: ${production.status})`,
+        //     });
+        // }
+
+        // Validate rejected_quantity against achieved_quantity
+        // console.log("rejected_quantity",rejected_quantity);
+        // console.log("production.product.achieved_quantity",production.product.achieved_quantity);
+        if (rejected_quantity > production.product.achieved_quantity) {
+            return res.status(400).json({
+                success: false,
+                message: `Rejected quantity (${rejected_quantity}) cannot exceed achieved quantity (${production.product.achieved_quantity})`,
+            });
+        }
+
+        // Subtract rejected_quantity from achieved_quantity
+        production.product.achieved_quantity -= rejected_quantity;
+
+        console.log("production after subtraction", production);
+
+        // Create a new QC Check record
+        const qcCheck = new falconQCCheck({
+            production: productionId,
+            job_order: production.job_order,
+            product_id: production.product.product_id,
+            semifinished_id: production.semifinished_id,
+            rejected_quantity,
+            recycled_quantity: 0,
+            process_name: effectiveProcessName,
+            remarks,
+            checked_by: userId,
+            updated_by: userId,
+        });
+
+        await qcCheck.save();
+
+        // Aggregate rejected and recycled quantities from all QC checks for this production
+        const qcChecks = await falconQCCheck.find({ production: productionId });
+        const totalRejected = qcChecks.reduce((sum, check) => sum + check.rejected_quantity, 0);
+        const totalRecycled = qcChecks.reduce((sum, check) => sum + check.recycled_quantity, 0);
+
+        // Update production record with aggregated values
         production.product.rejected_quantity = totalRejected;
         production.product.recycled_quantity = totalRecycled;
         production.qc_checked_by = userId;
