@@ -206,7 +206,7 @@ const packingSchema = Joi.object({
 
 
 
-const createPackingBundle = asyncHandler(async (req, res) => {
+const createPackingBundle_11_08_2025 = asyncHandler(async (req, res) => {
     let bodyData = req.body;
     const userId = req.user?._id?.toString();
 
@@ -346,6 +346,167 @@ const createPackingBundle = asyncHandler(async (req, res) => {
     return sendResponse(res, new ApiResponse(201, formattedPackings, 'Packings created successfully'));
 });
 
+
+const createPackingBundle = asyncHandler(async (req, res) => {
+    let bodyData = req.body;
+    const userId = req.user?._id?.toString();
+
+    // Validate userId
+    if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
+        throw new ApiError(400, 'Invalid or missing user ID in request');
+    }
+
+    // Parse the data field if it exists and is a string
+    if (bodyData.data && typeof bodyData.data === 'string') {
+        try {
+            bodyData = JSON.parse(bodyData.data);
+        } catch (error) {
+            throw new ApiError(400, 'Invalid JSON format in data field');
+        }
+    }
+
+    const packingItems = Array.isArray(bodyData) ? bodyData : [bodyData];
+    const createdPackings = [];
+
+    // Ensure temp directory exists
+    const tempDir = path.join(__dirname, '../../public/temp');
+    if (!fs.existsSync(tempDir)) {
+        fs.mkdirSync(tempDir, { recursive: true });
+        console.log('Created temp directory:', tempDir);
+    }
+
+    // Handle file uploads once
+    const uploadedFiles = [];
+    if (req.files && Array.isArray(req.files) && req.files.length > 0) {
+        for (const file of req.files) {
+            try {
+                const sanitizedFilename = sanitizeFilename(file.originalname);
+                const tempFilePath = path.join(tempDir, sanitizedFilename);
+                console.log('Temp File Path:', tempFilePath);
+
+                if (!fs.existsSync(file.path)) {
+                    throw new Error(`File not found at: ${file.path}`);
+                }
+
+                if (file.path !== tempFilePath) {
+                    fs.renameSync(file.path, tempFilePath);
+                    console.log(`Moved file from ${file.path} to ${tempFilePath}`);
+                }
+
+                const fileBuffer = fs.readFileSync(tempFilePath);
+
+                const { url } = await putObject(
+                    { data: fileBuffer, mimetype: file.mimetype },
+                    `falcon-packing/${Date.now()}-${sanitizedFilename}`
+                );
+
+                try {
+                    fs.unlinkSync(tempFilePath);
+                    console.log('Deleted temp file:', tempFilePath);
+                } catch (unlinkError) {
+                    console.error('Failed to delete temp file:', unlinkError.message);
+                }
+
+                uploadedFiles.push({
+                    file_name: file.originalname,
+                    file_url: url,
+                    uploaded_at: new Date(),
+                });
+            } catch (error) {
+                for (const f of req.files) {
+                    const tmp = path.join(tempDir, sanitizeFilename(f.originalname));
+                    if (fs.existsSync(tmp)) {
+                        try {
+                            fs.unlinkSync(tmp);
+                            console.log('Cleaned up temp file:', tmp);
+                        } catch (err) {
+                            console.error('Cleanup error:', err.message);
+                        }
+                    }
+                }
+                throw new ApiError(500, `File upload failed: ${error.message}`);
+            }
+        }
+    }
+
+    // Now process each packing item
+    for (const item of packingItems) {
+        const packingData = {
+            work_order: item.work_order || null,
+            job_order_id: item.job_order_id || null,
+            product: item.product,
+            semi_finished_id: item.semi_finished_id,
+            semi_finished_quantity: item.semi_finished_quantity,
+            rejected_quantity: item.rejected_quantity || 0,
+            files: uploadedFiles.length > 0 ? uploadedFiles : undefined,
+            packed_by: userId,
+        };
+
+        const { error, value } = packingSchema.validate(packingData, { abortEarly: false });
+        if (error) {
+            throw new ApiError(400, 'Validation failed for packing creation', error.details);
+        }
+
+        // Check achieved_quantity from the last production process
+        const lastProduction = await mongoose.model('falconProduction').findOne({
+            semifinished_id: value.semi_finished_id,
+        }).sort({ createdAt: -1 }); // Latest record
+
+        if (!lastProduction || lastProduction.product.achieved_quantity <= 0) {
+            throw new ApiError(400, `Cannot create packing bundle for semi_finished_id ${value.semi_finished_id}. Achieved quantity is zero or production record not found.`);
+        }
+
+        // Calculate total packed quantity for this semi_finished_id
+        const totalPacked = await falconPacking.aggregate([
+            { $match: { semi_finished_id: value.semi_finished_id } },
+            { $group: { _id: null, totalPacked: { $sum: "$semi_finished_quantity" } } }
+        ]).then(result => result[0]?.totalPacked || 0);
+
+        const remainingQuantity = lastProduction.product.achieved_quantity - totalPacked;
+        if (value.semi_finished_quantity > remainingQuantity) {
+            throw new ApiError(400, `Cannot pack ${value.semi_finished_quantity} units for semi_finished_id ${value.semi_finished_id}. Only ${remainingQuantity} units remain available.`);
+        }
+
+        // Check references
+        const [product, jobOrder] = await Promise.all([
+            mongoose.model('falconProduct').findById(value.product),
+            value.job_order_id
+                ? mongoose.model('falconJobOrder').findById(value.job_order_id)
+                : Promise.resolve(null),
+        ]);
+
+        if (!product) throw new ApiError(400, `Product not found with ID: ${value.product}`);
+        if (value.job_order_id && !jobOrder)
+            throw new ApiError(400, `Job order not found with ID: ${value.job_order_id}`);
+
+        const packing = await falconPacking.create(value);
+        createdPackings.push(packing._id);
+    }
+
+    const populatedPackings = await falconPacking
+        .find({ _id: { $in: createdPackings } })
+        .populate({
+            path: 'product',
+            select: 'name',
+            match: { is_deleted: false },
+        })
+        .populate({
+            path: 'job_order_id',
+            select: 'job_order_id',
+            match: { isDeleted: false },
+        })
+        .populate({
+            path: 'packed_by',
+            select: 'username email',
+            match: { isDeleted: false },
+        })
+        .lean();
+
+    const formattedPackings = populatedPackings.map((packing) => formatDateToIST(packing));
+
+    return sendResponse(res, new ApiResponse(201, formattedPackings, 'Packings created successfully'));
+});
+
 // Update Falcon Packing with QR ----- API TO SAVE PACKING QR DETAILS
 
 
@@ -360,7 +521,7 @@ const createPackingSchema = z.object({
     ).min(1, 'At least one packing record is required'),
 }).strict();
 
-const createFalconPacking = asyncHandler(async (req, res) => {
+const createFalconPacking_11_08_2025 = asyncHandler(async (req, res) => {
     try {
         // Debug: Log the request body
         // console.log('Request body:', req.body);
@@ -509,6 +670,166 @@ const createFalconPacking = asyncHandler(async (req, res) => {
     }
 });
 
+
+
+
+const createFalconPacking = asyncHandler(async (req, res) => {
+    try {
+        // Debug: Log the request body
+        console.log('Request body:', req.body);
+
+        // 1. Check for authenticated user
+        if (!req.user || !req.user._id) {
+            return res.status(401).json({
+                success: false,
+                message: 'Unauthorized: User not authenticated',
+            });
+        }
+        const userId = req.user._id.toString();
+
+        // 2. Validate input and debug schema
+        console.log('qrPackingSchema:', createPackingSchema, createPackingSchema.parse);
+        const validatedData = createPackingSchema.parse(req.body);
+        const { packings } = validatedData;
+        console.log('Validated packings:', packings);
+
+        // 3. Process each packing record
+        const updatedPackings = [];
+        const errors = [];
+
+        for (const { packing_id, qrCodeId } of packings) {
+            try {
+                const packing = await falconPacking.findById(packing_id);
+                if (!packing) {
+                    throw new Error('Packing record not found');
+                }
+
+                // Check achieved_quantity from the last production process
+                const lastProduction = await mongoose.model('falconProduction').findOne({
+                    semifinished_id: packing.semi_finished_id,
+                }).sort({ createdAt: -1 }); // Latest record
+
+                if (!lastProduction || lastProduction.product.achieved_quantity <= 0) {
+                    throw new Error(`Cannot update packing for semi_finished_id ${packing.semi_finished_id}. Achieved quantity is zero or production record not found.`);
+                }
+
+                // Generate QR code
+                let qrCodeBuffer;
+                try {
+                    qrCodeBuffer = await QRCode.toBuffer(qrCodeId, {
+                        type: 'png',
+                        errorCorrectionLevel: 'H',
+                        margin: 1,
+                        width: 200,
+                    });
+                } catch (error) {
+                    throw new Error(`Failed to generate QR code for ${qrCodeId}: ${error.message}`);
+                }
+
+                // Upload QR code to S3
+                const fileName = `qr-codes/${packing_id}-${Date.now()}.png`;
+                const file = {
+                    data: qrCodeBuffer,
+                    mimetype: 'image/png',
+                };
+                let qrCodeUrl;
+                try {
+                    const { url } = await putObject(file, fileName);
+                    qrCodeUrl = url;
+                } catch (error) {
+                    throw new Error(`Failed to upload QR code to S3 for ${qrCodeId}: ${error.message}`);
+                }
+
+                // Update packing record
+                const updatedPacking = await falconPacking.findByIdAndUpdate(
+                    packing_id,
+                    {
+                        qr_id: qrCodeId,
+                        qr_code: qrCodeUrl,
+                        delivery_stage: 'Packed',
+                        updated_by: userId,
+                    },
+                    { new: true, runValidators: true }
+                );
+
+                if (!updatedPacking) {
+                    throw new Error('Packing record not found');
+                }
+
+                updatedPackings.push(updatedPacking);
+            } catch (error) {
+                errors.push({
+                    packing_id,
+                    qrCodeId,
+                    error: error.message,
+                });
+            }
+        }
+
+        // 4. Handle response based on results
+        if (errors.length === 0) {
+            return res.status(200).json({
+                success: true,
+                message: 'Packing records updated with QR successfully',
+                data: updatedPackings,
+            });
+        } else if (updatedPackings.length > 0) {
+            return res.status(207).json({
+                success: false,
+                message: 'Some packing updates failed',
+                errors,
+                updated: updatedPackings,
+            });
+        } else {
+            return res.status(400).json({
+                success: false,
+                message: 'All packing updates failed',
+                errors,
+            });
+        }
+    } catch (error) {
+        // Handle Joi validation errors
+        if (error instanceof Joi.ValidationError) {
+            console.error('Validation errors:', error.details);
+            return res.status(400).json({
+                success: false,
+                errors: error.details.map((err) => ({
+                    field: err.path.join('.'),
+                    message: err.message,
+                })),
+            });
+        }
+
+        // Handle Mongoose validation errors
+        if (error.name === 'ValidationError') {
+            const formattedErrors = Object.values(error.errors).map((err) => ({
+                field: err.path,
+                message: err.message,
+            }));
+            return res.status(400).json({
+                success: false,
+                errors: formattedErrors,
+            });
+        }
+
+        // Handle duplicate key errors (e.g., unique qr_id)
+        if (error.code === 11000) {
+            return res.status(400).json({
+                success: false,
+                message: 'Duplicate QR code ID',
+                field: Object.keys(error.keyPattern)[0],
+            });
+        }
+
+        // Handle other errors
+        console.error('Error updating Packing with QR:', error);
+        return res.status(500).json({
+            success: false,
+            message: 'Internal Server Error',
+            error: error.message,
+        });
+    }
+});
 
 
 
@@ -1096,7 +1417,7 @@ const getJobOrderByWorkOrder = asyncHandler(async (req, res) => {
 //     }
 // });
 
-const getWorkOrderDetails = asyncHandler(async (req, res) => {
+const getWorkOrderDetails_11_08_2025 = asyncHandler(async (req, res) => {
     try {
         const { workOrderId, jobOrderId } = req.params;
 
@@ -1255,6 +1576,7 @@ const getWorkOrderDetails = asyncHandler(async (req, res) => {
                 }
             }
         ]);
+        // console.log("jobOrderDetails", jobOrderDetails.internalWorkOrderDetails);
 
         if (!jobOrderDetails.length) {
             return res.status(404).json({
@@ -1279,6 +1601,195 @@ const getWorkOrderDetails = asyncHandler(async (req, res) => {
         });
     }
 });
+
+
+
+
+
+const getWorkOrderDetails = asyncHandler(async (req, res) => {
+    try {
+        const { workOrderId, jobOrderId } = req.params;
+
+        if (!mongoose.Types.ObjectId.isValid(workOrderId) || !mongoose.Types.ObjectId.isValid(jobOrderId)) {
+            return res.status(400).json({
+                statusCode: 400,
+                success: false,
+                message: 'Invalid work order ID or job order ID format'
+            });
+        }
+
+        const jobOrderDetails = await falconJobOrder.aggregate([
+            {
+                $match: {
+                    _id: new mongoose.Types.ObjectId(jobOrderId),
+                    work_order_number: new mongoose.Types.ObjectId(workOrderId)
+                }
+            },
+            {
+                $lookup: {
+                    from: 'falconinternalworkorders',
+                    let: { job_order_id: '$_id' },
+                    pipeline: [
+                        {
+                            $match: {
+                                $expr: { $eq: ['$job_order_id', '$$job_order_id'] }
+                            }
+                        },
+                        { $unwind: '$products' },
+                        {
+                            $project: {
+                                _id: 0,
+                                product_id: '$products.product',
+                                semifinished_id: { $arrayElemAt: ['$products.semifinished_details.semifinished_id', 0] },
+                                code: '$products.code'
+                            }
+                        }
+                    ],
+                    as: 'internalWorkOrderDetails'
+                }
+            },
+            {
+                $lookup: {
+                    from: 'falconproductions',
+                    let: { job_order_id: '$_id' },
+                    pipeline: [
+                        {
+                            $match: {
+                                $expr: { $eq: ['$job_order', '$$job_order_id'] }
+                            }
+                        },
+                        { $unwind: '$product' },
+                        {
+                            $project: {
+                                _id: 0,
+                                product_id: '$product.product_id',
+                                semifinished_id: '$semifinished_id',
+                                achieved_quantity: '$product.achieved_quantity'
+                            }
+                        }
+                    ],
+                    as: 'productionAggregates'
+                }
+            },
+            {
+                $addFields: {
+                    products: {
+                        $map: {
+                            input: '$products',
+                            as: 'p',
+                            in: {
+                                $mergeObjects: [
+                                    '$$p',
+                                    {
+                                        semifinished_ids: {
+                                            $map: {
+                                                input: {
+                                                    $filter: {
+                                                        input: '$internalWorkOrderDetails',
+                                                        as: 'iwo',
+                                                        cond: {
+                                                            $and: [
+                                                                { $eq: ['$$iwo.product_id', '$$p.product'] },
+                                                                { $eq: ['$$iwo.code', '$$p.code'] }
+                                                            ]
+                                                        }
+                                                    }
+                                                },
+                                                as: 'm',
+                                                in: '$$m.semifinished_id'
+                                            }
+                                        },
+                                        achieved_quantity: {
+                                            $let: {
+                                                vars: {
+                                                    matchProd: {
+                                                        $filter: {
+                                                            input: '$productionAggregates',
+                                                            as: 'pa',
+                                                            cond: {
+                                                                $and: [
+                                                                    { $eq: ['$$pa.product_id', '$$p.product'] },
+                                                                    {
+                                                                        $in: ['$$pa.semifinished_id',
+                                                                            {
+                                                                                $map: {
+                                                                                    input: {
+                                                                                        $filter: {
+                                                                                            input: '$internalWorkOrderDetails',
+                                                                                            as: 'iwo',
+                                                                                            cond: {
+                                                                                                $and: [
+                                                                                                    { $eq: ['$$iwo.product_id', '$$p.product'] },
+                                                                                                    { $eq: ['$$iwo.code', '$$p.code'] }
+                                                                                                ]
+                                                                                            }
+                                                                                        }
+                                                                                    },
+                                                                                    as: 'm',
+                                                                                    in: '$$m.semifinished_id'
+                                                                                }
+                                                                            }
+                                                                        ]
+                                                                    }
+                                                                ]
+                                                            }
+                                                        }
+                                                    }
+                                                },
+                                                in: {
+                                                    $cond: [
+                                                        { $gt: [{ $size: '$$matchProd' }, 0] },
+                                                        { $arrayElemAt: ['$$matchProd.achieved_quantity', 0] },
+                                                        0
+                                                    ]
+                                                }
+                                            }
+                                        }
+                                    }
+                                ]
+                            }
+                        }
+                    }
+                }
+            },
+            {
+                $project: {
+                    _id: 1,
+                    job_order_id: 1,
+                    work_order_number: 1,
+                    date: 1,
+                    prod_requset_date: 1,
+                    prod_requirement_date: 1,
+                    products: 1
+                }
+            }
+        ]);
+
+        if (!jobOrderDetails.length) {
+            return res.status(404).json({
+                statusCode: 404,
+                success: false,
+                message: 'Job order not found'
+            });
+        }
+
+        res.status(200).json({
+            statusCode: 200,
+            success: true,
+            message: 'Job order details fetched successfully',
+            data: jobOrderDetails[0]
+        });
+
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({
+            statusCode: 500,
+            success: false,
+            message: 'Internal server error'
+        });
+    }
+});
+
 
 
 
