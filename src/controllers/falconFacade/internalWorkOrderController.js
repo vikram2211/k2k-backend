@@ -2692,7 +2692,7 @@ const getInternalWorkOrderById_07_08_2025 = asyncHandler(async (req, res) => {
     }
 });
 
-const getInternalWorkOrderById = asyncHandler(async (req, res) => {
+const getInternalWorkOrderById_12_08_2025 = asyncHandler(async (req, res) => {
     try {
         const { id } = req.params;
         console.log("id", id);
@@ -2834,6 +2834,192 @@ const getInternalWorkOrderById = asyncHandler(async (req, res) => {
                 jobOrderNumber: jobOrder.job_order_id,
                 createdAt: jobOrder.createdAt ? formatDateOnly(jobOrder.createdAt) : null,
                 createdBy: jobOrder.created_by.username,
+                status: jobOrder.status,
+            },
+            productsDetails: productsDetails,
+        };
+
+        return res.status(200).json({
+            success: true,
+            message: 'Internal work order fetched successfully',
+            data: responseData,
+        });
+    } catch (error) {
+        console.error('Error fetching internal work order:', error);
+        return res.status(500).json({
+            success: false,
+            message: `Error fetching internal work order: ${error.message}`,
+        });
+    }
+});
+
+
+
+const getInternalWorkOrderById = asyncHandler(async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        // Step 1: Fetch the internal work order by ID with populated system and product_system
+        const internalWorkOrder = await falconInternalWorkOrder
+            .findById(id)
+            .populate({
+                path: 'products.system',
+                model: 'falconSystem',
+                select: 'name',
+                match: { isDeleted: false },
+            })
+            .populate({
+                path: 'products.product_system',
+                model: 'falconProductSystem',
+                select: 'name',
+                match: { isDeleted: false },
+            })
+            .lean();
+
+        if (!internalWorkOrder) {
+            return res.status(404).json({
+                success: false,
+                message: 'Internal work order not found',
+            });
+        }
+        console.log("internalWorkOrder",internalWorkOrder);
+
+        // Step 2: Fetch the job order details
+        const jobOrder = await falconJobOrder
+            .findById(internalWorkOrder.job_order_id)
+            .populate({
+                path: 'work_order_number',
+                model: 'falconWorkOrder',
+                select: 'work_order_number client_id project_id',
+                populate: [
+                    {
+                        path: 'client_id',
+                        model: 'falconClient',
+                        select: 'name address',
+                        match: { isDeleted: false },
+                    },
+                    {
+                        path: 'project_id',
+                        model: 'falconProject',
+                        select: 'name',
+                        match: { isDeleted: false },
+                    },
+                ],
+            })
+            .populate({
+                path: 'prod_issued_approved_by',
+                model: 'Employee',
+                select: 'name',
+            })
+            .populate({
+                path: 'prod_recieved_by',
+                model: 'Employee',
+                select: 'name',
+            })
+            .populate({
+                path: 'created_by',
+                model: 'User',
+                select: 'username',
+            })
+            .lean();
+
+        if (!jobOrder) {
+            return res.status(404).json({
+                success: false,
+                message: 'Job order not found',
+            });
+        }
+
+        if (!jobOrder.work_order_number) {
+            return res.status(404).json({
+                success: false,
+                message: 'Work order not found',
+            });
+        }
+
+        // Step 3: Fetch product details and production quantities for the last process
+        const productsDetails = await Promise.all(
+            internalWorkOrder.products.map(async (internalProduct) => {
+                // console.log("internalProduct",internalProduct);
+                const jobProduct = jobOrder.products.find(
+                    p => String(p.product) === String(internalProduct.product)
+                );
+                const productDetail = await falconProduct.findById(internalProduct.product).select('name').lean();
+
+                // Fetch the production record for the last process for each semifinished_id
+                const semifinishedIds = internalProduct.semifinished_details.map(s => s.semifinished_id);
+                let achievedQty = 0;
+                let rejectedQty = 0;
+
+                if (semifinishedIds.length > 0) {
+                    // Find the production record with the highest process_sequence.current.index
+                    const lastProductionRecord = await falconProduction
+                        .findOne({
+                            internal_work_order: id,
+                            'product.product_id': internalProduct.product,
+                            semifinished_id: { $in: semifinishedIds },
+                        })
+                        .sort({ 'process_sequence.current.index': -1 }) // Sort by process index descending
+                        .select('product.achieved_quantity product.rejected_quantity')
+                        .lean();
+
+                    if (lastProductionRecord) {
+                        achievedQty = lastProductionRecord.product.achieved_quantity || 0;
+                        rejectedQty = lastProductionRecord.product.rejected_quantity || 0;
+                    }
+                }
+
+                return {
+                    product_name: productDetail ? productDetail.name : null,
+                    product_id: internalProduct.product,
+                    sales_order_no: internalWorkOrder.sales_order_no || 'N/A', // Explicitly include sales_order_no
+                    system_name: internalProduct.system?.name || null,
+                    system_id: internalProduct.system?._id || null,
+                    product_system_name: internalProduct.product_system?.name || null,
+                    product_system_id: internalProduct.product_system?._id || null,
+                    po_quantity: jobProduct ? jobProduct.po_quantity : internalProduct.po_quantity,
+                    planned_quantity: internalProduct.po_quantity,
+                    from_date: internalWorkOrder.date?.from ? formatDateOnly(internalWorkOrder.date.from) : null,
+                    to_date: internalWorkOrder.date?.to ? formatDateOnly(internalWorkOrder.date.to) : null,
+                    uom: jobProduct ? jobProduct.uom : internalProduct.uom,
+                    code: jobProduct ? jobProduct.code : internalProduct.code,
+                    color_code: jobProduct ? jobProduct.color_code : internalProduct.color_code,
+                    width: jobProduct ? jobProduct.width : internalProduct.width,
+                    height: jobProduct ? jobProduct.height : internalProduct.height,
+                    semifinished_details: internalProduct.semifinished_details || [],
+                    achieved_qty: achievedQty,
+                    rejected_qty: rejectedQty,
+                };
+            })
+        );
+
+        // Step 4: Format the response
+        const responseData = {
+            clientProjectDetails: {
+                clientName: jobOrder.work_order_number?.client_id?.name || null,
+                clientId: jobOrder.work_order_number?.client_id?._id || null,
+                address: jobOrder.work_order_number?.client_id?.address || null,
+                projectName: jobOrder.work_order_number?.project_id?.name || null,
+                projectId: jobOrder.work_order_number?.project_id?._id || null,
+            },
+            workOrderDetails: {
+                workOrderNumber: jobOrder.work_order_number?.work_order_number || null,
+                productionRequestDate: jobOrder.prod_requset_date ? formatDateOnly(jobOrder.prod_requset_date) : null,
+                productionRequirementDate: jobOrder.prod_requirement_date ? formatDateOnly(jobOrder.prod_requirement_date) : null,
+                approvedBy: jobOrder.prod_issued_approved_by?.name || null,
+                approvedById: jobOrder.prod_issued_approved_by?._id || null,
+                receivedBy: jobOrder.prod_recieved_by?.name || null,
+                receivedById: jobOrder.prod_recieved_by?._id || null,
+                workOrderDate: jobOrder.date ? formatDateOnly(jobOrder.date) : null,
+                file: jobOrder.files || [],
+                createdAt: jobOrder.createdAt ? formatDateOnly(jobOrder.createdAt) : null,
+                createdBy: jobOrder.created_by?.username || null,
+            },
+            jobOrderDetails: {
+                job_order_id: jobOrder._id,
+                jobOrderNumber: jobOrder.job_order_id,
+                createdAt: jobOrder.createdAt ? formatDateOnly(jobOrder.createdAt) : null,
+                createdBy: jobOrder.created_by?.username || null,
                 status: jobOrder.status,
             },
             productsDetails: productsDetails,
