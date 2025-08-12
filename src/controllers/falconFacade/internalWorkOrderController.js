@@ -1053,7 +1053,7 @@ const createInternalWorkOrder22_07_2025_8AM = asyncHandler(async (req, res) => {
 
     // 3. Parse the form-data body
     const bodyData = req.body;
-    console.log("bodyData",bodyData);
+    console.log("bodyData", bodyData);
     if (typeof bodyData.products === 'string') {
         try {
             bodyData.products = JSON.parse(bodyData.products);
@@ -1233,7 +1233,7 @@ const createInternalWorkOrder22_07_2025_8AM = asyncHandler(async (req, res) => {
     try {
         const productionDocs = [];
         for (const product of jobOrderData.products) {
-            console.log("product***",product);
+            console.log("product***", product);
             for (const sfDetail of product.semifinished_details) {
                 for (const process of sfDetail.processes) {
                     const productionData = {
@@ -1282,74 +1282,74 @@ const createInternalWorkOrder_22_07_2025_11AM = asyncHandler(async (req, res) =>
     // 1. Validate job_order_id
     const { job_order_id } = req.body;
     if (!job_order_id) {
-      return res.status(400).json({
-        success: false,
-        message: 'Job order ID is required',
-      });
+        return res.status(400).json({
+            success: false,
+            message: 'Job order ID is required',
+        });
     }
-  
+
     // 2. Validate job_order_id exists and is a valid ObjectId
     if (!mongoose.Types.ObjectId.isValid(job_order_id)) {
-      return res.status(400).json({
-        success: false,
-        message: 'Invalid job_order_id format',
-      });
+        return res.status(400).json({
+            success: false,
+            message: 'Invalid job_order_id format',
+        });
     }
     const jobOrder = await falconJobOrder.findById(job_order_id).populate('products.product');
     if (!jobOrder) {
-      return res.status(400).json({
-        success: false,
-        message: 'Job order not found',
-      });
+        return res.status(400).json({
+            success: false,
+            message: 'Job order not found',
+        });
     }
-  
+
     // 3. Parse the form-data body
     const bodyData = req.body;
     console.log("bodyData", bodyData);
     if (typeof bodyData.products === 'string') {
-      try {
-        bodyData.products = JSON.parse(bodyData.products);
-      } catch (err) {
-        throw new ApiError(400, 'Invalid products JSON format');
-      }
+        try {
+            bodyData.products = JSON.parse(bodyData.products);
+        } catch (err) {
+            throw new ApiError(400, 'Invalid products JSON format');
+        }
     }
-  
+
     // 4. Extract and validate date fields
     let dateFrom, dateTo;
     if (bodyData.date && bodyData.date.from && bodyData.date.to) {
-      dateFrom = bodyData.date.from;
-      dateTo = bodyData.date.to;
+        dateFrom = bodyData.date.from;
+        dateTo = bodyData.date.to;
     } else if (bodyData['date[from]'] && bodyData['date[to]']) {
-      dateFrom = bodyData['date[from]'];
-      dateTo = bodyData['date[to]'];
+        dateFrom = bodyData['date[from]'];
+        dateTo = bodyData['date[to]'];
     } else {
-      throw new ApiError(400, 'Date range (from and to) is required');
+        throw new ApiError(400, 'Date range (from and to) is required');
     }
     const parsedDateFrom = parseDate(dateFrom, 'date.from');
     const parsedDateTo = parseDate(dateTo, 'date.to');
-  
+
     // 5. Validate product quantities against job order
     const productQuantitiesInJobOrder = {};
     jobOrder.products.forEach((prod) => {
-      productQuantitiesInJobOrder[prod.product._id.toString()] = prod.po_quantity;
+        productQuantitiesInJobOrder[prod.product._id.toString()] = prod.po_quantity;
     });
     console.log("productQuantitiesInJobOrder", productQuantitiesInJobOrder);
-  
+
     // Fetch all existing internal work orders for this job_order_id
     const existingIWOs = await falconInternalWorkOrder.find({ job_order_id }).lean();
     console.log("existingIWOs", existingIWOs);
     const allocatedQuantities = {};
-  
+
     // Calculate total allocated quantities for each product
     existingIWOs.forEach((iwo) => {
-      iwo.products.forEach((prod) => {
-        console.log("prod", prod);
-        const productId = prod.product.toString();
-        allocatedQuantities[productId] = (allocatedQuantities[productId] || 0) + prod.po_quantity;
-      });
+        iwo.products.forEach((prod) => {
+            console.log("prod", prod);
+            const productId = prod.product.toString();
+            allocatedQuantities[productId] = (allocatedQuantities[productId] || 0) + prod.po_quantity;
+        });
     });
     console.log("allocatedQuantities", allocatedQuantities);
-  
+
     // Validate requested quantities in the new IWO
     // for (const product of bodyData.products) {
     //   const productId = product.product;
@@ -1360,7 +1360,7 @@ const createInternalWorkOrder_22_07_2025_11AM = asyncHandler(async (req, res) =>
     //   const allocatedQty = allocatedQuantities[productId] || 0;
     //   const maxAllowedQty = productQuantitiesInJobOrder[productId];
     //   console.log("maxAllowedQty", maxAllowedQty);
-  
+
     //   if (allocatedQty + requestedQty > maxAllowedQty) {
     //     throw new ApiError(
     //       400,
@@ -1369,691 +1369,691 @@ const createInternalWorkOrder_22_07_2025_11AM = asyncHandler(async (req, res) =>
     //     );
     //   }
     // }
-  
+
     // 6. Map files to their respective fields
     const filesMap = {};
     if (req.files) {
-      req.files.forEach((file) => {
-        const fieldName = file.fieldname;
-        filesMap[fieldName] = file;
-      });
+        req.files.forEach((file) => {
+            const fieldName = file.fieldname;
+            filesMap[fieldName] = file;
+        });
     }
-  
+
     // 7. Construct the internal work order data
     const jobOrderData = {
-      job_order_id: bodyData.job_order_id,
-      sales_order_no: bodyData.sales_order_no || undefined,
-      date: {
-        from: parsedDateFrom,
-        to: parsedDateTo,
-      },
-      products: await Promise.all(
-        bodyData.products.map(async (product, productIndex) => {
-          validateObjectId(product.product, `product at index ${productIndex}`);
-          validateObjectId(product.system, `system at index ${productIndex}`);
-          validateObjectId(product.product_system, `product_system at index ${productIndex}`);
-          return {
-            product: product.product,
-            code: product.code, // Include code
-            width: product.width ? parseFloat(product.width) : undefined, // Include width (optional)
-            height: product.height ? parseFloat(product.height) : undefined, // Include height (optional)
-            system: product.system,
-            product_system: product.product_system,
-            po_quantity: parseInt(product.po_quantity),
-            semifinished_details: await Promise.all(
-              product.semifinished_details.map(async (sfDetail, sfIndex) => {
-                if (!sfDetail.semifinished_id) {
-                  throw new ApiError(
-                    400,
-                    `Semifinished ID is required for semifinished_details at index ${sfIndex} in product ${productIndex}`
-                  );
-                }
-                const sfFileField = `products[${productIndex}][semifinished_details][${sfIndex}][file]`;
-                const sfFile = filesMap[sfFileField];
-                let sfFileUrl = undefined;
-                if (sfFile) {
-                  const sfFileName = `internal-work-orders/semifinished/${Date.now()}-${sanitizeFilename(
-                    sfFile.originalname
-                  )}`;
-                  const sfFileData = {
-                    data: fs.readFileSync(sfFile.path),
-                    mimetype: sfFile.mimetype,
-                  };
-                  const sfUploadResult = await putObject(sfFileData, sfFileName);
-                  sfFileUrl = sfUploadResult.url;
-                }
-                if (!sfDetail.processes || sfDetail.processes.length === 0) {
-                  return res.status(400).json({
-                    success: false,
-                    message: `Processes are required for semifinished_details at index ${sfIndex} in product ${productIndex}`,
-                  });
-                }
+        job_order_id: bodyData.job_order_id,
+        sales_order_no: bodyData.sales_order_no || undefined,
+        date: {
+            from: parsedDateFrom,
+            to: parsedDateTo,
+        },
+        products: await Promise.all(
+            bodyData.products.map(async (product, productIndex) => {
+                validateObjectId(product.product, `product at index ${productIndex}`);
+                validateObjectId(product.system, `system at index ${productIndex}`);
+                validateObjectId(product.product_system, `product_system at index ${productIndex}`);
                 return {
-                  semifinished_id: sfDetail.semifinished_id,
-                  file_url: sfFileUrl,
-                  remarks: sfDetail.remarks || undefined,
-                  processes: await Promise.all(
-                    sfDetail.processes.map(async (process, processIndex) => {
-                      if (!process.name) {
-                        throw new ApiError(
-                          400,
-                          `Process name is required for process at index ${processIndex} in semifinished_details ${sfIndex}, product ${productIndex}`
-                        );
-                      }
-                      const processFileField = `products[${productIndex}][semifinished_details][${sfIndex}][processes][${processIndex}][file]`;
-                      const processFile = filesMap[processFileField];
-                      let processFileUrl = undefined;
-                      if (processFile) {
-                        const processFileName = `internal-work-orders/processes/${Date.now()}-${sanitizeFilename(
-                          processFile.originalname
-                        )}`;
-                        const processFileData = {
-                          data: fs.readFileSync(processFile.path),
-                          mimetype: processFile.mimetype,
-                        };
-                        const processUploadResult = await putObject(
-                          processFileData,
-                          processFileName
-                        );
-                        processFileUrl = processUploadResult.url;
-                      }
-                      return {
-                        name: process.name,
-                        file_url: processFileUrl,
-                        remarks: process.remarks || undefined,
-                      };
-                    })
-                  ),
+                    product: product.product,
+                    code: product.code, // Include code
+                    width: product.width ? parseFloat(product.width) : undefined, // Include width (optional)
+                    height: product.height ? parseFloat(product.height) : undefined, // Include height (optional)
+                    system: product.system,
+                    product_system: product.product_system,
+                    po_quantity: parseInt(product.po_quantity),
+                    semifinished_details: await Promise.all(
+                        product.semifinished_details.map(async (sfDetail, sfIndex) => {
+                            if (!sfDetail.semifinished_id) {
+                                throw new ApiError(
+                                    400,
+                                    `Semifinished ID is required for semifinished_details at index ${sfIndex} in product ${productIndex}`
+                                );
+                            }
+                            const sfFileField = `products[${productIndex}][semifinished_details][${sfIndex}][file]`;
+                            const sfFile = filesMap[sfFileField];
+                            let sfFileUrl = undefined;
+                            if (sfFile) {
+                                const sfFileName = `internal-work-orders/semifinished/${Date.now()}-${sanitizeFilename(
+                                    sfFile.originalname
+                                )}`;
+                                const sfFileData = {
+                                    data: fs.readFileSync(sfFile.path),
+                                    mimetype: sfFile.mimetype,
+                                };
+                                const sfUploadResult = await putObject(sfFileData, sfFileName);
+                                sfFileUrl = sfUploadResult.url;
+                            }
+                            if (!sfDetail.processes || sfDetail.processes.length === 0) {
+                                return res.status(400).json({
+                                    success: false,
+                                    message: `Processes are required for semifinished_details at index ${sfIndex} in product ${productIndex}`,
+                                });
+                            }
+                            return {
+                                semifinished_id: sfDetail.semifinished_id,
+                                file_url: sfFileUrl,
+                                remarks: sfDetail.remarks || undefined,
+                                processes: await Promise.all(
+                                    sfDetail.processes.map(async (process, processIndex) => {
+                                        if (!process.name) {
+                                            throw new ApiError(
+                                                400,
+                                                `Process name is required for process at index ${processIndex} in semifinished_details ${sfIndex}, product ${productIndex}`
+                                            );
+                                        }
+                                        const processFileField = `products[${productIndex}][semifinished_details][${sfIndex}][processes][${processIndex}][file]`;
+                                        const processFile = filesMap[processFileField];
+                                        let processFileUrl = undefined;
+                                        if (processFile) {
+                                            const processFileName = `internal-work-orders/processes/${Date.now()}-${sanitizeFilename(
+                                                processFile.originalname
+                                            )}`;
+                                            const processFileData = {
+                                                data: fs.readFileSync(processFile.path),
+                                                mimetype: processFile.mimetype,
+                                            };
+                                            const processUploadResult = await putObject(
+                                                processFileData,
+                                                processFileName
+                                            );
+                                            processFileUrl = processUploadResult.url;
+                                        }
+                                        return {
+                                            name: process.name,
+                                            file_url: processFileUrl,
+                                            remarks: process.remarks || undefined,
+                                        };
+                                    })
+                                ),
+                            };
+                        })
+                    ),
                 };
-              })
-            ),
-          };
-        })
-      ),
+            })
+        ),
     };
-  
+
     // 8. Save internal work order to MongoDB
     let internalWorkOrder;
     try {
-      internalWorkOrder = await falconInternalWorkOrder.create(jobOrderData);
+        internalWorkOrder = await falconInternalWorkOrder.create(jobOrderData);
     } catch (error) {
-      console.log('error', error);
-      return res.status(500).json({
-        success: false,
-        message: `Error creating internal work order: ${error.message}`,
-      });
+        console.log('error', error);
+        return res.status(500).json({
+            success: false,
+            message: `Error creating internal work order: ${error.message}`,
+        });
     }
-  
+
     // 9. Construct and save falconProduction documents
     try {
-      const productionDocs = [];
-      for (const product of jobOrderData.products) {
-        console.log("product***", product);
-        for (const sfDetail of product.semifinished_details) {
-          for (const process of sfDetail.processes) {
-            const productionData = {
-              job_order: job_order_id,
-              semifinished_id: sfDetail.semifinished_id,
-              product: {
-                product_id: product.product,
-                code: product.code, // Include code
-                width: product.width ? parseFloat(product.width) : undefined, // Include width (optional)
-                height: product.height ? parseFloat(product.height) : undefined, // Include height (optional)
-                po_quantity: product.po_quantity,
-                achieved_quantity: 0,
-                rejected_quantity: 0,
-                recycled_quantity: 0,
-              },
-              process_name: process.name.toLowerCase(),
-              date: parsedDateFrom,
-              status: 'Pending',
-              created_by: req.user?._id || null,
-              updated_by: req.user?._id || null,
-            };
-            productionDocs.push(productionData);
-          }
+        const productionDocs = [];
+        for (const product of jobOrderData.products) {
+            console.log("product***", product);
+            for (const sfDetail of product.semifinished_details) {
+                for (const process of sfDetail.processes) {
+                    const productionData = {
+                        job_order: job_order_id,
+                        semifinished_id: sfDetail.semifinished_id,
+                        product: {
+                            product_id: product.product,
+                            code: product.code, // Include code
+                            width: product.width ? parseFloat(product.width) : undefined, // Include width (optional)
+                            height: product.height ? parseFloat(product.height) : undefined, // Include height (optional)
+                            po_quantity: product.po_quantity,
+                            achieved_quantity: 0,
+                            rejected_quantity: 0,
+                            recycled_quantity: 0,
+                        },
+                        process_name: process.name.toLowerCase(),
+                        date: parsedDateFrom,
+                        status: 'Pending',
+                        created_by: req.user?._id || null,
+                        updated_by: req.user?._id || null,
+                    };
+                    productionDocs.push(productionData);
+                }
+            }
         }
-      }
-      const productions = await falconProduction.insertMany(productionDocs);
-      console.log('Production documents created:', productions);
+        const productions = await falconProduction.insertMany(productionDocs);
+        console.log('Production documents created:', productions);
     } catch (error) {
-      console.log('Error creating production documents:', error);
-      await falconInternalWorkOrder.deleteOne({ _id: internalWorkOrder._id });
-      return res.status(500).json({
-        success: false,
-        message: `Error creating production documents: ${error.message}`,
-      });
+        console.log('Error creating production documents:', error);
+        await falconInternalWorkOrder.deleteOne({ _id: internalWorkOrder._id });
+        return res.status(500).json({
+            success: false,
+            message: `Error creating production documents: ${error.message}`,
+        });
     }
-  
+
     // 10. Return success response
     return res.status(201).json({
-      success: true,
-      message: 'Internal Work order and Production documents created successfully',
-      data: internalWorkOrder,
+        success: true,
+        message: 'Internal Work order and Production documents created successfully',
+        data: internalWorkOrder,
     });
-  });
+});
 
 
 
 
 
 
-  const createInternalWorkOrder_22_07_2025_11PM = asyncHandler(async (req, res) => {
+const createInternalWorkOrder_22_07_2025_11PM = asyncHandler(async (req, res) => {
     // 1. Validate job_order_id
     const { job_order_id } = req.body;
     if (!job_order_id) {
-      return res.status(400).json({
-        success: false,
-        message: 'Job order ID is required',
-      });
+        return res.status(400).json({
+            success: false,
+            message: 'Job order ID is required',
+        });
     }
-  
+
     // 2. Validate job_order_id exists and is a valid ObjectId
     if (!mongoose.Types.ObjectId.isValid(job_order_id)) {
-      return res.status(400).json({
-        success: false,
-        message: 'Invalid job_order_id format',
-      });
+        return res.status(400).json({
+            success: false,
+            message: 'Invalid job_order_id format',
+        });
     }
     const jobOrder = await falconJobOrder.findById(job_order_id).populate('products.product');
     if (!jobOrder) {
-      return res.status(400).json({
-        success: false,
-        message: 'Job order not found',
-      });
+        return res.status(400).json({
+            success: false,
+            message: 'Job order not found',
+        });
     }
-  
+
     // 3. Parse the form-data body
     const bodyData = req.body;
     console.log("bodyData", bodyData);
     if (typeof bodyData.products === 'string') {
-      try {
-        bodyData.products = JSON.parse(bodyData.products);
-      } catch (err) {
-        throw new ApiError(400, 'Invalid products JSON format');
-      }
+        try {
+            bodyData.products = JSON.parse(bodyData.products);
+        } catch (err) {
+            throw new ApiError(400, 'Invalid products JSON format');
+        }
     }
-  
+
     // 4. Extract and validate date fields
     let dateFrom, dateTo;
     if (bodyData.date && bodyData.date.from && bodyData.date.to) {
-      dateFrom = bodyData.date.from;
-      dateTo = bodyData.date.to;
+        dateFrom = bodyData.date.from;
+        dateTo = bodyData.date.to;
     } else if (bodyData['date[from]'] && bodyData['date[to]']) {
-      dateFrom = bodyData['date[from]'];
-      dateTo = bodyData['date[to]'];
+        dateFrom = bodyData['date[from]'];
+        dateTo = bodyData['date[to]'];
     } else {
-      throw new ApiError(400, 'Date range (from and to) is required');
+        throw new ApiError(400, 'Date range (from and to) is required');
     }
     const parsedDateFrom = parseDate(dateFrom, 'date.from');
     const parsedDateTo = parseDate(dateTo, 'date.to');
-  
+
     // 5. Validate product quantities against job order
     const productQuantitiesInJobOrder = {};
     jobOrder.products.forEach((prod) => {
-      const key = `${prod.product._id.toString()}-${prod.code}`;
-      productQuantitiesInJobOrder[key] = prod.po_quantity;
+        const key = `${prod.product._id.toString()}-${prod.code}`;
+        productQuantitiesInJobOrder[key] = prod.po_quantity;
     });
     console.log("productQuantitiesInJobOrder", productQuantitiesInJobOrder);
-  
+
     // Fetch all existing internal work orders for this job_order_id
     const existingIWOs = await falconInternalWorkOrder.find({ job_order_id }).lean();
     console.log("existingIWOs", existingIWOs);
     const allocatedQuantities = {};
-  
+
     // Calculate total allocated quantities for each product and code combination
     existingIWOs.forEach((iwo) => {
-      iwo.products.forEach((prod) => {
-        const key = `${prod.product.toString()}-${prod.code}`;
-        allocatedQuantities[key] = (allocatedQuantities[key] || 0) + prod.po_quantity;
-      });
+        iwo.products.forEach((prod) => {
+            const key = `${prod.product.toString()}-${prod.code}`;
+            allocatedQuantities[key] = (allocatedQuantities[key] || 0) + prod.po_quantity;
+        });
     });
     console.log("allocatedQuantities", allocatedQuantities);
-  
+
     // Validate requested quantities in the new IWO
     for (const product of bodyData.products) {
-      const productId = product.product;
-      const productCode = product.code;
-      const key = `${productId}-${productCode}`;
-      if (!productQuantitiesInJobOrder[key]) {
-        throw new ApiError(400, `Product ${productId} with code ${productCode} is not part of the job order`);
-      }
-      const requestedQty = parseInt(product.po_quantity);
-      const allocatedQty = allocatedQuantities[key] || 0;
-      const maxAllowedQty = productQuantitiesInJobOrder[key];
-      console.log("maxAllowedQty", maxAllowedQty);
-  
-      if (allocatedQty + requestedQty > maxAllowedQty) {
-        throw new ApiError(
-          400,
-          `Requested quantity (${requestedQty}) for product ${productId} (code: ${productCode}) exceeds remaining quantity. ` +
-          `Already allocated: ${allocatedQty}, Max allowed: ${maxAllowedQty}, Remaining: ${maxAllowedQty - allocatedQty}`
-        );
-      }
-    }
-  
-    // 6. Map files to their respective fields
-    const filesMap = {};
-    if (req.files) {
-      req.files.forEach((file) => {
-        const fieldName = file.fieldname;
-        filesMap[fieldName] = file;
-      });
-    }
-  
-    // 7. Construct the internal work order data
-    const jobOrderData = {
-      job_order_id: bodyData.job_order_id,
-      sales_order_no: bodyData.sales_order_no || undefined,
-      date: {
-        from: parsedDateFrom,
-        to: parsedDateTo,
-      },
-      products: await Promise.all(
-        bodyData.products.map(async (product, productIndex) => {
-          validateObjectId(product.product, `product at index ${productIndex}`);
-          validateObjectId(product.system, `system at index ${productIndex}`);
-          validateObjectId(product.product_system, `product_system at index ${productIndex}`);
-          return {
-            product: product.product,
-            code: product.code,
-            width: product.width ? parseFloat(product.width) : undefined,
-            height: product.height ? parseFloat(product.height) : undefined,
-            system: product.system,
-            product_system: product.product_system,
-            po_quantity: parseInt(product.po_quantity),
-            semifinished_details: await Promise.all(
-              product.semifinished_details.map(async (sfDetail, sfIndex) => {
-                if (!sfDetail.semifinished_id) {
-                  throw new ApiError(
-                    400,
-                    `Semifinished ID is required for semifinished_details at index ${sfIndex} in product ${productIndex}`
-                  );
-                }
-                const sfFileField = `products[${productIndex}][semifinished_details][${sfIndex}][file]`;
-                const sfFile = filesMap[sfFileField];
-                let sfFileUrl = undefined;
-                if (sfFile) {
-                  const sfFileName = `internal-work-orders/semifinished/${Date.now()}-${sanitizeFilename(
-                    sfFile.originalname
-                  )}`;
-                  const sfFileData = {
-                    data: fs.readFileSync(sfFile.path),
-                    mimetype: sfFile.mimetype,
-                  };
-                  const sfUploadResult = await putObject(sfFileData, sfFileName);
-                  sfFileUrl = sfUploadResult.url;
-                }
-                if (!sfDetail.processes || sfDetail.processes.length === 0) {
-                  return res.status(400).json({
-                    success: false,
-                    message: `Processes are required for semifinished_details at index ${sfIndex} in product ${productIndex}`,
-                  });
-                }
-                return {
-                  semifinished_id: sfDetail.semifinished_id,
-                  file_url: sfFileUrl,
-                  remarks: sfDetail.remarks || undefined,
-                  processes: await Promise.all(
-                    sfDetail.processes.map(async (process, processIndex) => {
-                      if (!process.name) {
-                        throw new ApiError(
-                          400,
-                          `Process name is required for process at index ${processIndex} in semifinished_details ${sfIndex}, product ${productIndex}`
-                        );
-                      }
-                      const processFileField = `products[${productIndex}][semifinished_details][${sfIndex}][processes][${processIndex}][file]`;
-                      const processFile = filesMap[processFileField];
-                      let processFileUrl = undefined;
-                      if (processFile) {
-                        const processFileName = `internal-work-orders/processes/${Date.now()}-${sanitizeFilename(
-                          processFile.originalname
-                        )}`;
-                        const processFileData = {
-                          data: fs.readFileSync(processFile.path),
-                          mimetype: processFile.mimetype,
-                        };
-                        const processUploadResult = await putObject(
-                          processFileData,
-                          processFileName
-                        );
-                        processFileUrl = processUploadResult.url;
-                      }
-                      return {
-                        name: process.name,
-                        file_url: processFileUrl,
-                        remarks: process.remarks || undefined,
-                      };
-                    })
-                  ),
-                };
-              })
-            ),
-          };
-        })
-      ),
-    };
-  
-    // 8. Save internal work order to MongoDB
-    let internalWorkOrder;
-    try {
-      internalWorkOrder = await falconInternalWorkOrder.create(jobOrderData);
-    } catch (error) {
-      console.log('error', error);
-      return res.status(500).json({
-        success: false,
-        message: `Error creating internal work order: ${error.message}`,
-      });
-    }
-  
-    // 9. Construct and save falconProduction documents
-    try {
-      const productionDocs = [];
-      for (const product of jobOrderData.products) {
-        console.log("product***", product);
-        for (const sfDetail of product.semifinished_details) {
-          for (const process of sfDetail.processes) {
-            const productionData = {
-              job_order: job_order_id,
-              semifinished_id: sfDetail.semifinished_id,
-              product: {
-                product_id: product.product,
-                code: product.code,
-                width: product.width ? parseFloat(product.width) : undefined,
-                height: product.height ? parseFloat(product.height) : undefined,
-                po_quantity: product.po_quantity,
-                achieved_quantity: 0,
-                rejected_quantity: 0,
-                recycled_quantity: 0,
-              },
-              process_name: process.name.toLowerCase(),
-              date: parsedDateFrom,
-              status: 'Pending',
-              created_by: req.user?._id || null,
-              updated_by: req.user?._id || null,
-            };
-            productionDocs.push(productionData);
-          }
-        }
-      }
-      const productions = await falconProduction.insertMany(productionDocs);
-      console.log('Production documents created:', productions);
-    } catch (error) {
-      console.log('Error creating production documents:', error);
-      await falconInternalWorkOrder.deleteOne({ _id: internalWorkOrder._id });
-      return res.status(500).json({
-        success: false,
-        message: `Error creating production documents: ${error.message}`,
-      });
-    }
-  
-    // 10. Return success response
-    return res.status(201).json({
-      success: true,
-      message: 'Internal Work order and Production documents created successfully',
-      data: internalWorkOrder,
-    });
-  });
-
-
-  const createInternalWorkOrder_07_08_2025 = asyncHandler(async (req, res) => {
-    const session = await mongoose.startSession();
-    session.startTransaction();
-  
-    try {
-      // 1. Validate job_order_id
-      const { job_order_id } = req.body;
-      if (!job_order_id) {
-        throw new ApiError(400, 'Job order ID is required');
-      }
-  
-      validateObjectId(job_order_id, 'job_order_id');
-  
-      // 2. Check if job order exists
-      const jobOrder = await falconJobOrder.findById(job_order_id).session(session).populate('products.product');
-      if (!jobOrder) {
-        throw new ApiError(404, 'Job order not found');
-      }
-  
-      // 3. Parse the form-data body
-      const bodyData = req.body;
-      if (typeof bodyData.products === 'string') {
-        try {
-          bodyData.products = JSON.parse(bodyData.products);
-        } catch (err) {
-          throw new ApiError(400, 'Invalid products JSON format');
-        }
-      }
-  
-      // 4. Extract and validate date fields
-      let dateFrom, dateTo;
-      if (bodyData.date && bodyData.date.from && bodyData.date.to) {
-        dateFrom = parseDate(bodyData.date.from, 'date.from');
-        dateTo = parseDate(bodyData.date.to, 'date.to');
-      } else if (bodyData['date[from]'] && bodyData['date[to]']) {
-        dateFrom = parseDate(bodyData['date[from]'], 'date.from');
-        dateTo = parseDate(bodyData['date[to]'], 'date.to');
-      } else {
-        throw new ApiError(400, 'Date range (from and to) is required');
-      }
-  
-      // 5. Validate product quantities against job order
-      const productQuantitiesInJobOrder = {};
-      jobOrder.products.forEach((prod) => {
-        const key = `${prod.product._id.toString()}-${prod.code}`;
-        productQuantitiesInJobOrder[key] = prod.po_quantity;
-      });
-  
-      // Calculate allocated quantities
-      const existingIWOs = await falconInternalWorkOrder.find({ job_order_id }).session(session).lean();
-      const allocatedQuantities = {};
-  
-      existingIWOs.forEach((iwo) => {
-        iwo.products.forEach((prod) => {
-          const key = `${prod.product.toString()}-${prod.code}`;
-          allocatedQuantities[key] = (allocatedQuantities[key] || 0) + prod.po_quantity;
-        });
-      });
-      ///
-      // Validate requested quantities
-      for (const product of bodyData.products) {
         const productId = product.product;
         const productCode = product.code;
         const key = `${productId}-${productCode}`;
-  
         if (!productQuantitiesInJobOrder[key]) {
-          throw new ApiError(400, `Product ${productId} with code ${productCode} is not part of the job order`);
+            throw new ApiError(400, `Product ${productId} with code ${productCode} is not part of the job order`);
         }
-  
         const requestedQty = parseInt(product.po_quantity);
         const allocatedQty = allocatedQuantities[key] || 0;
         const maxAllowedQty = productQuantitiesInJobOrder[key];
-  
+        console.log("maxAllowedQty", maxAllowedQty);
+
         if (allocatedQty + requestedQty > maxAllowedQty) {
-          throw new ApiError(
-            400,
-            `Requested quantity (${requestedQty}) for product ${productId} (code: ${productCode}) exceeds remaining quantity. ` +
-            `Already allocated: ${allocatedQty}, Max allowed: ${maxAllowedQty}, Remaining: ${maxAllowedQty - allocatedQty}`
-          );
+            throw new ApiError(
+                400,
+                `Requested quantity (${requestedQty}) for product ${productId} (code: ${productCode}) exceeds remaining quantity. ` +
+                `Already allocated: ${allocatedQty}, Max allowed: ${maxAllowedQty}, Remaining: ${maxAllowedQty - allocatedQty}`
+            );
         }
-      }
-  
-      // 6. Map files to their respective fields
-      const filesMap = {};
-      if (req.files) {
+    }
+
+    // 6. Map files to their respective fields
+    const filesMap = {};
+    if (req.files) {
         req.files.forEach((file) => {
-          const fieldName = file.fieldname;
-          filesMap[fieldName] = file;
+            const fieldName = file.fieldname;
+            filesMap[fieldName] = file;
         });
-      }
-  
-      // 7. Construct the internal work order data
-      const jobOrderData = {
+    }
+
+    // 7. Construct the internal work order data
+    const jobOrderData = {
         job_order_id: bodyData.job_order_id,
         sales_order_no: bodyData.sales_order_no || undefined,
         date: {
-          from: dateFrom,
-          to: dateTo,
+            from: parsedDateFrom,
+            to: parsedDateTo,
         },
         products: await Promise.all(
-          bodyData.products.map(async (product, productIndex) => {
-            validateObjectId(product.product, `product at index ${productIndex}`);
-            validateObjectId(product.system, `system at index ${productIndex}`);
-            validateObjectId(product.product_system, `product_system at index ${productIndex}`);
-  
-            return {
-              product: product.product,
-              code: product.code,
-              width: product.width ? parseFloat(product.width) : undefined,
-              height: product.height ? parseFloat(product.height) : undefined,
-              system: product.system,
-              product_system: product.product_system,
-              po_quantity: parseInt(product.po_quantity),
-              semifinished_details: await Promise.all(
-                product.semifinished_details.map(async (sfDetail, sfIndex) => {
-                  if (!sfDetail.semifinished_id) {
-                    throw new ApiError(
-                      400,
-                      `Semifinished ID is required for semifinished_details at index ${sfIndex} in product ${productIndex}`
-                    );
-                  }
-  
-                  const sfFileField = `products[${productIndex}][semifinished_details][${sfIndex}][file]`;
-                  const sfFile = filesMap[sfFileField];
-                  let sfFileUrl = undefined;
-  
-                  if (sfFile) {
-                    const sfFileName = `internal-work-orders/semifinished/${Date.now()}-${sanitizeFilename(
-                      sfFile.originalname
-                    )}`;
-                    const sfFileData = {
-                      data: fs.readFileSync(sfFile.path),
-                      mimetype: sfFile.mimetype,
-                    };
-                    const sfUploadResult = await putObject(sfFileData, sfFileName);
-                    sfFileUrl = sfUploadResult.url;
-                  }
-  
-                  if (!sfDetail.processes || sfDetail.processes.length === 0) {
-                    throw new ApiError(
-                      400,
-                      `Processes are required for semifinished_details at index ${sfIndex} in product ${productIndex}`
-                    );
-                  }
-  
-                  return {
-                    semifinished_id: sfDetail.semifinished_id,
-                    file_url: sfFileUrl,
-                    remarks: sfDetail.remarks || undefined,
-                    processes: await Promise.all(
-                      sfDetail.processes.map(async (process, processIndex) => {
-                        if (!process.name) {
-                          throw new ApiError(
-                            400,
-                            `Process name is required for process at index ${processIndex} in semifinished_details ${sfIndex}, product ${productIndex}`
-                          );
-                        }
-  
-                        const processFileField = `products[${productIndex}][semifinished_details][${sfIndex}][processes][${processIndex}][file]`;
-                        const processFile = filesMap[processFileField];
-                        let processFileUrl = undefined;
-  
-                        if (processFile) {
-                          const processFileName = `internal-work-orders/processes/${Date.now()}-${sanitizeFilename(
-                            processFile.originalname
-                          )}`;
-                          const processFileData = {
-                            data: fs.readFileSync(processFile.path),
-                            mimetype: processFile.mimetype,
-                          };
-                          const processUploadResult = await putObject(processFileData, processFileName);
-                          processFileUrl = processUploadResult.url;
-                        }
-  
-                        return {
-                          name: process.name,
-                          file_url: processFileUrl,
-                          remarks: process.remarks || undefined,
-                        };
-                      })
+            bodyData.products.map(async (product, productIndex) => {
+                validateObjectId(product.product, `product at index ${productIndex}`);
+                validateObjectId(product.system, `system at index ${productIndex}`);
+                validateObjectId(product.product_system, `product_system at index ${productIndex}`);
+                return {
+                    product: product.product,
+                    code: product.code,
+                    width: product.width ? parseFloat(product.width) : undefined,
+                    height: product.height ? parseFloat(product.height) : undefined,
+                    system: product.system,
+                    product_system: product.product_system,
+                    po_quantity: parseInt(product.po_quantity),
+                    semifinished_details: await Promise.all(
+                        product.semifinished_details.map(async (sfDetail, sfIndex) => {
+                            if (!sfDetail.semifinished_id) {
+                                throw new ApiError(
+                                    400,
+                                    `Semifinished ID is required for semifinished_details at index ${sfIndex} in product ${productIndex}`
+                                );
+                            }
+                            const sfFileField = `products[${productIndex}][semifinished_details][${sfIndex}][file]`;
+                            const sfFile = filesMap[sfFileField];
+                            let sfFileUrl = undefined;
+                            if (sfFile) {
+                                const sfFileName = `internal-work-orders/semifinished/${Date.now()}-${sanitizeFilename(
+                                    sfFile.originalname
+                                )}`;
+                                const sfFileData = {
+                                    data: fs.readFileSync(sfFile.path),
+                                    mimetype: sfFile.mimetype,
+                                };
+                                const sfUploadResult = await putObject(sfFileData, sfFileName);
+                                sfFileUrl = sfUploadResult.url;
+                            }
+                            if (!sfDetail.processes || sfDetail.processes.length === 0) {
+                                return res.status(400).json({
+                                    success: false,
+                                    message: `Processes are required for semifinished_details at index ${sfIndex} in product ${productIndex}`,
+                                });
+                            }
+                            return {
+                                semifinished_id: sfDetail.semifinished_id,
+                                file_url: sfFileUrl,
+                                remarks: sfDetail.remarks || undefined,
+                                processes: await Promise.all(
+                                    sfDetail.processes.map(async (process, processIndex) => {
+                                        if (!process.name) {
+                                            throw new ApiError(
+                                                400,
+                                                `Process name is required for process at index ${processIndex} in semifinished_details ${sfIndex}, product ${productIndex}`
+                                            );
+                                        }
+                                        const processFileField = `products[${productIndex}][semifinished_details][${sfIndex}][processes][${processIndex}][file]`;
+                                        const processFile = filesMap[processFileField];
+                                        let processFileUrl = undefined;
+                                        if (processFile) {
+                                            const processFileName = `internal-work-orders/processes/${Date.now()}-${sanitizeFilename(
+                                                processFile.originalname
+                                            )}`;
+                                            const processFileData = {
+                                                data: fs.readFileSync(processFile.path),
+                                                mimetype: processFile.mimetype,
+                                            };
+                                            const processUploadResult = await putObject(
+                                                processFileData,
+                                                processFileName
+                                            );
+                                            processFileUrl = processUploadResult.url;
+                                        }
+                                        return {
+                                            name: process.name,
+                                            file_url: processFileUrl,
+                                            remarks: process.remarks || undefined,
+                                        };
+                                    })
+                                ),
+                            };
+                        })
                     ),
-                  };
-                })
-              ),
-            };
-          })
+                };
+            })
         ),
-      };
-  
-      // 8. Save internal work order
-      const internalWorkOrder = await falconInternalWorkOrder.create([jobOrderData], { session });
-  
-      // 9. Create production records with proper sequencing
-      const productionDocs = [];
-      for (const product of jobOrderData.products) {
-        for (const sfDetail of product.semifinished_details) {
-          // Create production records with proper sequencing
-          sfDetail.processes.forEach((process, index) => {
-            const productionData = {
-              job_order: job_order_id,
-              internal_work_order: internalWorkOrder[0]._id,
-              semifinished_id: sfDetail.semifinished_id,
-              product: {
-                product_id: product.product,
-                code: product.code,
-                width: product.width,
-                height: product.height,
-                po_quantity: product.po_quantity,
-                achieved_quantity: 0,
-                rejected_quantity: 0,
-                recycled_quantity: 0,
-              },
-              process_name: process.name.toLowerCase(),
-              process_sequence: {
-                current: {
-                  name: process.name.toLowerCase(),
-                  index: index,
-                },
-                previous: index > 0 ? {
-                  name: sfDetail.processes[index - 1].name.toLowerCase(),
-                  index: index - 1,
-                } : null,
-                next: index < sfDetail.processes.length - 1 ? {
-                  name: sfDetail.processes[index + 1].name.toLowerCase(),
-                  index: index + 1,
-                } : null,
-              },
-              available_quantity: index === 0 ? product.po_quantity : 0,
-              status: index === 0 ? 'Pending' : 'Pending', //Blocked
-              date: dateFrom,
-              created_by: req.user._id,
-              updated_by: req.user._id,
-            };
-            productionDocs.push(productionData);
-          });
+    };
+
+    // 8. Save internal work order to MongoDB
+    let internalWorkOrder;
+    try {
+        internalWorkOrder = await falconInternalWorkOrder.create(jobOrderData);
+    } catch (error) {
+        console.log('error', error);
+        return res.status(500).json({
+            success: false,
+            message: `Error creating internal work order: ${error.message}`,
+        });
+    }
+
+    // 9. Construct and save falconProduction documents
+    try {
+        const productionDocs = [];
+        for (const product of jobOrderData.products) {
+            console.log("product***", product);
+            for (const sfDetail of product.semifinished_details) {
+                for (const process of sfDetail.processes) {
+                    const productionData = {
+                        job_order: job_order_id,
+                        semifinished_id: sfDetail.semifinished_id,
+                        product: {
+                            product_id: product.product,
+                            code: product.code,
+                            width: product.width ? parseFloat(product.width) : undefined,
+                            height: product.height ? parseFloat(product.height) : undefined,
+                            po_quantity: product.po_quantity,
+                            achieved_quantity: 0,
+                            rejected_quantity: 0,
+                            recycled_quantity: 0,
+                        },
+                        process_name: process.name.toLowerCase(),
+                        date: parsedDateFrom,
+                        status: 'Pending',
+                        created_by: req.user?._id || null,
+                        updated_by: req.user?._id || null,
+                    };
+                    productionDocs.push(productionData);
+                }
+            }
         }
-      }
-  
-      // 10. Save production records
-      await falconProduction.insertMany(productionDocs, { session });
-  
-      await session.commitTransaction();
-  
-      return res.status(201).json({
+        const productions = await falconProduction.insertMany(productionDocs);
+        console.log('Production documents created:', productions);
+    } catch (error) {
+        console.log('Error creating production documents:', error);
+        await falconInternalWorkOrder.deleteOne({ _id: internalWorkOrder._id });
+        return res.status(500).json({
+            success: false,
+            message: `Error creating production documents: ${error.message}`,
+        });
+    }
+
+    // 10. Return success response
+    return res.status(201).json({
         success: true,
         message: 'Internal Work order and Production documents created successfully',
-        data: internalWorkOrder[0],
-      });
-    } catch (error) {
-      await session.abortTransaction();
-      console.error('Error in createInternalWorkOrder:', error);
-      throw error;
-    } finally {
-      session.endSession();
-    }
-  });
+        data: internalWorkOrder,
+    });
+});
 
-  const createInternalWorkOrder = asyncHandler(async (req, res) => {
+
+const createInternalWorkOrder_07_08_2025 = asyncHandler(async (req, res) => {
+    const session = await mongoose.startSession();
+    session.startTransaction();
+
+    try {
+        // 1. Validate job_order_id
+        const { job_order_id } = req.body;
+        if (!job_order_id) {
+            throw new ApiError(400, 'Job order ID is required');
+        }
+
+        validateObjectId(job_order_id, 'job_order_id');
+
+        // 2. Check if job order exists
+        const jobOrder = await falconJobOrder.findById(job_order_id).session(session).populate('products.product');
+        if (!jobOrder) {
+            throw new ApiError(404, 'Job order not found');
+        }
+
+        // 3. Parse the form-data body
+        const bodyData = req.body;
+        if (typeof bodyData.products === 'string') {
+            try {
+                bodyData.products = JSON.parse(bodyData.products);
+            } catch (err) {
+                throw new ApiError(400, 'Invalid products JSON format');
+            }
+        }
+
+        // 4. Extract and validate date fields
+        let dateFrom, dateTo;
+        if (bodyData.date && bodyData.date.from && bodyData.date.to) {
+            dateFrom = parseDate(bodyData.date.from, 'date.from');
+            dateTo = parseDate(bodyData.date.to, 'date.to');
+        } else if (bodyData['date[from]'] && bodyData['date[to]']) {
+            dateFrom = parseDate(bodyData['date[from]'], 'date.from');
+            dateTo = parseDate(bodyData['date[to]'], 'date.to');
+        } else {
+            throw new ApiError(400, 'Date range (from and to) is required');
+        }
+
+        // 5. Validate product quantities against job order
+        const productQuantitiesInJobOrder = {};
+        jobOrder.products.forEach((prod) => {
+            const key = `${prod.product._id.toString()}-${prod.code}`;
+            productQuantitiesInJobOrder[key] = prod.po_quantity;
+        });
+
+        // Calculate allocated quantities
+        const existingIWOs = await falconInternalWorkOrder.find({ job_order_id }).session(session).lean();
+        const allocatedQuantities = {};
+
+        existingIWOs.forEach((iwo) => {
+            iwo.products.forEach((prod) => {
+                const key = `${prod.product.toString()}-${prod.code}`;
+                allocatedQuantities[key] = (allocatedQuantities[key] || 0) + prod.po_quantity;
+            });
+        });
+        ///
+        // Validate requested quantities
+        for (const product of bodyData.products) {
+            const productId = product.product;
+            const productCode = product.code;
+            const key = `${productId}-${productCode}`;
+
+            if (!productQuantitiesInJobOrder[key]) {
+                throw new ApiError(400, `Product ${productId} with code ${productCode} is not part of the job order`);
+            }
+
+            const requestedQty = parseInt(product.po_quantity);
+            const allocatedQty = allocatedQuantities[key] || 0;
+            const maxAllowedQty = productQuantitiesInJobOrder[key];
+
+            if (allocatedQty + requestedQty > maxAllowedQty) {
+                throw new ApiError(
+                    400,
+                    `Requested quantity (${requestedQty}) for product ${productId} (code: ${productCode}) exceeds remaining quantity. ` +
+                    `Already allocated: ${allocatedQty}, Max allowed: ${maxAllowedQty}, Remaining: ${maxAllowedQty - allocatedQty}`
+                );
+            }
+        }
+
+        // 6. Map files to their respective fields
+        const filesMap = {};
+        if (req.files) {
+            req.files.forEach((file) => {
+                const fieldName = file.fieldname;
+                filesMap[fieldName] = file;
+            });
+        }
+
+        // 7. Construct the internal work order data
+        const jobOrderData = {
+            job_order_id: bodyData.job_order_id,
+            sales_order_no: bodyData.sales_order_no || undefined,
+            date: {
+                from: dateFrom,
+                to: dateTo,
+            },
+            products: await Promise.all(
+                bodyData.products.map(async (product, productIndex) => {
+                    validateObjectId(product.product, `product at index ${productIndex}`);
+                    validateObjectId(product.system, `system at index ${productIndex}`);
+                    validateObjectId(product.product_system, `product_system at index ${productIndex}`);
+
+                    return {
+                        product: product.product,
+                        code: product.code,
+                        width: product.width ? parseFloat(product.width) : undefined,
+                        height: product.height ? parseFloat(product.height) : undefined,
+                        system: product.system,
+                        product_system: product.product_system,
+                        po_quantity: parseInt(product.po_quantity),
+                        semifinished_details: await Promise.all(
+                            product.semifinished_details.map(async (sfDetail, sfIndex) => {
+                                if (!sfDetail.semifinished_id) {
+                                    throw new ApiError(
+                                        400,
+                                        `Semifinished ID is required for semifinished_details at index ${sfIndex} in product ${productIndex}`
+                                    );
+                                }
+
+                                const sfFileField = `products[${productIndex}][semifinished_details][${sfIndex}][file]`;
+                                const sfFile = filesMap[sfFileField];
+                                let sfFileUrl = undefined;
+
+                                if (sfFile) {
+                                    const sfFileName = `internal-work-orders/semifinished/${Date.now()}-${sanitizeFilename(
+                                        sfFile.originalname
+                                    )}`;
+                                    const sfFileData = {
+                                        data: fs.readFileSync(sfFile.path),
+                                        mimetype: sfFile.mimetype,
+                                    };
+                                    const sfUploadResult = await putObject(sfFileData, sfFileName);
+                                    sfFileUrl = sfUploadResult.url;
+                                }
+
+                                if (!sfDetail.processes || sfDetail.processes.length === 0) {
+                                    throw new ApiError(
+                                        400,
+                                        `Processes are required for semifinished_details at index ${sfIndex} in product ${productIndex}`
+                                    );
+                                }
+
+                                return {
+                                    semifinished_id: sfDetail.semifinished_id,
+                                    file_url: sfFileUrl,
+                                    remarks: sfDetail.remarks || undefined,
+                                    processes: await Promise.all(
+                                        sfDetail.processes.map(async (process, processIndex) => {
+                                            if (!process.name) {
+                                                throw new ApiError(
+                                                    400,
+                                                    `Process name is required for process at index ${processIndex} in semifinished_details ${sfIndex}, product ${productIndex}`
+                                                );
+                                            }
+
+                                            const processFileField = `products[${productIndex}][semifinished_details][${sfIndex}][processes][${processIndex}][file]`;
+                                            const processFile = filesMap[processFileField];
+                                            let processFileUrl = undefined;
+
+                                            if (processFile) {
+                                                const processFileName = `internal-work-orders/processes/${Date.now()}-${sanitizeFilename(
+                                                    processFile.originalname
+                                                )}`;
+                                                const processFileData = {
+                                                    data: fs.readFileSync(processFile.path),
+                                                    mimetype: processFile.mimetype,
+                                                };
+                                                const processUploadResult = await putObject(processFileData, processFileName);
+                                                processFileUrl = processUploadResult.url;
+                                            }
+
+                                            return {
+                                                name: process.name,
+                                                file_url: processFileUrl,
+                                                remarks: process.remarks || undefined,
+                                            };
+                                        })
+                                    ),
+                                };
+                            })
+                        ),
+                    };
+                })
+            ),
+        };
+
+        // 8. Save internal work order
+        const internalWorkOrder = await falconInternalWorkOrder.create([jobOrderData], { session });
+
+        // 9. Create production records with proper sequencing
+        const productionDocs = [];
+        for (const product of jobOrderData.products) {
+            for (const sfDetail of product.semifinished_details) {
+                // Create production records with proper sequencing
+                sfDetail.processes.forEach((process, index) => {
+                    const productionData = {
+                        job_order: job_order_id,
+                        internal_work_order: internalWorkOrder[0]._id,
+                        semifinished_id: sfDetail.semifinished_id,
+                        product: {
+                            product_id: product.product,
+                            code: product.code,
+                            width: product.width,
+                            height: product.height,
+                            po_quantity: product.po_quantity,
+                            achieved_quantity: 0,
+                            rejected_quantity: 0,
+                            recycled_quantity: 0,
+                        },
+                        process_name: process.name.toLowerCase(),
+                        process_sequence: {
+                            current: {
+                                name: process.name.toLowerCase(),
+                                index: index,
+                            },
+                            previous: index > 0 ? {
+                                name: sfDetail.processes[index - 1].name.toLowerCase(),
+                                index: index - 1,
+                            } : null,
+                            next: index < sfDetail.processes.length - 1 ? {
+                                name: sfDetail.processes[index + 1].name.toLowerCase(),
+                                index: index + 1,
+                            } : null,
+                        },
+                        available_quantity: index === 0 ? product.po_quantity : 0,
+                        status: index === 0 ? 'Pending' : 'Pending', //Blocked
+                        date: dateFrom,
+                        created_by: req.user._id,
+                        updated_by: req.user._id,
+                    };
+                    productionDocs.push(productionData);
+                });
+            }
+        }
+
+        // 10. Save production records
+        await falconProduction.insertMany(productionDocs, { session });
+
+        await session.commitTransaction();
+
+        return res.status(201).json({
+            success: true,
+            message: 'Internal Work order and Production documents created successfully',
+            data: internalWorkOrder[0],
+        });
+    } catch (error) {
+        await session.abortTransaction();
+        console.error('Error in createInternalWorkOrder:', error);
+        throw error;
+    } finally {
+        session.endSession();
+    }
+});
+
+const createInternalWorkOrder = asyncHandler(async (req, res) => {
     const session = await mongoose.startSession();
     session.startTransaction();
 
@@ -3213,7 +3213,7 @@ const updateInternalWorkOrder_07_08_2025 = asyncHandler(async (req, res) => {
 
     // Parse the form-data body
     const bodyData = req.body;
-    console.log("bodyData",bodyData);
+    console.log("bodyData", bodyData);
 
     // Map files to their respective fields
     const filesMap = {};
@@ -3670,7 +3670,7 @@ const updateInternalWorkOrder___WORKING = asyncHandler(async (req, res) => {
                     };
 
                     if (existingProd) {
-                        
+
                         // Update existing production record
                         Object.assign(existingProd, productionData);
                         existingProd.save({ session }); // Ensure this is inside an async context
