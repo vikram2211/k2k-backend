@@ -450,7 +450,7 @@ export const getJobOrdersByDate2 = async (req, res) => {
 
 
 
-export const getJobOrdersByDate = async (req, res) => {
+export const getJobOrdersByDate_13_08_2025 = async (req, res) => {
   try {
     console.log("came here in by dateeeee");
     // Normalize today's date (UTC at 00:00)
@@ -529,7 +529,7 @@ export const getJobOrdersByDate = async (req, res) => {
         },
       })
       .lean();
-    // console.log("dailyProductions", dailyProductions);
+    console.log("dailyProductions", dailyProductions);
 
     // Group by JobOrder to avoid duplicates
     const jobOrderMap = new Map();
@@ -672,6 +672,210 @@ export const getJobOrdersByDate = async (req, res) => {
 
 
 
+
+export const getJobOrdersByDate = async (req, res) => {
+  try {
+    // Normalize today's date (UTC at 00:00)
+    const today = new Date();
+    const todayUTC = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()));
+
+    // Tomorrow's date for future DPR categorization
+    const tomorrowUTC = new Date(todayUTC);
+    tomorrowUTC.setUTCDate(tomorrowUTC.getUTCDate() + 1);
+
+    // Query parameters
+    const { date } = req.query;
+    let query = {};
+
+    // If a specific date is provided, filter by that date
+    if (date) {
+      const inputDate = new Date(date);
+      if (isNaN(inputDate.getTime())) {
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid date format. Use YYYY-MM-DD (e.g., "2025-05-06")',
+        });
+      }
+      // Normalize input date to UTC midnight
+      const normalizedDate = new Date(Date.UTC(inputDate.getUTCFullYear(), inputDate.getUTCMonth(), inputDate.getUTCDate()));
+      query.date = {
+        $gte: normalizedDate,
+        $lt: new Date(normalizedDate.getTime() + 24 * 60 * 60 * 1000), // Next day
+      };
+    }
+
+    // Fetch daily productions with populated fields
+    const dailyProductions = await DailyProduction.find(query)
+      .populate({
+        path: 'job_order',
+        select: 'job_order_id sales_order_number batch_number date status created_by updated_by createdAt updatedAt products',
+        populate: [
+          {
+            path: 'work_order',
+            select: 'project_id work_order_number products client_id',
+            populate: [
+              {
+                path: 'project_id',
+                select: 'name',
+              },
+              {
+                path: 'client_id',
+                select: 'name',
+              },
+            ],
+          },
+          {
+            path: 'products.machine_name',
+            select: 'name',
+          },
+        ],
+      })
+      .populate({
+        path: 'products.product_id',
+        select: 'material_code description plant',
+        populate: {
+          path: 'plant',
+          select: 'plant_name',
+        },
+      })
+      .lean();
+
+    // Group by JobOrder and Product to include all products
+    const jobOrderProductMap = new Map();
+
+    dailyProductions.forEach((dailyProduction) => {
+      const jobOrder = dailyProduction.job_order;
+      const jobOrderId = jobOrder?._id?.toString() || dailyProduction._id.toString();
+
+      // Process each product in the DailyProduction
+      dailyProduction.products.forEach((dpProduct) => {
+        const productId = dpProduct.product_id._id.toString();
+        // Create a unique key for JobOrder and Product combination
+        const uniqueKey = `${jobOrderId}-${productId}`;
+
+        // Skip if this JobOrder-Product combination has already been processed
+        if (jobOrderProductMap.has(uniqueKey)) {
+          return;
+        }
+
+        // Find the corresponding product in the job order's products array
+        const jobOrderProduct = jobOrder?.products?.find(
+          (prod) => prod.product.toString() === productId
+        );
+
+        // Find the corresponding product in the work order's products array to get po_quantity
+        const workOrderProduct = jobOrder?.work_order?.products?.find(
+          (prod) => prod.product_id.toString() === productId
+        );
+
+        // Get latest start and stop times from production logs
+        let started_at = null;
+        let stopped_at = null;
+        if (dailyProduction.production_logs && dailyProduction.production_logs.length > 0) {
+          const startLog = dailyProduction.production_logs
+            .filter((log) => log.action === 'Start')
+            .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))[0]; // Latest Start
+          const stopLog = dailyProduction.production_logs
+            .filter((log) => log.action === 'Stop')
+            .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))[0]; // Latest Stop
+
+          started_at = startLog ? startLog.timestamp : null;
+          stopped_at = stopLog ? stopLog.timestamp : null;
+        }
+
+        // Create the entry for this JobOrder-Product combination
+        const entry = {
+          _id: jobOrder?._id || dailyProduction._id,
+          work_order: {
+            _id: jobOrder?.work_order?._id || null,
+            work_order_number: jobOrder?.work_order?.work_order_number || 'N/A',
+            project_name: jobOrder?.work_order?.project_id?.name || 'N/A',
+            client_name: jobOrder?.work_order?.client_id?.name || 'N/A',
+          },
+          sales_order_number: jobOrder?.sales_order_number || 'N/A',
+          batch_number: jobOrder?.batch_number || 'N/A',
+          date: jobOrder?.date || { from: null, to: null },
+          status: jobOrder?.status || dailyProduction.status,
+          created_by: jobOrder?.created_by || dailyProduction.created_by,
+          updated_by: jobOrder?.updated_by || dailyProduction.updated_by,
+          createdAt: jobOrder?.createdAt || dailyProduction.createdAt,
+          updatedAt: jobOrder?.updatedAt || dailyProduction.updatedAt,
+          job_order: jobOrder?._id || dailyProduction._id,
+          job_order_id: jobOrder?.job_order_id,
+          product_id: dpProduct.product_id._id,
+          plant_name: dpProduct.product_id?.plant?.plant_name || 'N/A',
+          machine_name: jobOrderProduct?.machine_name?.name || 'N/A',
+          material_code: dpProduct.product_id?.material_code || 'N/A',
+          description: dpProduct.product_id?.description || 'N/A',
+          po_quantity: workOrderProduct?.po_quantity || 0,
+          planned_quantity: jobOrderProduct?.planned_quantity || 0,
+          scheduled_date: jobOrderProduct?.scheduled_date || dailyProduction.date,
+          achieved_quantity: dpProduct.achieved_quantity || 0,
+          rejected_quantity: dpProduct.rejected_quantity || 0,
+          recycled_quantity: dpProduct.recycled_quantity || 0,
+          started_at,
+          stopped_at,
+          submitted_by: dpProduct.submitted_by || null,
+          daily_production: {
+            _id: dailyProduction._id,
+            status: dailyProduction.status,
+            date: dailyProduction.date,
+            qc_checked_by: dailyProduction.qc_checked_by,
+            downtime: dailyProduction.downtime,
+            created_by: dailyProduction.created_by,
+            updated_by: dailyProduction.updated_by,
+            createdAt: dailyProduction.createdAt,
+            updatedAt: dailyProduction.updatedAt,
+          },
+          latestDate: dailyProduction.date, // Track the DailyProduction date for categorization
+        };
+
+        jobOrderProductMap.set(uniqueKey, entry);
+      });
+    });
+
+    // Categorize the consolidated entries
+    const categorizedOrders = {
+      pastDPR: [],
+      todayDPR: [],
+      futureDPR: [],
+    };
+
+    jobOrderProductMap.forEach((entry) => {
+      // Categorize based on the DailyProduction date
+      const dpDate = new Date(Date.UTC(
+        new Date(entry.latestDate).getUTCFullYear(),
+        new Date(entry.latestDate).getUTCMonth(),
+        new Date(entry.latestDate).getUTCDate()
+      ));
+
+      if (date) {
+        categorizedOrders.todayDPR.push(entry);
+      } else {
+        if (dpDate.getTime() === todayUTC.getTime()) {
+          categorizedOrders.todayDPR.push(entry);
+        } else if (dpDate < todayUTC) {
+          categorizedOrders.pastDPR.push(entry);
+        } else if (dpDate >= tomorrowUTC) {
+          categorizedOrders.futureDPR.push(entry);
+        }
+      }
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: 'Production data fetched successfully',
+      data: categorizedOrders,
+    });
+  } catch (error) {
+    console.error('Error getting production data:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal Server Error',
+      error: error.message,
+    });
+  }
+};
 
 
 

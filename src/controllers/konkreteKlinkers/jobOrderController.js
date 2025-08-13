@@ -586,7 +586,7 @@ export const getJobOrders = async (req, res) => {
     // Transform the response to include project_name at the top level
     const transformedOrders = jobOrders.map(order => {
       const orderObj = order.toObject();
-      console.log("orderObj***********",orderObj);
+      // console.log("orderObj***********",orderObj);
       return {
         ...orderObj,
         project_name: orderObj.work_order?.project_id?.name || 'N/A',
@@ -1833,7 +1833,7 @@ export const getJobOrderById = async (req, res) => {
   }
 };
 
-export const updateJobOrder = async (req, res) => {
+export const updateJobOrder_13_08_2025 = async (req, res) => {
   try {
     // 1. Get job order ID from params
     const { id } = req.params;
@@ -1849,6 +1849,7 @@ export const updateJobOrder = async (req, res) => {
 
     // 3. Parse request body
     const bodyData = req.body;
+    console.log("bodyData",bodyData);
 
     // 4. Initialize update data object
     const updateData = {};
@@ -1978,6 +1979,286 @@ export const updateJobOrder = async (req, res) => {
     });
   }
 };
+
+
+
+export const updateJobOrder = async (req, res) => {
+  try {
+    // 1. Get job order ID from params
+    const { id } = req.params;
+
+    // 2. Check if job order exists
+    const existingJobOrder = await JobOrder.findById(id);
+    if (!existingJobOrder) {
+      return res.status(404).json({
+        success: false,
+        message: "Job order not found",
+      });
+    }
+
+    // 3. Parse request body
+    const bodyData = req.body;
+
+    // 4. Initialize update data object
+    const updateData = {};
+
+    // 5. Handle sales_order_number update if provided
+    if (bodyData.sales_order_number !== undefined) {
+      updateData.sales_order_number = bodyData.sales_order_number;
+    }
+
+    // 6. Handle batch_number update if provided
+    if (bodyData.batch_number !== undefined) {
+      updateData.batch_number = bodyData.batch_number;
+    }
+
+    // 7. Handle status update if provided
+    if (bodyData.status !== undefined) {
+      updateData.status = bodyData.status;
+    }
+
+    // 8. Handle date update if provided
+    if (bodyData.date) {
+      updateData.date = {
+        from: new Date(bodyData.date.from),
+        to: new Date(bodyData.date.to),
+      };
+    }
+
+    // 9. Handle products update if provided
+    let productsToUpdate = [];
+    let newProducts = [];
+    if (bodyData.products !== undefined) {
+      let updatedProducts = bodyData.products;
+
+      // Parse stringified products array if needed
+      if (typeof bodyData.products === 'string') {
+        updatedProducts = JSON.parse(bodyData.products);
+      }
+
+      // Validate and process each product
+      updateData.products = await Promise.all(
+        updatedProducts.map(async (product) => {
+          // Validate required fields
+          if (
+            !product.product ||
+            !product.machine_name ||
+            !product.planned_quantity ||
+            !product.scheduled_date
+          ) {
+            throw new Error(
+              'All product fields (product, machine_name, planned_quantity, scheduled_date) are required'
+            );
+          }
+
+          // Convert scheduled_date to Date object
+          return {
+            product: product.product,
+            machine_name: product.machine_name,
+            planned_quantity: product.planned_quantity,
+            scheduled_date: new Date(product.scheduled_date),
+          };
+        })
+      );
+
+      // Identify products with changed scheduled_date and new products
+      productsToUpdate = updateData.products.map((newProduct) => {
+        const existingProduct = existingJobOrder.products.find((p) =>
+          p.product.equals(newProduct.product)
+        );
+        const hasDateChanged =
+          existingProduct &&
+          new Date(existingProduct.scheduled_date).getTime() !==
+            new Date(newProduct.scheduled_date).getTime();
+        const isNewProduct = !existingProduct;
+        return {
+          product_id: newProduct.product,
+          scheduled_date: newProduct.scheduled_date,
+          hasDateChanged,
+          isNewProduct,
+        };
+      });
+
+      // Filter new products for creating DailyProduction records
+      newProducts = updateData.products.filter((newProduct) =>
+        !existingJobOrder.products.some((p) => p.product.equals(newProduct.product))
+      );
+    }
+
+    // 10. Check if there's anything to update
+    if (Object.keys(updateData).length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "No fields provided for update",
+      });
+    }
+
+    // 11. Validate work order constraints for new products
+    if (newProducts.length > 0) {
+      const workOrder = await WorkOrder.findById(existingJobOrder.work_order);
+      if (!workOrder) {
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid work_order ID associated with job order',
+        });
+      }
+
+      for (const product of newProducts) {
+        const woProduct = workOrder.products.find((p) => p.product_id.equals(product.product));
+        if (!woProduct) {
+          throw new Error(`Product ${product.product} not found in work order`);
+        }
+
+        const existingJobOrders = await JobOrder.find({
+          work_order: existingJobOrder.work_order,
+          'products.product': product.product,
+        });
+
+        const totalExistingPlannedQuantity = existingJobOrders.reduce((total, jo) => {
+          const joProduct = jo.products.find((p) => p.product.equals(product.product));
+          return total + (joProduct ? joProduct.planned_quantity : 0);
+        }, 0);
+
+        const totalPlannedQuantity = totalExistingPlannedQuantity + product.planned_quantity;
+
+        if (totalPlannedQuantity > woProduct.qty_in_nos) {
+          throw new Error(
+            `Planned quantity for product ${product.product} exceeds available work order quantity. ` +
+            `Work order has qty_in_nos of ${woProduct.qty_in_nos}, ` +
+            `existing job orders have a total planned quantity of ${totalExistingPlannedQuantity}, ` +
+            `and you are trying to add ${product.planned_quantity}. ` +
+            `Maximum allowed additional quantity is ${woProduct.qty_in_nos - totalExistingPlannedQuantity}.`
+          );
+        }
+      }
+    }
+
+    // 12. Update job order
+    const updatedJobOrder = await JobOrder.findByIdAndUpdate(
+      id,
+      { $set: updateData },
+      {
+        new: true,
+        runValidators: true,
+      }
+    );
+
+    // 13. Update existing DailyProduction records for changed scheduled_date
+    if (productsToUpdate.length > 0) {
+      const dailyProductionUpdates = productsToUpdate
+        .filter((p) => p.hasDateChanged)
+        .map(async (product) => {
+          // Find DailyProduction records for this job order and product
+          const dailyProductions = await DailyProduction.find({
+            job_order: id,
+            'products.product_id': product.product_id,
+            status: 'Pending', // Only update if status is Pending
+          });
+
+          // Update date for each matching DailyProduction record
+          return Promise.all(
+            dailyProductions.map(async (production) => {
+              return DailyProduction.findByIdAndUpdate(
+                production._id,
+                {
+                  $set: {
+                    date: new Date(product.scheduled_date),
+                    updated_by: req.user._id,
+                  },
+                },
+                { new: true }
+              );
+            })
+          );
+        });
+
+      await Promise.all(dailyProductionUpdates);
+    }
+
+    // 14. Create new DailyProduction records for new products
+    if (newProducts.length > 0) {
+      const dailyProductionPromises = newProducts.map(async (product) => {
+        const schemaProduct = {
+          product_id: product.product,
+          achieved_quantity: 0,
+          rejected_quantity: 0,
+          recycled_quantity: 0,
+        };
+
+        const newProduction = new DailyProduction({
+          work_order: existingJobOrder.work_order,
+          job_order: updatedJobOrder._id,
+          products: [schemaProduct],
+          date: new Date(product.scheduled_date),
+          submitted_by: req.user._id,
+          created_by: req.user._id,
+          updated_by: req.user._id,
+          status: 'Pending',
+        });
+
+        return newProduction.save();
+      });
+
+      await Promise.all(dailyProductionPromises);
+    }
+
+    // 15. Populate the updated job order for better response
+    const populatedJobOrder = await JobOrder.findById(updatedJobOrder._id)
+      .populate({
+        path: 'work_order',
+        populate: [
+          { path: 'client_id', select: 'name address' },
+          { path: 'project_id', select: 'name' },
+        ],
+        select: 'work_order_number',
+      })
+      .populate('products.product', 'description')
+      .populate('products.machine_name', 'name');
+
+    res.status(200).json({
+      success: true,
+      data: populatedJobOrder,
+      message: "Job order and associated production records updated successfully",
+    });
+  } catch (error) {
+    // Handle different error types
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({
+        success: false,
+        errors: error.errors.map((err) => ({
+          field: err.path.join('.'),
+          message: err.message,
+        })),
+      });
+    }
+
+    if (error.name === 'ValidationError') {
+      const formattedErrors = Object.values(error.errors).map((err) => ({
+        field: err.path,
+        message: err.message,
+      }));
+      return res.status(400).json({
+        success: false,
+        errors: formattedErrors,
+      });
+    }
+
+    if (error.name === 'CastError') {
+      return res.status(400).json({
+        success: false,
+        message: `Invalid ID format: ${error.value}`,
+      });
+    }
+
+    console.error('Error updating job order:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message || 'Internal Server Error',
+    });
+  }
+};
+
+
 
 export const deleteJobOrder = async (req, res) => {
   try {
