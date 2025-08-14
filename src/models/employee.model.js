@@ -1,5 +1,21 @@
 import mongoose, { Schema } from "mongoose";
 
+const tabPermissionSchema = new mongoose.Schema({
+  name: { type: String, required: true },
+  enabled: { type: Boolean, required: true }
+});
+// Single permission schema
+const permissionSchema = new Schema({
+  module: { type: String, required: true },
+  create: { type: Boolean, default: false },
+  read: { type: Boolean, default: false },
+  update: { type: Boolean, default: false },
+  updateStatus: { type: Boolean, default: false },
+  delete: { type: Boolean, default: false },
+  tabs: [tabPermissionSchema]
+});
+
+
 const employeeSchema = new Schema(
     {
         name: { type: String, required: true, unique: true },
@@ -19,6 +35,10 @@ const employeeSchema = new Schema(
             required: true,
 
         },
+        permissions: {
+      type: [permissionSchema],
+      default: []
+    },
 
     },
     { timestamps: true }
