@@ -1,6 +1,7 @@
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/ApiError.js";
 import { User } from "../models/user.model.js";
+import { Employee } from "../models/employee.model.js";
 
 import { ApiResponse } from "../utils/ApiResponse.js";
 import jwt from "jsonwebtoken";
@@ -94,6 +95,10 @@ const registerUser = asyncHandler(async (req, res) => {
 import dotenv from 'dotenv';
 dotenv.config();
 
+
+
+
+
 const loginUser = asyncHandler(async (req, res, next) => {
   console.log("inside login");
   const MONGODB_CONNECTION_STRING = process.env.MONGODB_URI;
@@ -147,6 +152,21 @@ const loginUser = asyncHandler(async (req, res, next) => {
     "-password -refreshToken"
   );
 
+  // 🔑 if Employee, fetch extra details
+  let employeeDetails = null;
+  if (user.userType === "Employee") {
+    // employeeDetails = await Employee.findOne({ email: user.email }).lean(); 
+     employeeDetails = await Employee.findOne(
+  {
+    $or: [
+      { email: email },
+      { name: username }  // <-- use username for Employee login
+    ]
+  },
+  " address emp_code factory permissions role"   // <-- only these fields will be returned
+);
+  }
+
   const options = {
     httpOnly: true,
     secure: true,
@@ -160,7 +180,7 @@ const loginUser = asyncHandler(async (req, res, next) => {
     .json(
       new ApiResponse(
         200,
-        { user: loggedInUser, accessToken, refreshToken },
+        { user: loggedInUser, employee: employeeDetails, accessToken, refreshToken },
         "User logged in successfully"
       )
     );

@@ -6,6 +6,9 @@ import { ApiError } from '../utils/ApiError.js';
 import { ApiResponse } from '../utils/ApiResponse.js';
 import { formatDateToIST } from '../utils/formatDate.js';
 import { factoryPermissions } from "../models/permissions.model.js";
+import bcrypt from 'bcryptjs';
+import jwt from "jsonwebtoken";
+import {User} from "../models/user.model.js";
 
 // Helper function to send ApiResponse
 const sendResponse = (res, response) => {
@@ -297,6 +300,17 @@ const createEmployee = asyncHandler(async (req, res) => {
     // Save to database
     const employee = await Employee.create(employeeData);
 
+    const employeeDatatoUser = {
+        username: value.name,
+        username : value.name,
+        email: value.email,
+        // userType: value.role,
+         userType: "Employee", 
+        password: value.password,
+        phoneNumber: value.phoneNumber || null,
+    };
+        const employeetoUSer = await User.create(employeeDatatoUser);
+
     // Return success response
     return sendResponse(
         res,
@@ -318,5 +332,47 @@ const getEmployees = asyncHandler(async (req, res) => {
     return sendResponse(res, new ApiResponse(200, employees, 'Employees fetched successfully'));
   });
   
+
+  //Login
+
+//    const employeeLogin = async (req, res) => {
+//   try {
+//     const { email, password } = req.body;
+
+//     // Check if employee exists
+//     const employee = await Employee.findOne({ email });
+//     if (!employee) {
+//       return res.status(404).json({ message: "Employee not found" });
+//     }
+
+//     // Compare password
+//     const isMatch = await bcrypt.compare(password, employee.password);
+//     if (!isMatch) {
+//       return res.status(400).json({ message: "Invalid credentials" });
+//     }
+
+//     // Generate JWT
+//     const token = jwt.sign(
+//       { id: employee._id, role: employee.role, type: "employee" },
+//       process.env.ACCESS_TOKEN_SECRET,
+//       { expiresIn: "1d" }
+//     );
+
+//     res.status(200).json({
+//       message: "Employee login successful",
+//       token,
+//       employee: {
+//         id: employee._id,
+//         name: employee.name,
+//         email: employee.email,
+//         role: employee.role,
+//         factory: employee.factory
+//       }
+//     });
+//   } catch (err) {
+//     console.error("Employee Login Error:", err);
+//     res.status(500).json({ message: "Server error" });
+//   }
+// };
 
 export { createEmployee,getEmployees };

@@ -1,4 +1,6 @@
 import mongoose, { Schema } from "mongoose";
+import bcrypt from "bcryptjs";
+import { User } from "../models/user.model.js";
 
 const tabPermissionSchema = new mongoose.Schema({
   name: { type: String, required: true },
@@ -39,9 +41,22 @@ const employeeSchema = new Schema(
       type: [permissionSchema],
       default: []
     },
-
+     password: { type: String, required: true, minlength: 6 },
     },
     { timestamps: true }
 );
+
+// 🔹 Pre-save hook to hash password
+employeeSchema.pre("save", async function (next) {
+  if (!this.isModified("password")) return next(); // only hash if modified
+  this.password = await bcrypt.hash(this.password, 10);
+  next();
+});
+
+// 🔹 Method to check password validity
+employeeSchema.methods.isPasswordCorrect = async function (enterpassword) {
+  console.log("Comparing:", enterpassword, "with", this.password);
+  return await bcrypt.compare(enterpassword, this.password);
+};
 
 export const Employee = mongoose.model("Employee", employeeSchema);

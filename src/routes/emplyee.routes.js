@@ -2,13 +2,13 @@ import { Router } from "express";
 import {
     createEmployee,
     getEmployees
-
 } from "../controllers/employeeController.js";
 import { factoryPermissions } from "../models/permissions.model.js";
 const router = Router();
 
 router.route("/emplyee/create").post(createEmployee);
 router.route("/emplyee/get").get(getEmployees);
+// router.route("/emplyee/login").post(employeeLogin);
 
 // Get permissions by factory
 router.get("/permissions/:factory", (req, res) => {
@@ -40,7 +40,7 @@ const factoryModules = {
       { 
         name: "Production", 
         type: "tab",
-        tabs: ["Planning", "Quality", "Output", "Efficiency"]
+         tabs: ["Past DPR", "Current DPR", "Future DPR"]
       },
       { name: "QC Check", type: "standard" },
       { name: "Packing", type: "standard" },

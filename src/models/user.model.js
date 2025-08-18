@@ -33,7 +33,8 @@ const userSchema = new Schema(
     // ],
 
   },
-  { discriminatorKey: "userType", timestamps: true }
+  // discriminatorKey: "userType",
+  {  timestamps: true }
 );
 
 // userSchema.methods.generateAccessToken = function () {
