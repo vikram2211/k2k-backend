@@ -30,7 +30,7 @@ const sendResponse = (res, response) => {
     // Validate request body
     const { error, value } = sysytmSchema.validate(req.body, { abortEarly: false });
     if (error) {
-      throw new ApiError(400, 'Validation failed for client creation', error.details);
+      throw new ApiError(400, 'Validation failed for System creation', error.details);
     }
   
     // Extract validated fields

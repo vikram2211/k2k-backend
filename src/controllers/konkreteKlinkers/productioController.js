@@ -878,6 +878,64 @@ export const getJobOrdersByDate = async (req, res) => {
 };
 
 
+export const getJobOrdersByDate_18_08_2025 = async (req, res) => {
+  try {
+    const { date } = req.query;
+    const dailyProductions = await DailyProduction.find({ date }).populate('job_order');
+    const reports = dailyProductions.map(dp => ({
+      _id: dp._id,
+      work_order: {
+        _id: dp.job_order._id,
+        work_order_number: dp.job_order.work_order_number,
+        project_name: dp.job_order.project_name,
+        client_name: dp.job_order.client_name,
+      },
+      sales_order_number: dp.job_order.sales_order_number,
+      batch_number: dp.batch_number,
+      date: {
+        from: dp.job_order.date_from,
+        to: dp.job_order.date_to,
+      },
+      status: dp.status,
+      created_by: dp.created_by,
+      updated_by: dp.updated_by,
+      createdAt: dp.createdAt,
+      updatedAt: dp.updatedAt,
+      job_order: dp.job_order._id,
+      job_order_id: dp.job_order.job_order_id,
+      objId: dp.products[0]?.objId || dp.job_order.products[0]?._id, // Use objId
+      plant_name: dp.plant_name,
+      machine_name: dp.machine_name,
+      material_code: dp.material_code,
+      description: dp.description,
+      po_quantity: dp.po_quantity,
+      planned_quantity: dp.planned_quantity,
+      scheduled_date: dp.scheduled_date,
+      achieved_quantity: dp.products[0]?.achieved_quantity || 0,
+      rejected_quantity: dp.products[0]?.rejected_quantity || 0,
+      recycled_quantity: dp.products[0]?.recycled_quantity || 0,
+      started_at: dp.started_at,
+      stopped_at: dp.stopped_at,
+      submitted_by: dp.submitted_by,
+      daily_production: {
+        _id: dp._id,
+        status: dp.status,
+        date: dp.date,
+        downtime: dp.downtime,
+        created_by: dp.created_by,
+        updated_by: dp.updated_by,
+        createdAt: dp.createdAt,
+        updatedAt: dp.updatedAt,
+      },
+      latestDate: dp.date,
+    }));
+    return res.status(200).json({ success: true, todayDPR: reports });
+  } catch (error) {
+    console.error('Error fetching job orders:', error);
+    return res.status(500).json({ success: false, message: 'Internal Server Error', error: error.message });
+  }
+};
+
 
 
 
@@ -2763,7 +2821,7 @@ export const handleDailyProductionAction = async (req, res) => {
   }
 };
 
-///FINAL =>
+///FINAL WAS WORKING BUT CHANGES MADE FOR HABNDELING UNIQUE PRODUCTION=>
 
 const simulateProductionCounts = async (job_order, product_id) => {
   try {
@@ -3257,6 +3315,512 @@ export const handleDailyProductionActions = async (req, res) => {
     });
   }
 };
+
+
+
+
+
+
+
+
+
+const simulateProductionCounts_18_08_2025 = async (job_order, objId) => {
+  try {
+    // Find the DailyProduction document that matches both job_order and objId
+    const dailyProduction = await DailyProduction.findOne({
+      job_order,
+      'products.objId': objId,
+      status: 'In Progress', // Only simulate for In Progress records
+    });
+
+    if (!dailyProduction) {
+      console.error(`DailyProduction not found or not In Progress for job_order: ${job_order}, objId: ${objId}`);
+      return;
+    }
+
+    if (dailyProduction.status === 'Paused') {
+      console.log(`Production is paused for job_order: ${job_order}, objId: ${objId}`);
+      return;
+    }
+
+    if (dailyProduction.status === 'Pending QC') {
+      console.log(`Production already stopped for job_order: ${job_order}, objId: ${objId}`);
+      return;
+    }
+
+    // Find the JobOrder to get the planned_quantity
+    const jobOrder = await JobOrder.findById(job_order);
+    if (!jobOrder) {
+      console.error(`JobOrder not found for job_order: ${job_order}`);
+      return;
+    }
+
+    const jobOrderProduct = jobOrder.products.find((product) =>
+      product._id.equals(objId)
+    );
+    if (!jobOrderProduct) {
+      console.error(`Product subdocument ${objId} not found in JobOrder ${job_order}`);
+      return;
+    }
+
+    const plannedQuantity = jobOrderProduct.planned_quantity;
+
+    // Find the product in DailyProduction to get the current achieved_quantity
+    const dailyProduct = dailyProduction.products.find((p) =>
+      p.objId.equals(objId)
+    );
+    if (!dailyProduct) {
+      console.error(`Product subdocument ${objId} not found in DailyProduction ${dailyProduction._id}`);
+      return;
+    }
+
+    const currentAchievedQuantity = dailyProduct.achieved_quantity;
+    const newAchievedQuantity = currentAchievedQuantity + 1;
+
+    // Check if the new achieved_quantity would exceed the planned_quantity
+    if (newAchievedQuantity > plannedQuantity) {
+      console.log(`Planned quantity reached for job_order: ${job_order}, objId: ${objId}. Stopping production.`);
+
+      // Stop production
+      dailyProduction.status = 'Pending QC';
+      dailyProduction.stopped_at = new Date();
+      dailyProduction.production_logs.push({
+        action: 'Stop',
+        timestamp: new Date(),
+        user: dailyProduction.updated_by,
+        description: 'Production stopped automatically: Planned quantity reached',
+      });
+
+      await dailyProduction.save();
+      console.log(`Production stopped for job_order: ${job_order}, objId: ${objId}`);
+
+      // Update inventory with the total achieved_quantity
+      const allDailyProductions = await DailyProduction.find({
+        work_order: dailyProduction.work_order,
+        'products.objId': objId, // Updated to use objId
+      });
+
+      let totalAchievedQuantity = 0;
+      allDailyProductions.forEach((dp) => {
+        const product = dp.products.find((p) => p.objId.equals(objId));
+        if (product) {
+          totalAchievedQuantity += product.achieved_quantity;
+        }
+      });
+
+      const inventory = await Inventory.findOne({
+        work_order: dailyProduction.work_order,
+        product: dailyProduct.product_id, // Use product_id from DailyProduction
+      });
+      if (inventory) {
+        inventory.produced_quantity = totalAchievedQuantity;
+        inventory.updated_by = dailyProduction.updated_by;
+        await inventory.save();
+      }
+
+      // Clear the production interval
+      const productionKey = `${job_order}_${objId}`;
+      const intervalId = activeProductions.get(productionKey);
+      if (intervalId) {
+        clearInterval(intervalId);
+        activeProductions.delete(productionKey);
+      }
+
+      return;
+    }
+
+    // If planned quantity not exceeded, proceed with incrementing achieved_quantity
+    dailyProduction.products = dailyProduction.products.map((p) =>
+      p.objId.equals(objId)
+        ? { ...p.toObject(), achieved_quantity: newAchievedQuantity }
+        : p
+    );
+
+    await dailyProduction.save();
+    console.log(`Updated achieved_quantity for job_order: ${job_order}, objId: ${objId}`);
+
+    // Update inventory with the total achieved_quantity
+    const allDailyProductions = await DailyProduction.find({
+      work_order: dailyProduction.work_order,
+      'products.objId': objId, // Updated to use objId
+    });
+
+    let totalAchievedQuantity = 0;
+    allDailyProductions.forEach((dp) => {
+      const product = dp.products.find((p) => p.objId.equals(objId));
+      if (product) {
+        totalAchievedQuantity += product.achieved_quantity;
+      }
+    });
+
+    const inventory = await Inventory.findOne({
+      work_order: dailyProduction.work_order,
+      product: dailyProduct.product_id, // Use product_id from DailyProduction
+    });
+    if (inventory) {
+      inventory.produced_quantity = totalAchievedQuantity;
+      inventory.updated_by = dailyProduction.updated_by;
+      await inventory.save();
+    }
+  } catch (error) {
+    console.error(`Error updating achieved_quantity: ${error.message}`);
+  }
+};
+
+export const handleDailyProductionActions_18_08_2025 = async (req, res) => {
+  try {
+    const { action, job_order, objId, pause_description } = req.body;
+    if (!mongoose.Types.ObjectId.isValid(objId)) {
+      return res.status(400).json({ success: false, message: 'Invalid objId' });
+    }
+
+    if (!['start', 'stop', 'pause', 'resume'].includes(action)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid action. Must be "start", "stop", "pause", or "resume".',
+      });
+    }
+
+    if (!req.user || !req.user._id) {
+      return res.status(401).json({
+        success: false,
+        message: 'Unauthorized: User not authenticated.',
+      });
+    }
+
+    if (!job_order || !objId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Missing required fields: job_order, objId.',
+      });
+    }
+
+    const jobOrder = await JobOrder.findById(job_order).populate(
+      'work_order',
+      'work_order_number'
+    );
+    if (!jobOrder) {
+      return res.status(404).json({
+        success: false,
+        message: 'Job order not found.',
+      });
+    }
+
+    const jobOrderProduct = jobOrder.products.find((product) =>
+      product._id.equals(objId)
+    );
+    if (!jobOrderProduct) {
+      return res.status(400).json({
+        success: false,
+        message: 'Product subdocument ID not found in job order.',
+      });
+    }
+
+    const plannedQuantity = jobOrderProduct.planned_quantity;
+
+    // Find the DailyProduction record for the specific job_order and objId
+    let dailyProduction = await DailyProduction.findOne({
+      job_order,
+      'products.objId': objId,
+    });
+
+    if (action === 'start') {
+      if (dailyProduction) {
+        if (dailyProduction.started_at) {
+          return res.status(400).json({
+            success: false,
+            message: 'Production already started for this job order and product.',
+          });
+        }
+
+        const dailyProduct = dailyProduction.products.find((p) =>
+          p.objId.equals(objId)
+        );
+        if (dailyProduct && dailyProduct.achieved_quantity >= plannedQuantity) {
+          return res.status(400).json({
+            success: false,
+            message: 'Cannot start production: Planned quantity already reached.',
+          });
+        }
+
+        // Update only the specific DailyProduction record
+        dailyProduction.started_at = new Date();
+        dailyProduction.submitted_by = req.user._id;
+        dailyProduction.updated_by = req.user._id;
+        dailyProduction.status = 'In Progress';
+        dailyProduction.production_logs.push({
+          action: 'Start',
+          timestamp: new Date(),
+          user: req.user._id,
+          description: 'Production started',
+        });
+
+        const updatedProduction = await dailyProduction.save();
+
+        // Start production simulation only for the requested product
+        const productionKey = `${job_order}_${objId}`;
+        if (!activeProductions.has(productionKey)) {
+          const intervalId = setInterval(
+            () => simulateProductionCounts(job_order, objId),
+            10000
+          );
+          activeProductions.set(productionKey, intervalId);
+        }
+
+        return res.status(200).json({
+          success: true,
+          message: 'Production started successfully for the specified product.',
+          data: updatedProduction,
+        });
+      } else {
+        // Create a new DailyProduction record for the specific product
+        const schemaProducts = jobOrder.products
+          .filter((product) => product._id.equals(objId))
+          .map((product) => ({
+            product_id: product.product,
+            objId: product._id,
+            achieved_quantity: 0,
+            rejected_quantity: 0,
+            recycled_quantity: 0,
+          }));
+
+        if (schemaProducts.length === 0) {
+          return res.status(400).json({
+            success: false,
+            message: 'No matching product found to start production.',
+          });
+        }
+
+        const newProduction = new DailyProduction({
+          work_order: jobOrder.work_order._id,
+          job_order,
+          products: schemaProducts,
+          date: jobOrderProduct.scheduled_date,
+          submitted_by: req.user._id,
+          started_at: new Date(),
+          created_by: req.user._id,
+          updated_by: req.user._id,
+          status: 'In Progress',
+          production_logs: [
+            {
+              action: 'Start',
+              timestamp: new Date(),
+              user: req.user._id,
+              description: 'Production started',
+            },
+          ],
+        });
+
+        const savedProduction = await newProduction.save();
+
+        // Start production simulation only for the requested product
+        const productionKey = `${job_order}_${objId}`;
+        if (!activeProductions.has(productionKey)) {
+          const intervalId = setInterval(
+            () => simulateProductionCounts(job_order, objId),
+            10000
+          );
+          activeProductions.set(productionKey, intervalId);
+        }
+
+        return res.status(201).json({
+          success: true,
+          message: 'Production started successfully.',
+          data: savedProduction,
+        });
+      }
+    } else if (action === 'pause') {
+      if (!dailyProduction) {
+        return res.status(404).json({
+          success: false,
+          message: 'Daily production document not found for this job order and product.',
+        });
+      }
+
+      if (!dailyProduction.started_at) {
+        return res.status(400).json({
+          success: false,
+          message: 'Production has not started for this job order and product.',
+        });
+      }
+      if (dailyProduction.stopped_at) {
+        return res.status(400).json({
+          success: false,
+          message: 'Production already stopped for this job order and product.',
+        });
+      }
+      if (dailyProduction.status === 'Paused') {
+        return res.status(400).json({
+          success: false,
+          message: 'Production is already paused.',
+        });
+      }
+
+      dailyProduction.status = 'Paused';
+      dailyProduction.updated_by = req.user._id;
+      dailyProduction.production_logs.push({
+        action: 'Pause',
+        timestamp: new Date(),
+        user: req.user._id,
+        description: pause_description || 'Production paused',
+      });
+
+      const updatedProduction = await dailyProduction.save();
+
+      const productionKey = `${job_order}_${objId}`;
+      const intervalId = activeProductions.get(productionKey);
+      if (intervalId) {
+        clearInterval(intervalId);
+        activeProductions.delete(productionKey);
+      }
+
+      return res.status(200).json({
+        success: true,
+        message: 'Production paused successfully for the specified product.',
+        data: updatedProduction,
+      });
+    } else if (action === 'resume') {
+      if (!dailyProduction) {
+        return res.status(404).json({
+          success: false,
+          message: 'Daily production document not found for this job order and product.',
+        });
+      }
+
+      if (!dailyProduction.started_at) {
+        return res.status(400).json({
+          success: false,
+          message: 'Production has not started for this job order and product.',
+        });
+      }
+      if (dailyProduction.stopped_at) {
+        return res.status(400).json({
+          success: false,
+          message: 'Production already stopped for this job order and product.',
+        });
+      }
+      if (dailyProduction.status !== 'Paused') {
+        return res.status(400).json({
+          success: false,
+          message: 'Production is not paused.',
+        });
+      }
+
+      dailyProduction.status = 'In Progress';
+      dailyProduction.updated_by = req.user._id;
+      dailyProduction.production_logs.push({
+        action: 'Resume',
+        timestamp: new Date(),
+        user: req.user._id,
+        description: 'Production resumed',
+      });
+
+      const updatedProduction = await dailyProduction.save();
+
+      const productionKey = `${job_order}_${objId}`;
+      if (!activeProductions.has(productionKey)) {
+        const intervalId = setInterval(
+          () => simulateProductionCounts(job_order, objId),
+          10000
+        );
+        activeProductions.set(productionKey, intervalId);
+      }
+
+      return res.status(200).json({
+        success: true,
+        message: 'Production resumed successfully for the specified product.',
+        data: updatedProduction,
+      });
+    } else if (action === 'stop') {
+      if (!dailyProduction) {
+        return res.status(404).json({
+          success: false,
+          message: 'Daily production document not found for this job order and product.',
+        });
+      }
+
+      if (!dailyProduction.started_at) {
+        return res.status(400).json({
+          success: false,
+          message: 'Production has not started for this job order and product.',
+        });
+      }
+      if (dailyProduction.stopped_at) {
+        return res.status(400).json({
+          success: false,
+          message: 'Production already stopped for this job order and product.',
+        });
+      }
+
+      dailyProduction.stopped_at = new Date();
+      dailyProduction.updated_by = req.user._id;
+      dailyProduction.status = 'Pending QC';
+      dailyProduction.production_logs.push({
+        action: 'Stop',
+        timestamp: new Date(),
+        user: req.user._id,
+        description: 'Production stopped',
+      });
+
+      const updatedProduction = await dailyProduction.save();
+
+      // Update inventory with the total achieved_quantity
+      const allDailyProductions = await DailyProduction.find({
+        work_order: dailyProduction.work_order,
+        'products.objId': objId, // Updated to use objId
+      });
+
+      let totalAchievedQuantity = 0;
+      allDailyProductions.forEach((dp) => {
+        const product = dp.products.find((p) => p.objId.equals(objId));
+        if (product) {
+          totalAchievedQuantity += product.achieved_quantity;
+        }
+      });
+
+      const inventory = await Inventory.findOne({
+        work_order: dailyProduction.work_order,
+        product: jobOrderProduct.product,
+      });
+      if (inventory) {
+        inventory.produced_quantity = totalAchievedQuantity;
+        inventory.updated_by = req.user._id;
+        await inventory.save();
+      }
+
+      const productionKey = `${job_order}_${objId}`;
+      const intervalId = activeProductions.get(productionKey);
+      if (intervalId) {
+        clearInterval(intervalId);
+        activeProductions.delete(productionKey);
+      }
+
+      return res.status(200).json({
+        success: true,
+        message: 'Production stopped successfully for the specified product.',
+        data: updatedProduction,
+      });
+    }
+  } catch (error) {
+    console.error('Error handling daily production action:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal Server Error',
+      error: error.message,
+    });
+  }
+};
+
+
+
+
+
+
+
+
+
+
+
 
 ///USING BELLOW API BEFORE INVENTORY MANAGMENT - 
 // export const handleDailyProductionAction = async (req, res) => {
@@ -4266,6 +4830,149 @@ export const getUpdatedProductProduction = async (req, res) => {
       data:    responseObj,
     });
 
+  } catch (err) {
+    console.error('Error fetching production logs:', err);
+    return res.status(500).json({ success: false, message: 'Internal Server Error', error: err.message });
+  }
+};
+
+
+
+
+
+export const getUpdatedProductProduction_18_08_2025 = async (req, res) => {
+  try {
+    const { job_order, objId } = req.query; // product_id is now JobOrder.products._id (objId)
+
+    // 1️⃣ Validate IDs
+    if (!job_order || !product_id) {
+      return res.status(400).json({ success: false, message: 'Missing job_order or product_id' });
+    }
+    if (!mongoose.Types.ObjectId.isValid(job_order) || !mongoose.Types.ObjectId.isValid(product_id)) {
+      return res.status(400).json({ success: false, message: 'Invalid ObjectId' });
+    }
+
+    // 2️⃣ Fetch DailyProduction with updated query and populates
+    const dp = await DailyProduction.findOne({
+      job_order,
+      'products.objId': product_id, // Query using objId instead of product_id
+    })
+      .populate({
+        path: 'job_order',
+        select: 'job_order_id sales_order_number batch_number date status created_by updated_by createdAt updatedAt products work_order',
+        populate: [
+          {
+            path: 'work_order',
+            select: 'project_id work_order_number products client_id',
+            populate: [
+              { path: 'project_id', select: 'name' },
+              { path: 'client_id', select: 'name' },
+            ],
+          },
+          {
+            path: 'products.machine_name',
+            select: 'name',
+          },
+          {
+            path: 'products.product', // Populate product details from JobOrder.products
+            select: 'material_code description plant',
+            populate: { path: 'plant', select: 'plant_name' },
+          },
+        ],
+      })
+      .populate({
+        path: 'products.product_id',
+        select: 'material_code description plant',
+        populate: { path: 'plant', select: 'plant_name' },
+      })
+      .lean();
+
+    if (!dp) {
+      return res.status(404).json({
+        success: false,
+        message: `No production data for job_order:${job_order} & objId:${product_id}`,
+      });
+    }
+
+    // 3️⃣ Find the matching product in DailyProduction.products
+    const dpProduct = dp.products.find((p) => p.objId.toString() === product_id);
+    if (!dpProduct) {
+      return res.status(404).json({ success: false, message: 'Product not found in DailyProduction' });
+    }
+
+    const jobOrder = dp.job_order;
+    const workOrder = jobOrder?.work_order ?? null;
+
+    // Locate the same product entry in JobOrder.products and WorkOrder.products
+    const jobOrderProduct = jobOrder?.products?.find((p) => p._id.toString() === product_id) || {};
+    const workOrderProduct = workOrder?.products?.find((p) => p.product_id.toString() === dpProduct.product_id.toString()) || {};
+
+    // Latest start/stop times
+    let started_at = null,
+      stopped_at = null;
+    if (dp.production_logs?.length) {
+      const startLog = dp.production_logs
+        .filter((l) => l.action === 'Start')
+        .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))[0];
+      const stopLog = dp.production_logs
+        .filter((l) => l.action === 'Stop')
+        .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))[0];
+      started_at = startLog?.timestamp ?? null;
+      stopped_at = stopLog?.timestamp ?? null;
+    }
+
+    // 4️⃣ Build the response object matching getJobOrdersByDate
+    const responseObj = {
+      _id: jobOrder?._id || dp._id,
+      work_order: {
+        _id: workOrder?._id || null,
+        work_order_number: workOrder?.work_order_number || 'N/A',
+        project_name: workOrder?.project_id?.name || 'N/A',
+        client_name: workOrder?.client_id?.name || 'N/A',
+      },
+      sales_order_number: jobOrder?.sales_order_number || 'N/A',
+      batch_number: jobOrder?.batch_number || 'N/A',
+      date: jobOrder?.date || { from: null, to: null },
+      status: jobOrder?.status || dp.status,
+      created_by: jobOrder?.created_by || dp.created_by,
+      updated_by: jobOrder?.updated_by || dp.updated_by,
+      createdAt: jobOrder?.createdAt || dp.createdAt,
+      updatedAt: jobOrder?.updatedAt || dp.updatedAt,
+      job_order: jobOrder?._id || dp._id,
+      job_order_id: jobOrder?.job_order_id,
+      product_id: dpProduct.objId, // Use JobOrder.products._id (objId)
+      plant_name: dpProduct.product_id?.plant?.plant_name || jobOrderProduct?.product?.plant?.plant_name || 'N/A',
+      machine_name: jobOrderProduct?.machine_name?.name || 'N/A',
+      material_code: dpProduct.product_id?.material_code || jobOrderProduct?.product?.material_code || 'N/A',
+      description: dpProduct.product_id?.description || jobOrderProduct?.product?.description || 'N/A',
+      po_quantity: workOrderProduct?.po_quantity || 0,
+      planned_quantity: jobOrderProduct?.planned_quantity || 0,
+      scheduled_date: jobOrderProduct?.scheduled_date || dp.date,
+      achieved_quantity: dpProduct.achieved_quantity || 0,
+      rejected_quantity: dpProduct.rejected_quantity || 0,
+      recycled_quantity: dpProduct.recycled_quantity || 0,
+      started_at,
+      stopped_at,
+      submitted_by: dp.submitted_by || null,
+      daily_production: {
+        _id: dp._id,
+        status: dp.status,
+        date: dp.date,
+        qc_checked_by: dp.qc_checked_by,
+        downtime: dp.downtime,
+        created_by: dp.created_by,
+        updated_by: dp.updated_by,
+        createdAt: dp.createdAt,
+        updatedAt: dp.updatedAt,
+      },
+      latestDate: dp.date,
+    };
+
+    return res.status(200).json({
+      success: true,
+      message: 'Production data fetched successfully.',
+      data: responseObj,
+    });
   } catch (err) {
     console.error('Error fetching production logs:', err);
     return res.status(500).json({ success: false, message: 'Internal Server Error', error: err.message });

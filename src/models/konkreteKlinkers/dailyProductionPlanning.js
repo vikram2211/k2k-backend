@@ -214,6 +214,10 @@ const dailyProductionSchema = new mongoose.Schema(
           ref: 'Product',
           required: true,
         },
+        // objId: {
+        //   type: mongoose.Schema.Types.ObjectId,
+        //   required: true,
+        // },
         achieved_quantity: {
           type: Number,
           required: true,

@@ -488,6 +488,7 @@ export const createJobOrder = async (req, res, next) => {
     const dailyProductionPromises = validatedData.products.map(async (product) => {
       const schemaProduct = {
         product_id: product.product,
+        // objId: product._id,
         achieved_quantity: 0,
         rejected_quantity: 0,
         recycled_quantity: 0,
@@ -2180,6 +2181,7 @@ export const updateJobOrder = async (req, res) => {
       const dailyProductionPromises = newProducts.map(async (product) => {
         const schemaProduct = {
           product_id: product.product,
+          // objId: updatedJobOrder.products.find((p) => p.product.equals(product.product))._id,
           achieved_quantity: 0,
           rejected_quantity: 0,
           recycled_quantity: 0,
