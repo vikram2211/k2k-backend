@@ -767,6 +767,7 @@ export const getJobOrdersByDate = async (req, res) => {
         const workOrderProduct = jobOrder?.work_order?.products?.find(
           (prod) => prod.product_id.toString() === productId
         );
+        console.log("workOrderProduct",workOrderProduct);
 
         // Get latest start and stop times from production logs
         let started_at = null;
@@ -808,6 +809,7 @@ export const getJobOrdersByDate = async (req, res) => {
           material_code: dpProduct.product_id?.material_code || 'N/A',
           description: dpProduct.product_id?.description || 'N/A',
           po_quantity: workOrderProduct?.po_quantity || 0,
+          qty_in_nos: workOrderProduct?.qty_in_nos || 0,
           planned_quantity: jobOrderProduct?.planned_quantity || 0,
           scheduled_date: jobOrderProduct?.scheduled_date || dailyProduction.date,
           achieved_quantity: dpProduct.achieved_quantity || 0,

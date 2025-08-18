@@ -2944,7 +2944,8 @@ const getInternalWorkOrderById = asyncHandler(async (req, res) => {
                 const jobProduct = jobOrder.products.find(
                     p => String(p.product) === String(internalProduct.product)
                 );
-                const productDetail = await falconProduct.findById(internalProduct.product).select('name').lean();
+                const productDetail = await falconProduct.findById(internalProduct.product).select('name');
+                //.lean()
 
                 // Fetch the production record for the last process for each semifinished_id
                 const semifinishedIds = internalProduct.semifinished_details.map(s => s.semifinished_id);
@@ -2959,7 +2960,7 @@ const getInternalWorkOrderById = asyncHandler(async (req, res) => {
                             'product.product_id': internalProduct.product,
                             semifinished_id: { $in: semifinishedIds },
                         })
-                        .sort({ 'process_sequence.current.index': -1 }) // Sort by process index descending
+                        // .sort({ 'process_sequence.current.index': -1 }) // Sort by process index descending
                         .select('product.achieved_quantity product.rejected_quantity')
                         .lean();
 
@@ -2982,7 +2983,7 @@ const getInternalWorkOrderById = asyncHandler(async (req, res) => {
                     from_date: internalWorkOrder.date?.from ? formatDateOnly(internalWorkOrder.date.from) : null,
                     to_date: internalWorkOrder.date?.to ? formatDateOnly(internalWorkOrder.date.to) : null,
                     uom: jobProduct ? jobProduct.uom : internalProduct.uom,
-                    code: jobProduct ? jobProduct.code : internalProduct.code,
+                    code: jobProduct ? internalProduct.code : jobProduct.code, //
                     color_code: jobProduct ? jobProduct.color_code : internalProduct.color_code,
                     width: jobProduct ? jobProduct.width : internalProduct.width,
                     height: jobProduct ? jobProduct.height : internalProduct.height,
