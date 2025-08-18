@@ -5,7 +5,7 @@ import { asyncHandler } from '../utils/asyncHandler.js';
 import { ApiError } from '../utils/ApiError.js';
 import { ApiResponse } from '../utils/ApiResponse.js';
 import { formatDateToIST } from '../utils/formatDate.js';
-import { factoryPermissions } from "../models/permissions.model..js";
+import { factoryPermissions } from "../models/permissions.model.js";
 
 // Helper function to send ApiResponse
 const sendResponse = (res, response) => {
@@ -158,7 +158,7 @@ const createEmployee = asyncHandler(async (req, res) => {
         }),
         permissions: Joi.array().items(
             Joi.object({
-                module: Joi.string().required(),
+                module: Joi.string(),
                 type: Joi.string().valid('standard', 'tab').required(),
                 enabled: Joi.boolean().required(),
                 create: Joi.when('type', {
@@ -215,7 +215,10 @@ const createEmployee = asyncHandler(async (req, res) => {
                     })
                 }).optional()
             })
-        ).optional()
+        ).optional(),
+        password: Joi.string().required().messages({
+            'string.empty': 'Password is required',
+        }),
     });
 
     // Validate request body
@@ -287,7 +290,8 @@ const createEmployee = asyncHandler(async (req, res) => {
         factory: value.factory,
         role: value.role,
         address: value.address,
-        permissions: permissionsToSave
+        permissions: permissionsToSave,
+        password: value.password
     };
 
     // Save to database

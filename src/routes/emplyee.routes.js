@@ -4,7 +4,7 @@ import {
     getEmployees
 
 } from "../controllers/employeeController.js";
-import { factoryPermissions } from "../models/permissions.model..js";
+import { factoryPermissions } from "../models/permissions.model.js";
 const router = Router();
 
 router.route("/emplyee/create").post(createEmployee);
