@@ -28,7 +28,7 @@ dotenv.config();
 
 
 const MONGODB_CONNECTION_STRING = process.env.MONGODB_URI;
-// console.log("MONGODB_CONNECTION_STRING",MONGODB_CONNECTION_STRING);
+console.log("MONGODB_CONNECTION_STRING",MONGODB_CONNECTION_STRING);
 
 const dbConnect = async () => {
   try {

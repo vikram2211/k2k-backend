@@ -86,11 +86,11 @@
         {
           file_name: {
             type: String,
-            required: true,
+            // required: true,
           },
           file_url: {
             type: String,
-            required: true,
+            // required: true,
           },
           uploaded_at: {
             type: Date,

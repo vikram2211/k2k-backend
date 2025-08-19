@@ -673,7 +673,7 @@ export const getJobOrdersByDate_13_08_2025 = async (req, res) => {
 
 
 
-export const getJobOrdersByDate = async (req, res) => {
+export const getJobOrdersByDate_19_08_2025 = async (req, res) => {
   try {
     // Normalize today's date (UTC at 00:00)
     const today = new Date();
@@ -739,6 +739,8 @@ export const getJobOrdersByDate = async (req, res) => {
         },
       })
       .lean();
+      // console.log("dailyProductions",dailyProductions);
+      dailyProductions.map((dailyPr)=>console.log("dailyPr",dailyPr))
 
     // Group by JobOrder and Product to include all products
     const jobOrderProductMap = new Map();
@@ -830,6 +832,206 @@ export const getJobOrdersByDate = async (req, res) => {
             updatedAt: dailyProduction.updatedAt,
           },
           latestDate: dailyProduction.date, // Track the DailyProduction date for categorization
+        };
+
+        jobOrderProductMap.set(uniqueKey, entry);
+      });
+    });
+
+    // Categorize the consolidated entries
+    const categorizedOrders = {
+      pastDPR: [],
+      todayDPR: [],
+      futureDPR: [],
+    };
+
+    jobOrderProductMap.forEach((entry) => {
+      // Categorize based on the DailyProduction date
+      const dpDate = new Date(Date.UTC(
+        new Date(entry.latestDate).getUTCFullYear(),
+        new Date(entry.latestDate).getUTCMonth(),
+        new Date(entry.latestDate).getUTCDate()
+      ));
+
+      if (date) {
+        categorizedOrders.todayDPR.push(entry);
+      } else {
+        if (dpDate.getTime() === todayUTC.getTime()) {
+          categorizedOrders.todayDPR.push(entry);
+        } else if (dpDate < todayUTC) {
+          categorizedOrders.pastDPR.push(entry);
+        } else if (dpDate >= tomorrowUTC) {
+          categorizedOrders.futureDPR.push(entry);
+        }
+      }
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: 'Production data fetched successfully',
+      data: categorizedOrders,
+    });
+  } catch (error) {
+    console.error('Error getting production data:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal Server Error',
+      error: error.message,
+    });
+  }
+};
+export const getJobOrdersByDate = async (req, res) => {
+  try {
+    // Normalize today's date (UTC at 00:00)
+    const today = new Date();
+    const todayUTC = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()));
+
+    // Tomorrow's date for future DPR categorization
+    const tomorrowUTC = new Date(todayUTC);
+    tomorrowUTC.setUTCDate(tomorrowUTC.getUTCDate() + 1);
+
+    // Query parameters
+    const { date } = req.query;
+    let query = {};
+
+    // If a specific date is provided, filter by that date
+    if (date) {
+      const inputDate = new Date(date);
+      if (isNaN(inputDate.getTime())) {
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid date format. Use YYYY-MM-DD (e.g., "2025-05-06")',
+        });
+      }
+      // Normalize input date to UTC midnight
+      const normalizedDate = new Date(Date.UTC(inputDate.getUTCFullYear(), inputDate.getUTCMonth(), inputDate.getUTCDate()));
+      query.date = {
+        $gte: normalizedDate,
+        $lt: new Date(normalizedDate.getTime() + 24 * 60 * 60 * 1000), // Next day
+      };
+    }
+
+    // Fetch daily productions with populated fields
+    const dailyProductions = await DailyProduction.find(query)
+      .populate({
+        path: 'job_order',
+        select: 'job_order_id sales_order_number batch_number date status created_by updated_by createdAt updatedAt products',
+        populate: [
+          {
+            path: 'work_order',
+            select: 'project_id work_order_number products client_id',
+            populate: [
+              {
+                path: 'project_id',
+                select: 'name',
+              },
+              {
+                path: 'client_id',
+                select: 'name',
+              },
+            ],
+          },
+          {
+            path: 'products.machine_name',
+            select: 'name',
+          },
+        ],
+      })
+      .populate({
+        path: 'products.product_id',
+        select: 'material_code description plant',
+        populate: {
+          path: 'plant',
+          select: 'plant_name',
+        },
+      })
+      .lean();
+
+    // Group by DailyProduction to include all records
+    const jobOrderProductMap = new Map();
+
+    dailyProductions.forEach((dailyProduction) => {
+      const jobOrder = dailyProduction.job_order;
+      const jobOrderId = jobOrder?._id?.toString() || dailyProduction._id.toString();
+
+      // Process each product in the DailyProduction
+      dailyProduction.products.forEach((dpProduct) => {
+        const productId = dpProduct.product_id._id.toString();
+        // Create a unique key including DailyProduction _id for uniqueness
+        const uniqueKey = `${jobOrderId}-${productId}-${dailyProduction._id.toString()}`;
+
+        // Find the corresponding product in the job order's products array
+        const jobOrderProduct = jobOrder?.products?.find(
+          (prod) => prod.product.toString() === productId
+        );
+
+        // Find the corresponding product in the work order's products array to get po_quantity
+        const workOrderProduct = jobOrder?.work_order?.products?.find(
+          (prod) => prod.product_id.toString() === productId
+        );
+
+        // Get latest start and stop times from production logs
+        let started_at = null;
+        let stopped_at = null;
+        if (dailyProduction.production_logs && dailyProduction.production_logs.length > 0) {
+          const startLog = dailyProduction.production_logs
+            .filter((log) => log.action === 'Start')
+            .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))[0]; // Latest Start
+          const stopLog = dailyProduction.production_logs
+            .filter((log) => log.action === 'Stop')
+            .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))[0]; // Latest Stop
+
+          started_at = startLog ? startLog.timestamp : null;
+          stopped_at = stopLog ? stopLog.timestamp : null;
+        }
+
+        // Create the entry for this DailyProduction-Product combination
+        const entry = {
+          _id: jobOrder?._id || dailyProduction._id,
+          work_order: {
+            _id: jobOrder?.work_order?._id || null,
+            work_order_number: jobOrder?.work_order?.work_order_number || 'N/A',
+            project_name: jobOrder?.work_order?.project_id?.name || 'N/A',
+            client_name: jobOrder?.work_order?.client_id?.name || 'N/A',
+          },
+          sales_order_number: jobOrder?.sales_order_number || 'N/A',
+          batch_number: jobOrder?.batch_number || 'N/A',
+          date: jobOrder?.date || { from: null, to: null },
+          status: jobOrder?.status || dailyProduction.status,
+          created_by: jobOrder?.created_by || dailyProduction.created_by,
+          updated_by: jobOrder?.updated_by || dailyProduction.updated_by,
+          createdAt: jobOrder?.createdAt || dailyProduction.createdAt,
+          updatedAt: jobOrder?.updatedAt || dailyProduction.updatedAt,
+          job_order: jobOrder?._id || dailyProduction._id,
+          job_order_id: jobOrder?.job_order_id,
+          product_id: dpProduct.product_id._id,
+          plant_name: dpProduct.product_id?.plant?.plant_name || 'N/A',
+          machine_name: jobOrderProduct?.machine_name?.name || 'N/A',
+          material_code: dpProduct.product_id?.material_code || 'N/A',
+          description: dpProduct.product_id?.description || 'N/A',
+          po_quantity: workOrderProduct?.po_quantity || 0,
+          qty_in_nos: workOrderProduct?.qty_in_nos || 0,
+          planned_quantity: jobOrderProduct?.planned_quantity || 0,
+          scheduled_date: jobOrderProduct?.scheduled_date || dailyProduction.date,
+          achieved_quantity: dpProduct.achieved_quantity || 0,
+          rejected_quantity: dpProduct.rejected_quantity || 0,
+          recycled_quantity: dpProduct.recycled_quantity || 0,
+          prodId:dailyProduction._id,
+          started_at,
+          stopped_at,
+          submitted_by: dpProduct.submitted_by || null,
+          daily_production: {
+            _id: dailyProduction._id, // Production ID for uniqueness
+            status: dailyProduction.status,
+            date: dailyProduction.date,
+            qc_checked_by: dailyProduction.qc_checked_by,
+            downtime: dailyProduction.downtime,
+            created_by: dailyProduction.created_by,
+            updated_by: dailyProduction.updated_by,
+            createdAt: dailyProduction.createdAt,
+            updatedAt: dailyProduction.updatedAt,
+          },
+          latestDate: dailyProduction.date,
         };
 
         jobOrderProductMap.set(uniqueKey, entry);
@@ -1183,49 +1385,49 @@ export const getJobOrdersByDate_18_08_2025 = async (req, res) => {
 
 
 /////NEW SIMULATED API - 
-const simulateProductionCount2 = async (job_order, product_id) => {
-  const session = await mongoose.startSession();
-  try {
-    session.startTransaction();
-    console.log("came in simulated api");
+// const simulateProductionCount2 = async (job_order, product_id) => {
+//   const session = await mongoose.startSession();
+//   try {
+//     session.startTransaction();
+//     console.log("came in simulated api");
 
 
-    const dailyProduction = await DailyProduction.findOne({ job_order }).session(session);
-    if (!dailyProduction) {
-      console.error(`DailyProduction not found for job_order: ${job_order}`);
-      return;
-    }
+//     const dailyProduction = await DailyProduction.findOne({ job_order }).session(session);
+//     if (!dailyProduction) {
+//       console.error(`DailyProduction not found for job_order: ${job_order}`);
+//       return;
+//     }
 
-    dailyProduction.products = dailyProduction.products.map((p) =>
-      p.product_id.equals(product_id)
-        ? { ...p.toObject(), achieved_quantity: p.achieved_quantity + 1 }
-        : p
-    );
+//     dailyProduction.products = dailyProduction.products.map((p) =>
+//       p.product_id.equals(product_id)
+//         ? { ...p.toObject(), achieved_quantity: p.achieved_quantity + 1 }
+//         : p
+//     );
 
-    await dailyProduction.save({ session });
-    console.log("came in simulated api 222");
+//     await dailyProduction.save({ session });
+//     console.log("came in simulated api 222");
 
-    // Update Inventory
-    const inventory = await Inventory.findOne({
-      work_order: dailyProduction.work_order,
-      product: product_id,
-    }).session(session);
-    if (inventory) {
-      const product = dailyProduction.products.find((p) => p.product_id.equals(product_id));
-      inventory.produced_quantity = product.achieved_quantity;
-      inventory.updated_by = dailyProduction.updated_by;
-      await inventory.save({ session });
-    }
+//     // Update Inventory
+//     const inventory = await Inventory.findOne({
+//       work_order: dailyProduction.work_order,
+//       product: product_id,
+//     }).session(session);
+//     if (inventory) {
+//       const product = dailyProduction.products.find((p) => p.product_id.equals(product_id));
+//       inventory.produced_quantity = product.achieved_quantity;
+//       inventory.updated_by = dailyProduction.updated_by;
+//       await inventory.save({ session });
+//     }
 
-    await session.commitTransaction();
-    console.log(`Updated achieved_quantity and inventory for job_order: ${job_order}, product_id: ${product_id}`);
-  } catch (error) {
-    await session.abortTransaction();
-    console.error(`Error updating achieved_quantity: ${error.message}`);
-  } finally {
-    session.endSession();
-  }
-};
+//     await session.commitTransaction();
+//     console.log(`Updated achieved_quantity and inventory for job_order: ${job_order}, product_id: ${product_id}`);
+//   } catch (error) {
+//     await session.abortTransaction();
+//     console.error(`Error updating achieved_quantity: ${error.message}`);
+//   } finally {
+//     session.endSession();
+//   }
+// };
 
 
 
@@ -1618,1214 +1820,1214 @@ const simulateProductionCount2 = async (job_order, product_id) => {
 
 const activeProductions = new Map();
 
-const simulateProductionCount1 = async (job_order, product_id) => {
-  try {
-    console.log("Came in simulated count api");
-    const dailyProduction = await DailyProduction.findOne({ job_order });
-    console.log("dailyProduction.....", dailyProduction);
-    if (!dailyProduction) {
-      console.error(`DailyProduction not found for job_order: ${job_order}`);
-      return;
-    }
-
-    if (dailyProduction.status === 'Paused') {
-      console.log(`Production is paused for job_order: ${job_order}`);
-      return;
-    }
-
-    dailyProduction.products = dailyProduction.products.map((p) =>
-      p.product_id.equals(product_id)
-        ? { ...p.toObject(), achieved_quantity: p.achieved_quantity + 1 }
-        : p
-    );
-
-    await dailyProduction.save();
-    console.log(`Updated achieved_quantity for job_order: ${job_order}, product_id: ${product_id}`);
-
-    const inventory = await Inventory.findOne({
-      work_order: dailyProduction.work_order,
-      product: product_id,
-    });
-
-    if (inventory) {
-      const product = dailyProduction.products.find((p) => p.product_id.equals(product_id));
-      inventory.produced_quantity = product.achieved_quantity;
-      inventory.updated_by = dailyProduction.updated_by;
-      await inventory.save();
-    }
-  } catch (error) {
-    console.error(`Error updating achieved_quantity: ${error.message}`);
-  }
-};
-
-
-
-export const handleDailyProductionAction1 = async (req, res) => {
-  console.log("came in production stage");
-  try {
-    const { action, job_order, product_id, pause_description } = req.body;
-    console.log("req.body", req.body);
-
-    if (!['start', 'stop', 'pause', 'resume'].includes(action)) {
-      return res.status(400).json({
-        success: false,
-        message: 'Invalid action. Must be "start", "stop", "pause", or "resume".',
-      });
-    }
-
-    if (!req.user || !req.user._id) {
-      return res.status(401).json({
-        success: false,
-        message: 'Unauthorized: User not authenticated.',
-      });
-    }
-
-    if (!job_order || !product_id) {
-      return res.status(400).json({
-        success: false,
-        message: 'Missing required fields: job_order, product_id.',
-      });
-    }
-
-    const jobOrder = await JobOrder.findById(job_order).populate(
-      'work_order',
-      'work_order_number'
-    );
-    console.log("jobOrder", jobOrder);
-
-    if (!jobOrder) {
-      return res.status(404).json({
-        success: false,
-        message: 'Job order not found.',
-      });
-    }
-
-    const productExists = jobOrder.products.some((product) =>
-      product.product.equals(product_id)
-    );
-    if (!productExists) {
-      return res.status(400).json({
-        success: false,
-        message: 'Product ID not found in job order.',
-      });
-    }
-
-    if (action === 'start') {
-      console.log("came here start");
-      let dailyProduction = await DailyProduction.findOne({ job_order });
-
-      if (dailyProduction) {
-        if (dailyProduction.started_at) {
-          return res.status(400).json({
-            success: false,
-            message: 'Production already started for this job order.',
-          });
-        }
-
-        dailyProduction.started_at = new Date();
-        dailyProduction.submitted_by = req.user._id;
-        dailyProduction.updated_by = req.user._id;
-        dailyProduction.status = 'In Progress';
-        dailyProduction.production_logs.push({
-          action: 'Start',
-          timestamp: new Date(),
-          user: req.user._id,
-          description: 'Production started',
-        });
-
-        const updatedProduction = await dailyProduction.save();
-        console.log("updatedProduction", updatedProduction);
-
-        for (const product of dailyProduction.products) {
-          const productionKey = `${job_order}_${product.product_id}`;
-          if (!activeProductions.has(productionKey)) {
-            const intervalId = setInterval(
-              () => simulateProductionCount(job_order, product.product_id),
-              5000
-            );
-            activeProductions.set(productionKey, intervalId);
-          }
-        }
-
-        return res.status(200).json({
-          success: true,
-          message: 'Production started successfully for job order.',
-          data: updatedProduction,
-        });
-      } else {
-        console.log("came in else as it is first daily production");
-        const schemaProducts = jobOrder.products.map((product) => ({
-          product_id: product.product,
-          achieved_quantity: 0,
-          rejected_quantity: 0,
-          recycled_quantity: 0,
-        }));
-
-        const newProduction = new DailyProduction({
-          work_order: jobOrder.work_order._id,
-          job_order,
-          products: schemaProducts,
-          submitted_by: req.user._id,
-          started_at: new Date(),
-          created_by: req.user._id,
-          updated_by: req.user._id,
-          status: 'In Progress',
-          production_logs: [
-            {
-              action: 'Start',
-              timestamp: new Date(),
-              user: req.user._id,
-              description: 'Production started',
-            },
-          ],
-        });
-
-        const savedProduction = await newProduction.save();
-        console.log("savedProduction", savedProduction);
-
-        for (const product of newProduction.products) {
-          const productionKey = `${job_order}_${product.product_id}`;
-          const intervalId = setInterval(
-            () => simulateProductionCount(job_order, product.product_id),
-            5000
-          );
-          activeProductions.set(productionKey, intervalId);
-        }
-
-        return res.status(201).json({
-          success: true,
-          message: 'Production started successfully.',
-          data: savedProduction,
-        });
-      }
-    } else if (action === 'pause') {
-      const dailyProduction = await DailyProduction.findOne({ job_order });
-      console.log("dailyProduction", dailyProduction);
-      if (!dailyProduction) {
-        return res.status(404).json({
-          success: false,
-          message: 'Daily production document not found for this job order.',
-        });
-      }
-
-      if (!dailyProduction.started_at) {
-        return res.status(400).json({
-          success: false,
-          message: 'Production has not started for this job order.',
-        });
-      }
-      if (dailyProduction.stopped_at) {
-        return res.status(400).json({
-          success: false,
-          message: 'Production already stopped for this job order.',
-        });
-      }
-      if (dailyProduction.status === 'Paused') {
-        return res.status(400).json({
-          success: false,
-          message: 'Production is already paused.',
-        });
-      }
-
-      dailyProduction.status = 'Paused';
-      dailyProduction.updated_by = req.user._id;
-      dailyProduction.production_logs.push({
-        action: 'Pause',
-        timestamp: new Date(),
-        user: req.user._id,
-        description: pause_description || 'Production paused',
-      });
-
-      const updatedProduction = await dailyProduction.save();
-      console.log("updatedProduction", updatedProduction);
-
-      for (const product of dailyProduction.products) {
-        const productionKey = `${job_order}_${product.product_id}`;
-        const intervalId = activeProductions.get(productionKey);
-        if (intervalId) {
-          clearInterval(intervalId);
-          activeProductions.delete(productionKey);
-        }
-      }
-
-      return res.status(200).json({
-        success: true,
-        message: 'Production paused successfully for job order.',
-        data: updatedProduction,
-      });
-    } else if (action === 'resume') {
-      const dailyProduction = await DailyProduction.findOne({ job_order });
-      console.log("dailyProduction", dailyProduction);
-      if (!dailyProduction) {
-        return res.status(404).json({
-          success: false,
-          message: 'Daily production document not found for this job order.',
-        });
-      }
-
-      if (!dailyProduction.started_at) {
-        return res.status(400).json({
-          success: false,
-          message: 'Production has not started for this job order.',
-        });
-      }
-      if (dailyProduction.stopped_at) {
-        return res.status(400).json({
-          success: false,
-          message: 'Production already stopped for this job order.',
-        });
-      }
-      if (dailyProduction.status !== 'Paused') {
-        return res.status(400).json({
-          success: false,
-          message: 'Production is not paused.',
-        });
-      }
-
-      dailyProduction.status = 'In Progress';
-      dailyProduction.updated_by = req.user._id;
-      dailyProduction.production_logs.push({
-        action: 'Resume',
-        timestamp: new Date(),
-        user: req.user._id,
-        description: 'Production resumed',
-      });
-
-      const updatedProduction = await dailyProduction.save();
-      console.log("updatedProduction", updatedProduction);
-
-      for (const product of dailyProduction.products) {
-        const productionKey = `${job_order}_${product.product_id}`;
-        if (!activeProductions.has(productionKey)) {
-          const intervalId = setInterval(
-            () => simulateProductionCount(job_order, product.product_id),
-            5000
-          );
-          activeProductions.set(productionKey, intervalId);
-        }
-      }
-
-      return res.status(200).json({
-        success: true,
-        message: 'Production resumed successfully for job order.',
-        data: updatedProduction,
-      });
-    } else if (action === 'stop') {
-      const dailyProduction = await DailyProduction.findOne({ job_order });
-      console.log("dailyProduction", dailyProduction);
-      if (!dailyProduction) {
-        return res.status(404).json({
-          success: false,
-          message: 'Daily production document not found for this job order.',
-        });
-      }
-
-      if (!dailyProduction.started_at) {
-        return res.status(400).json({
-          success: false,
-          message: 'Production has not started for this job order.',
-        });
-      }
-      if (dailyProduction.stopped_at) {
-        return res.status(400).json({
-          success: false,
-          message: 'Production already stopped for this job order.',
-        });
-      }
-
-      dailyProduction.stopped_at = new Date();
-      dailyProduction.updated_by = req.user._id;
-      dailyProduction.status = 'Pending QC';
-      dailyProduction.production_logs.push({
-        action: 'Stop',
-        timestamp: new Date(),
-        user: req.user._id,
-        description: 'Production stopped',
-      });
-
-      const updatedProduction = await dailyProduction.save();
-      console.log("updatedProduction", updatedProduction);
-
-      for (const product of dailyProduction.products) {
-        const inventory = await Inventory.findOne({
-          work_order: dailyProduction.work_order,
-          product: product.product_id,
-        });
-        if (inventory) {
-          inventory.produced_quantity = product.achieved_quantity;
-          inventory.updated_by = req.user._id;
-          await inventory.save();
-        }
-      }
-
-      for (const product of dailyProduction.products) {
-        const productionKey = `${job_order}_${product.product_id}`;
-        const intervalId = activeProductions.get(productionKey);
-        if (intervalId) {
-          clearInterval(intervalId);
-          activeProductions.delete(productionKey);
-        }
-      }
-
-      return res.status(200).json({
-        success: true,
-        message: 'Production stopped successfully for job order.',
-        data: updatedProduction,
-      });
-    }
-  } catch (error) {
-    console.error('Error handling daily production action:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Internal Server Error',
-      error: error.message,
-    });
-  }
-};
-
-const simulateProductionCount22 = async (job_order, product_id) => {
-  try {
-    console.log("Came in simulated count api");
-    // Find the DailyProduction document that matches both job_order and product_id
-    const dailyProduction = await DailyProduction.findOne({
-      job_order,
-      'products.product_id': product_id,
-    });
-    console.log("dailyProduction.....", dailyProduction);
-    if (!dailyProduction) {
-      console.error(`DailyProduction not found for job_order: ${job_order}, product_id: ${product_id}`);
-      return;
-    }
-
-    if (dailyProduction.status === 'Paused') {
-      console.log(`Production is paused for job_order: ${job_order}, product_id: ${product_id}`);
-      return;
-    }
-
-    dailyProduction.products = dailyProduction.products.map((p) =>
-      p.product_id.equals(product_id)
-        ? { ...p.toObject(), achieved_quantity: p.achieved_quantity + 1 }
-        : p
-    );
-
-    await dailyProduction.save();
-    console.log(`Updated achieved_quantity for job_order: ${job_order}, product_id: ${product_id}`);
-
-    const inventory = await Inventory.findOne({
-      work_order: dailyProduction.work_order,
-      product: product_id,
-    });
-
-    if (inventory) {
-      const product = dailyProduction.products.find((p) => p.product_id.equals(product_id));
-      inventory.produced_quantity = product.achieved_quantity;
-      inventory.updated_by = dailyProduction.updated_by;
-      await inventory.save();
-    }
-  } catch (error) {
-    console.error(`Error updating achieved_quantity: ${error.message}`);
-  }
-};
-
-export const handleDailyProductionAction22 = async (req, res) => {
-  console.log("came in production stage");
-  try {
-    const { action, job_order, product_id, pause_description } = req.body;
-    console.log("req.body", req.body);
-
-    if (!['start', 'stop', 'pause', 'resume'].includes(action)) {
-      return res.status(400).json({
-        success: false,
-        message: 'Invalid action. Must be "start", "stop", "pause", or "resume".',
-      });
-    }
-
-    if (!req.user || !req.user._id) {
-      return res.status(401).json({
-        success: false,
-        message: 'Unauthorized: User not authenticated.',
-      });
-    }
-
-    if (!job_order || !product_id) {
-      return res.status(400).json({
-        success: false,
-        message: 'Missing required fields: job_order, product_id.',
-      });
-    }
-
-    const jobOrder = await JobOrder.findById(job_order).populate(
-      'work_order',
-      'work_order_number'
-    );
-    console.log("jobOrder", jobOrder);
-
-    if (!jobOrder) {
-      return res.status(404).json({
-        success: false,
-        message: 'Job order not found.',
-      });
-    }
-
-    const productExists = jobOrder.products.some((product) =>
-      product.product.equals(product_id)
-    );
-    if (!productExists) {
-      return res.status(400).json({
-        success: false,
-        message: 'Product ID not found in job order.',
-      });
-    }
-
-    if (action === 'start') {
-      console.log("came here start");
-      // Find the DailyProduction document for the specific job_order and product_id
-      let dailyProduction = await DailyProduction.findOne({
-        job_order,
-        'products.product_id': product_id,
-      });
-
-      if (dailyProduction) {
-        if (dailyProduction.started_at) {
-          return res.status(400).json({
-            success: false,
-            message: 'Production already started for this job order and product.',
-          });
-        }
-
-        dailyProduction.started_at = new Date();
-        dailyProduction.submitted_by = req.user._id;
-        dailyProduction.updated_by = req.user._id;
-        dailyProduction.status = 'In Progress';
-        dailyProduction.production_logs.push({
-          action: 'Start',
-          timestamp: new Date(),
-          user: req.user._id,
-          description: 'Production started',
-        });
-
-        const updatedProduction = await dailyProduction.save();
-        console.log("updatedProduction", updatedProduction);
-
-        // Start production simulation only for the requested product
-        const productionKey = `${job_order}_${product_id}`;
-        if (!activeProductions.has(productionKey)) {
-          const intervalId = setInterval(
-            () => simulateProductionCount(job_order, product_id),
-            10000
-          );
-          activeProductions.set(productionKey, intervalId);
-        }
-
-        return res.status(200).json({
-          success: true,
-          message: 'Production started successfully for the specified product.',
-          data: updatedProduction,
-        });
-      } else {
-        console.log("came in else as it is first daily production");
-        const schemaProducts = jobOrder.products
-          .filter((product) => product.product.equals(product_id))
-          .map((product) => ({
-            product_id: product.product,
-            achieved_quantity: 0,
-            rejected_quantity: 0,
-            recycled_quantity: 0,
-          }));
-
-        if (schemaProducts.length === 0) {
-          return res.status(400).json({
-            success: false,
-            message: 'No matching product found to start production.',
-          });
-        }
-
-        const newProduction = new DailyProduction({
-          work_order: jobOrder.work_order._id,
-          job_order,
-          products: schemaProducts,
-          submitted_by: req.user._id,
-          started_at: new Date(),
-          created_by: req.user._id,
-          updated_by: req.user._id,
-          status: 'In Progress',
-          production_logs: [
-            {
-              action: 'Start',
-              timestamp: new Date(),
-              user: req.user._id,
-              description: 'Production started',
-            },
-          ],
-        });
-
-        const savedProduction = await newProduction.save();
-        console.log("savedProduction", savedProduction);
-
-        // Start production simulation only for the requested product
-        const productionKey = `${job_order}_${product_id}`;
-        const intervalId = setInterval(
-          () => simulateProductionCount(job_order, product_id),
-          10000
-        );
-        activeProductions.set(productionKey, intervalId);
-
-        return res.status(201).json({
-          success: true,
-          message: 'Production started successfully.',
-          data: savedProduction,
-        });
-      }
-    } else if (action === 'pause') {
-      const dailyProduction = await DailyProduction.findOne({
-        job_order,
-        'products.product_id': product_id,
-      });
-      console.log("dailyProduction", dailyProduction);
-      if (!dailyProduction) {
-        return res.status(404).json({
-          success: false,
-          message: 'Daily production document not found for this job order and product.',
-        });
-      }
-
-      if (!dailyProduction.started_at) {
-        return res.status(400).json({
-          success: false,
-          message: 'Production has not started for this job order and product.',
-        });
-      }
-      if (dailyProduction.stopped_at) {
-        return res.status(400).json({
-          success: false,
-          message: 'Production already stopped for this job order and product.',
-        });
-      }
-      if (dailyProduction.status === 'Paused') {
-        return res.status(400).json({
-          success: false,
-          message: 'Production is already paused.',
-        });
-      }
-
-      dailyProduction.status = 'Paused';
-      dailyProduction.updated_by = req.user._id;
-      dailyProduction.production_logs.push({
-        action: 'Pause',
-        timestamp: new Date(),
-        user: req.user._id,
-        description: pause_description || 'Production paused',
-      });
-
-      const updatedProduction = await dailyProduction.save();
-      console.log("updatedProduction", updatedProduction);
-
-      const productionKey = `${job_order}_${product_id}`;
-      const intervalId = activeProductions.get(productionKey);
-      if (intervalId) {
-        clearInterval(intervalId);
-        activeProductions.delete(productionKey);
-      }
-
-      return res.status(200).json({
-        success: true,
-        message: 'Production paused successfully for the specified product.',
-        data: updatedProduction,
-      });
-    } else if (action === 'resume') {
-      const dailyProduction = await DailyProduction.findOne({
-        job_order,
-        'products.product_id': product_id,
-      });
-      console.log("dailyProduction", dailyProduction);
-      if (!dailyProduction) {
-        return res.status(404).json({
-          success: false,
-          message: 'Daily production document not found for this job order and product.',
-        });
-      }
-
-      if (!dailyProduction.started_at) {
-        return res.status(400).json({
-          success: false,
-          message: 'Production has not started for this job order and product.',
-        });
-      }
-      if (dailyProduction.stopped_at) {
-        return res.status(400).json({
-          success: false,
-          message: 'Production already stopped for this job order and product.',
-        });
-      }
-      if (dailyProduction.status !== 'Paused') {
-        return res.status(400).json({
-          success: false,
-          message: 'Production is not paused.',
-        });
-      }
-
-      dailyProduction.status = 'In Progress';
-      dailyProduction.updated_by = req.user._id;
-      dailyProduction.production_logs.push({
-        action: 'Resume',
-        timestamp: new Date(),
-        user: req.user._id,
-        description: 'Production resumed',
-      });
-
-      const updatedProduction = await dailyProduction.save();
-      console.log("updatedProduction", updatedProduction);
-
-      const productionKey = `${job_order}_${product_id}`;
-      if (!activeProductions.has(productionKey)) {
-        const intervalId = setInterval(
-          () => simulateProductionCount(job_order, product_id),
-          10000
-        );
-        activeProductions.set(productionKey, intervalId);
-      }
-
-      return res.status(200).json({
-        success: true,
-        message: 'Production resumed successfully for the specified product.',
-        data: updatedProduction,
-      });
-    } else if (action === 'stop') {
-      const dailyProduction = await DailyProduction.findOne({
-        job_order,
-        'products.product_id': product_id,
-      });
-      console.log("dailyProduction", dailyProduction);
-      if (!dailyProduction) {
-        return res.status(404).json({
-          success: false,
-          message: 'Daily production document not found for this job order and product.',
-        });
-      }
-
-      if (!dailyProduction.started_at) {
-        return res.status(400).json({
-          success: false,
-          message: 'Production has not started for this job order and product.',
-        });
-      }
-      if (dailyProduction.stopped_at) {
-        return res.status(400).json({
-          success: false,
-          message: 'Production already stopped for this job order and product.',
-        });
-      }
-
-      dailyProduction.stopped_at = new Date();
-      dailyProduction.updated_by = req.user._id;
-      dailyProduction.status = 'Pending QC';
-      dailyProduction.production_logs.push({
-        action: 'Stop',
-        timestamp: new Date(),
-        user: req.user._id,
-        description: 'Production stopped',
-      });
-
-      const updatedProduction = await dailyProduction.save();
-      console.log("updatedProduction", updatedProduction);
-
-      const product = dailyProduction.products.find((p) => p.product_id.equals(product_id));
-      const inventory = await Inventory.findOne({
-        work_order: dailyProduction.work_order,
-        product: product_id,
-      });
-      if (inventory) {
-        inventory.produced_quantity = product.achieved_quantity;
-        inventory.updated_by = req.user._id;
-        await inventory.save();
-      }
-
-      const productionKey = `${job_order}_${product_id}`;
-      const intervalId = activeProductions.get(productionKey);
-      if (intervalId) {
-        clearInterval(intervalId);
-        activeProductions.delete(productionKey);
-      }
-
-      return res.status(200).json({
-        success: true,
-        message: 'Production stopped successfully for the specified product.',
-        data: updatedProduction,
-      });
-    }
-  } catch (error) {
-    console.error('Error handling daily production action:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Internal Server Error',
-      error: error.message,
-    });
-  }
-};
+// const simulateProductionCount1 = async (job_order, product_id) => {
+//   try {
+//     console.log("Came in simulated count api");
+//     const dailyProduction = await DailyProduction.findOne({ job_order });
+//     console.log("dailyProduction.....", dailyProduction);
+//     if (!dailyProduction) {
+//       console.error(`DailyProduction not found for job_order: ${job_order}`);
+//       return;
+//     }
+
+//     if (dailyProduction.status === 'Paused') {
+//       console.log(`Production is paused for job_order: ${job_order}`);
+//       return;
+//     }
+
+//     dailyProduction.products = dailyProduction.products.map((p) =>
+//       p.product_id.equals(product_id)
+//         ? { ...p.toObject(), achieved_quantity: p.achieved_quantity + 1 }
+//         : p
+//     );
+
+//     await dailyProduction.save();
+//     console.log(`Updated achieved_quantity for job_order: ${job_order}, product_id: ${product_id}`);
+
+//     const inventory = await Inventory.findOne({
+//       work_order: dailyProduction.work_order,
+//       product: product_id,
+//     });
+
+//     if (inventory) {
+//       const product = dailyProduction.products.find((p) => p.product_id.equals(product_id));
+//       inventory.produced_quantity = product.achieved_quantity;
+//       inventory.updated_by = dailyProduction.updated_by;
+//       await inventory.save();
+//     }
+//   } catch (error) {
+//     console.error(`Error updating achieved_quantity: ${error.message}`);
+//   }
+// };
+
+
+
+// export const handleDailyProductionAction1 = async (req, res) => {
+//   console.log("came in production stage");
+//   try {
+//     const { action, job_order, product_id, pause_description } = req.body;
+//     console.log("req.body", req.body);
+
+//     if (!['start', 'stop', 'pause', 'resume'].includes(action)) {
+//       return res.status(400).json({
+//         success: false,
+//         message: 'Invalid action. Must be "start", "stop", "pause", or "resume".',
+//       });
+//     }
+
+//     if (!req.user || !req.user._id) {
+//       return res.status(401).json({
+//         success: false,
+//         message: 'Unauthorized: User not authenticated.',
+//       });
+//     }
+
+//     if (!job_order || !product_id) {
+//       return res.status(400).json({
+//         success: false,
+//         message: 'Missing required fields: job_order, product_id.',
+//       });
+//     }
+
+//     const jobOrder = await JobOrder.findById(job_order).populate(
+//       'work_order',
+//       'work_order_number'
+//     );
+//     console.log("jobOrder", jobOrder);
+
+//     if (!jobOrder) {
+//       return res.status(404).json({
+//         success: false,
+//         message: 'Job order not found.',
+//       });
+//     }
+
+//     const productExists = jobOrder.products.some((product) =>
+//       product.product.equals(product_id)
+//     );
+//     if (!productExists) {
+//       return res.status(400).json({
+//         success: false,
+//         message: 'Product ID not found in job order.',
+//       });
+//     }
+
+//     if (action === 'start') {
+//       console.log("came here start");
+//       let dailyProduction = await DailyProduction.findOne({ job_order });
+
+//       if (dailyProduction) {
+//         if (dailyProduction.started_at) {
+//           return res.status(400).json({
+//             success: false,
+//             message: 'Production already started for this job order.',
+//           });
+//         }
+
+//         dailyProduction.started_at = new Date();
+//         dailyProduction.submitted_by = req.user._id;
+//         dailyProduction.updated_by = req.user._id;
+//         dailyProduction.status = 'In Progress';
+//         dailyProduction.production_logs.push({
+//           action: 'Start',
+//           timestamp: new Date(),
+//           user: req.user._id,
+//           description: 'Production started',
+//         });
+
+//         const updatedProduction = await dailyProduction.save();
+//         console.log("updatedProduction", updatedProduction);
+
+//         for (const product of dailyProduction.products) {
+//           const productionKey = `${job_order}_${product.product_id}`;
+//           if (!activeProductions.has(productionKey)) {
+//             const intervalId = setInterval(
+//               () => simulateProductionCount(job_order, product.product_id),
+//               5000
+//             );
+//             activeProductions.set(productionKey, intervalId);
+//           }
+//         }
+
+//         return res.status(200).json({
+//           success: true,
+//           message: 'Production started successfully for job order.',
+//           data: updatedProduction,
+//         });
+//       } else {
+//         console.log("came in else as it is first daily production");
+//         const schemaProducts = jobOrder.products.map((product) => ({
+//           product_id: product.product,
+//           achieved_quantity: 0,
+//           rejected_quantity: 0,
+//           recycled_quantity: 0,
+//         }));
+
+//         const newProduction = new DailyProduction({
+//           work_order: jobOrder.work_order._id,
+//           job_order,
+//           products: schemaProducts,
+//           submitted_by: req.user._id,
+//           started_at: new Date(),
+//           created_by: req.user._id,
+//           updated_by: req.user._id,
+//           status: 'In Progress',
+//           production_logs: [
+//             {
+//               action: 'Start',
+//               timestamp: new Date(),
+//               user: req.user._id,
+//               description: 'Production started',
+//             },
+//           ],
+//         });
+
+//         const savedProduction = await newProduction.save();
+//         console.log("savedProduction", savedProduction);
+
+//         for (const product of newProduction.products) {
+//           const productionKey = `${job_order}_${product.product_id}`;
+//           const intervalId = setInterval(
+//             () => simulateProductionCount(job_order, product.product_id),
+//             5000
+//           );
+//           activeProductions.set(productionKey, intervalId);
+//         }
+
+//         return res.status(201).json({
+//           success: true,
+//           message: 'Production started successfully.',
+//           data: savedProduction,
+//         });
+//       }
+//     } else if (action === 'pause') {
+//       const dailyProduction = await DailyProduction.findOne({ job_order });
+//       console.log("dailyProduction", dailyProduction);
+//       if (!dailyProduction) {
+//         return res.status(404).json({
+//           success: false,
+//           message: 'Daily production document not found for this job order.',
+//         });
+//       }
+
+//       if (!dailyProduction.started_at) {
+//         return res.status(400).json({
+//           success: false,
+//           message: 'Production has not started for this job order.',
+//         });
+//       }
+//       if (dailyProduction.stopped_at) {
+//         return res.status(400).json({
+//           success: false,
+//           message: 'Production already stopped for this job order.',
+//         });
+//       }
+//       if (dailyProduction.status === 'Paused') {
+//         return res.status(400).json({
+//           success: false,
+//           message: 'Production is already paused.',
+//         });
+//       }
+
+//       dailyProduction.status = 'Paused';
+//       dailyProduction.updated_by = req.user._id;
+//       dailyProduction.production_logs.push({
+//         action: 'Pause',
+//         timestamp: new Date(),
+//         user: req.user._id,
+//         description: pause_description || 'Production paused',
+//       });
+
+//       const updatedProduction = await dailyProduction.save();
+//       console.log("updatedProduction", updatedProduction);
+
+//       for (const product of dailyProduction.products) {
+//         const productionKey = `${job_order}_${product.product_id}`;
+//         const intervalId = activeProductions.get(productionKey);
+//         if (intervalId) {
+//           clearInterval(intervalId);
+//           activeProductions.delete(productionKey);
+//         }
+//       }
+
+//       return res.status(200).json({
+//         success: true,
+//         message: 'Production paused successfully for job order.',
+//         data: updatedProduction,
+//       });
+//     } else if (action === 'resume') {
+//       const dailyProduction = await DailyProduction.findOne({ job_order });
+//       console.log("dailyProduction", dailyProduction);
+//       if (!dailyProduction) {
+//         return res.status(404).json({
+//           success: false,
+//           message: 'Daily production document not found for this job order.',
+//         });
+//       }
+
+//       if (!dailyProduction.started_at) {
+//         return res.status(400).json({
+//           success: false,
+//           message: 'Production has not started for this job order.',
+//         });
+//       }
+//       if (dailyProduction.stopped_at) {
+//         return res.status(400).json({
+//           success: false,
+//           message: 'Production already stopped for this job order.',
+//         });
+//       }
+//       if (dailyProduction.status !== 'Paused') {
+//         return res.status(400).json({
+//           success: false,
+//           message: 'Production is not paused.',
+//         });
+//       }
+
+//       dailyProduction.status = 'In Progress';
+//       dailyProduction.updated_by = req.user._id;
+//       dailyProduction.production_logs.push({
+//         action: 'Resume',
+//         timestamp: new Date(),
+//         user: req.user._id,
+//         description: 'Production resumed',
+//       });
+
+//       const updatedProduction = await dailyProduction.save();
+//       console.log("updatedProduction", updatedProduction);
+
+//       for (const product of dailyProduction.products) {
+//         const productionKey = `${job_order}_${product.product_id}`;
+//         if (!activeProductions.has(productionKey)) {
+//           const intervalId = setInterval(
+//             () => simulateProductionCount(job_order, product.product_id),
+//             5000
+//           );
+//           activeProductions.set(productionKey, intervalId);
+//         }
+//       }
+
+//       return res.status(200).json({
+//         success: true,
+//         message: 'Production resumed successfully for job order.',
+//         data: updatedProduction,
+//       });
+//     } else if (action === 'stop') {
+//       const dailyProduction = await DailyProduction.findOne({ job_order });
+//       console.log("dailyProduction", dailyProduction);
+//       if (!dailyProduction) {
+//         return res.status(404).json({
+//           success: false,
+//           message: 'Daily production document not found for this job order.',
+//         });
+//       }
+
+//       if (!dailyProduction.started_at) {
+//         return res.status(400).json({
+//           success: false,
+//           message: 'Production has not started for this job order.',
+//         });
+//       }
+//       if (dailyProduction.stopped_at) {
+//         return res.status(400).json({
+//           success: false,
+//           message: 'Production already stopped for this job order.',
+//         });
+//       }
+
+//       dailyProduction.stopped_at = new Date();
+//       dailyProduction.updated_by = req.user._id;
+//       dailyProduction.status = 'Pending QC';
+//       dailyProduction.production_logs.push({
+//         action: 'Stop',
+//         timestamp: new Date(),
+//         user: req.user._id,
+//         description: 'Production stopped',
+//       });
+
+//       const updatedProduction = await dailyProduction.save();
+//       console.log("updatedProduction", updatedProduction);
+
+//       for (const product of dailyProduction.products) {
+//         const inventory = await Inventory.findOne({
+//           work_order: dailyProduction.work_order,
+//           product: product.product_id,
+//         });
+//         if (inventory) {
+//           inventory.produced_quantity = product.achieved_quantity;
+//           inventory.updated_by = req.user._id;
+//           await inventory.save();
+//         }
+//       }
+
+//       for (const product of dailyProduction.products) {
+//         const productionKey = `${job_order}_${product.product_id}`;
+//         const intervalId = activeProductions.get(productionKey);
+//         if (intervalId) {
+//           clearInterval(intervalId);
+//           activeProductions.delete(productionKey);
+//         }
+//       }
+
+//       return res.status(200).json({
+//         success: true,
+//         message: 'Production stopped successfully for job order.',
+//         data: updatedProduction,
+//       });
+//     }
+//   } catch (error) {
+//     console.error('Error handling daily production action:', error);
+//     res.status(500).json({
+//       success: false,
+//       message: 'Internal Server Error',
+//       error: error.message,
+//     });
+//   }
+// };
+
+// const simulateProductionCount22 = async (job_order, product_id) => {
+//   try {
+//     console.log("Came in simulated count api");
+//     // Find the DailyProduction document that matches both job_order and product_id
+//     const dailyProduction = await DailyProduction.findOne({
+//       job_order,
+//       'products.product_id': product_id,
+//     });
+//     console.log("dailyProduction.....", dailyProduction);
+//     if (!dailyProduction) {
+//       console.error(`DailyProduction not found for job_order: ${job_order}, product_id: ${product_id}`);
+//       return;
+//     }
+
+//     if (dailyProduction.status === 'Paused') {
+//       console.log(`Production is paused for job_order: ${job_order}, product_id: ${product_id}`);
+//       return;
+//     }
+
+//     dailyProduction.products = dailyProduction.products.map((p) =>
+//       p.product_id.equals(product_id)
+//         ? { ...p.toObject(), achieved_quantity: p.achieved_quantity + 1 }
+//         : p
+//     );
+
+//     await dailyProduction.save();
+//     console.log(`Updated achieved_quantity for job_order: ${job_order}, product_id: ${product_id}`);
+
+//     const inventory = await Inventory.findOne({
+//       work_order: dailyProduction.work_order,
+//       product: product_id,
+//     });
+
+//     if (inventory) {
+//       const product = dailyProduction.products.find((p) => p.product_id.equals(product_id));
+//       inventory.produced_quantity = product.achieved_quantity;
+//       inventory.updated_by = dailyProduction.updated_by;
+//       await inventory.save();
+//     }
+//   } catch (error) {
+//     console.error(`Error updating achieved_quantity: ${error.message}`);
+//   }
+// };
+
+// export const handleDailyProductionAction22 = async (req, res) => {
+//   console.log("came in production stage");
+//   try {
+//     const { action, job_order, product_id, pause_description } = req.body;
+//     console.log("req.body", req.body);
+
+//     if (!['start', 'stop', 'pause', 'resume'].includes(action)) {
+//       return res.status(400).json({
+//         success: false,
+//         message: 'Invalid action. Must be "start", "stop", "pause", or "resume".',
+//       });
+//     }
+
+//     if (!req.user || !req.user._id) {
+//       return res.status(401).json({
+//         success: false,
+//         message: 'Unauthorized: User not authenticated.',
+//       });
+//     }
+
+//     if (!job_order || !product_id) {
+//       return res.status(400).json({
+//         success: false,
+//         message: 'Missing required fields: job_order, product_id.',
+//       });
+//     }
+
+//     const jobOrder = await JobOrder.findById(job_order).populate(
+//       'work_order',
+//       'work_order_number'
+//     );
+//     console.log("jobOrder", jobOrder);
+
+//     if (!jobOrder) {
+//       return res.status(404).json({
+//         success: false,
+//         message: 'Job order not found.',
+//       });
+//     }
+
+//     const productExists = jobOrder.products.some((product) =>
+//       product.product.equals(product_id)
+//     );
+//     if (!productExists) {
+//       return res.status(400).json({
+//         success: false,
+//         message: 'Product ID not found in job order.',
+//       });
+//     }
+
+//     if (action === 'start') {
+//       console.log("came here start");
+//       // Find the DailyProduction document for the specific job_order and product_id
+//       let dailyProduction = await DailyProduction.findOne({
+//         job_order,
+//         'products.product_id': product_id,
+//       });
+
+//       if (dailyProduction) {
+//         if (dailyProduction.started_at) {
+//           return res.status(400).json({
+//             success: false,
+//             message: 'Production already started for this job order and product.',
+//           });
+//         }
+
+//         dailyProduction.started_at = new Date();
+//         dailyProduction.submitted_by = req.user._id;
+//         dailyProduction.updated_by = req.user._id;
+//         dailyProduction.status = 'In Progress';
+//         dailyProduction.production_logs.push({
+//           action: 'Start',
+//           timestamp: new Date(),
+//           user: req.user._id,
+//           description: 'Production started',
+//         });
+
+//         const updatedProduction = await dailyProduction.save();
+//         console.log("updatedProduction", updatedProduction);
+
+//         // Start production simulation only for the requested product
+//         const productionKey = `${job_order}_${product_id}`;
+//         if (!activeProductions.has(productionKey)) {
+//           const intervalId = setInterval(
+//             () => simulateProductionCount(job_order, product_id),
+//             10000
+//           );
+//           activeProductions.set(productionKey, intervalId);
+//         }
+
+//         return res.status(200).json({
+//           success: true,
+//           message: 'Production started successfully for the specified product.',
+//           data: updatedProduction,
+//         });
+//       } else {
+//         console.log("came in else as it is first daily production");
+//         const schemaProducts = jobOrder.products
+//           .filter((product) => product.product.equals(product_id))
+//           .map((product) => ({
+//             product_id: product.product,
+//             achieved_quantity: 0,
+//             rejected_quantity: 0,
+//             recycled_quantity: 0,
+//           }));
+
+//         if (schemaProducts.length === 0) {
+//           return res.status(400).json({
+//             success: false,
+//             message: 'No matching product found to start production.',
+//           });
+//         }
+
+//         const newProduction = new DailyProduction({
+//           work_order: jobOrder.work_order._id,
+//           job_order,
+//           products: schemaProducts,
+//           submitted_by: req.user._id,
+//           started_at: new Date(),
+//           created_by: req.user._id,
+//           updated_by: req.user._id,
+//           status: 'In Progress',
+//           production_logs: [
+//             {
+//               action: 'Start',
+//               timestamp: new Date(),
+//               user: req.user._id,
+//               description: 'Production started',
+//             },
+//           ],
+//         });
+
+//         const savedProduction = await newProduction.save();
+//         console.log("savedProduction", savedProduction);
+
+//         // Start production simulation only for the requested product
+//         const productionKey = `${job_order}_${product_id}`;
+//         const intervalId = setInterval(
+//           () => simulateProductionCount(job_order, product_id),
+//           10000
+//         );
+//         activeProductions.set(productionKey, intervalId);
+
+//         return res.status(201).json({
+//           success: true,
+//           message: 'Production started successfully.',
+//           data: savedProduction,
+//         });
+//       }
+//     } else if (action === 'pause') {
+//       const dailyProduction = await DailyProduction.findOne({
+//         job_order,
+//         'products.product_id': product_id,
+//       });
+//       console.log("dailyProduction", dailyProduction);
+//       if (!dailyProduction) {
+//         return res.status(404).json({
+//           success: false,
+//           message: 'Daily production document not found for this job order and product.',
+//         });
+//       }
+
+//       if (!dailyProduction.started_at) {
+//         return res.status(400).json({
+//           success: false,
+//           message: 'Production has not started for this job order and product.',
+//         });
+//       }
+//       if (dailyProduction.stopped_at) {
+//         return res.status(400).json({
+//           success: false,
+//           message: 'Production already stopped for this job order and product.',
+//         });
+//       }
+//       if (dailyProduction.status === 'Paused') {
+//         return res.status(400).json({
+//           success: false,
+//           message: 'Production is already paused.',
+//         });
+//       }
+
+//       dailyProduction.status = 'Paused';
+//       dailyProduction.updated_by = req.user._id;
+//       dailyProduction.production_logs.push({
+//         action: 'Pause',
+//         timestamp: new Date(),
+//         user: req.user._id,
+//         description: pause_description || 'Production paused',
+//       });
+
+//       const updatedProduction = await dailyProduction.save();
+//       console.log("updatedProduction", updatedProduction);
+
+//       const productionKey = `${job_order}_${product_id}`;
+//       const intervalId = activeProductions.get(productionKey);
+//       if (intervalId) {
+//         clearInterval(intervalId);
+//         activeProductions.delete(productionKey);
+//       }
+
+//       return res.status(200).json({
+//         success: true,
+//         message: 'Production paused successfully for the specified product.',
+//         data: updatedProduction,
+//       });
+//     } else if (action === 'resume') {
+//       const dailyProduction = await DailyProduction.findOne({
+//         job_order,
+//         'products.product_id': product_id,
+//       });
+//       console.log("dailyProduction", dailyProduction);
+//       if (!dailyProduction) {
+//         return res.status(404).json({
+//           success: false,
+//           message: 'Daily production document not found for this job order and product.',
+//         });
+//       }
+
+//       if (!dailyProduction.started_at) {
+//         return res.status(400).json({
+//           success: false,
+//           message: 'Production has not started for this job order and product.',
+//         });
+//       }
+//       if (dailyProduction.stopped_at) {
+//         return res.status(400).json({
+//           success: false,
+//           message: 'Production already stopped for this job order and product.',
+//         });
+//       }
+//       if (dailyProduction.status !== 'Paused') {
+//         return res.status(400).json({
+//           success: false,
+//           message: 'Production is not paused.',
+//         });
+//       }
+
+//       dailyProduction.status = 'In Progress';
+//       dailyProduction.updated_by = req.user._id;
+//       dailyProduction.production_logs.push({
+//         action: 'Resume',
+//         timestamp: new Date(),
+//         user: req.user._id,
+//         description: 'Production resumed',
+//       });
+
+//       const updatedProduction = await dailyProduction.save();
+//       console.log("updatedProduction", updatedProduction);
+
+//       const productionKey = `${job_order}_${product_id}`;
+//       if (!activeProductions.has(productionKey)) {
+//         const intervalId = setInterval(
+//           () => simulateProductionCount(job_order, product_id),
+//           10000
+//         );
+//         activeProductions.set(productionKey, intervalId);
+//       }
+
+//       return res.status(200).json({
+//         success: true,
+//         message: 'Production resumed successfully for the specified product.',
+//         data: updatedProduction,
+//       });
+//     } else if (action === 'stop') {
+//       const dailyProduction = await DailyProduction.findOne({
+//         job_order,
+//         'products.product_id': product_id,
+//       });
+//       console.log("dailyProduction", dailyProduction);
+//       if (!dailyProduction) {
+//         return res.status(404).json({
+//           success: false,
+//           message: 'Daily production document not found for this job order and product.',
+//         });
+//       }
+
+//       if (!dailyProduction.started_at) {
+//         return res.status(400).json({
+//           success: false,
+//           message: 'Production has not started for this job order and product.',
+//         });
+//       }
+//       if (dailyProduction.stopped_at) {
+//         return res.status(400).json({
+//           success: false,
+//           message: 'Production already stopped for this job order and product.',
+//         });
+//       }
+
+//       dailyProduction.stopped_at = new Date();
+//       dailyProduction.updated_by = req.user._id;
+//       dailyProduction.status = 'Pending QC';
+//       dailyProduction.production_logs.push({
+//         action: 'Stop',
+//         timestamp: new Date(),
+//         user: req.user._id,
+//         description: 'Production stopped',
+//       });
+
+//       const updatedProduction = await dailyProduction.save();
+//       console.log("updatedProduction", updatedProduction);
+
+//       const product = dailyProduction.products.find((p) => p.product_id.equals(product_id));
+//       const inventory = await Inventory.findOne({
+//         work_order: dailyProduction.work_order,
+//         product: product_id,
+//       });
+//       if (inventory) {
+//         inventory.produced_quantity = product.achieved_quantity;
+//         inventory.updated_by = req.user._id;
+//         await inventory.save();
+//       }
+
+//       const productionKey = `${job_order}_${product_id}`;
+//       const intervalId = activeProductions.get(productionKey);
+//       if (intervalId) {
+//         clearInterval(intervalId);
+//         activeProductions.delete(productionKey);
+//       }
+
+//       return res.status(200).json({
+//         success: true,
+//         message: 'Production stopped successfully for the specified product.',
+//         data: updatedProduction,
+//       });
+//     }
+//   } catch (error) {
+//     console.error('Error handling daily production action:', error);
+//     res.status(500).json({
+//       success: false,
+//       message: 'Internal Server Error',
+//       error: error.message,
+//     });
+//   }
+// };
 
 //22-05-25
 //SEMIFINAL =>
 
-const simulateProductionCount = async (job_order, product_id) => {
-  try {
-    console.log("Came in simulated count api**");
+// const simulateProductionCount = async (job_order, product_id) => {
+//   try {
+//     console.log("Came in simulated count api**");
 
-    // Find the DailyProduction document that matches both job_order and product_id
-    const dailyProduction = await DailyProduction.findOne({
-      job_order,
-      'products.product_id': product_id,
-    });
-    console.log("dailyProduction.....", dailyProduction);
+//     // Find the DailyProduction document that matches both job_order and product_id
+//     const dailyProduction = await DailyProduction.findOne({
+//       job_order,
+//       'products.product_id': product_id,
+//     });
+//     console.log("dailyProduction.....", dailyProduction);
 
-    if (!dailyProduction) {
-      console.error(`DailyProduction not found for job_order: ${job_order}, product_id: ${product_id}`);
-      return;
-    }
+//     if (!dailyProduction) {
+//       console.error(`DailyProduction not found for job_order: ${job_order}, product_id: ${product_id}`);
+//       return;
+//     }
 
-    if (dailyProduction.status === 'Paused') {
-      console.log(`Production is paused for job_order: ${job_order}, product_id: ${product_id}`);
-      return;
-    }
+//     if (dailyProduction.status === 'Paused') {
+//       console.log(`Production is paused for job_order: ${job_order}, product_id: ${product_id}`);
+//       return;
+//     }
 
-    if (dailyProduction.status === 'Pending QC') {
-      console.log(`Production already stopped for job_order: ${job_order}, product_id: ${product_id}`);
-      return;
-    }
+//     if (dailyProduction.status === 'Pending QC') {
+//       console.log(`Production already stopped for job_order: ${job_order}, product_id: ${product_id}`);
+//       return;
+//     }
 
-    // Find the JobOrder to get the planned_quantity
-    const jobOrder = await JobOrder.findById(job_order);
-    if (!jobOrder) {
-      console.error(`JobOrder not found for job_order: ${job_order}`);
-      return;
-    }
+//     // Find the JobOrder to get the planned_quantity
+//     const jobOrder = await JobOrder.findById(job_order);
+//     if (!jobOrder) {
+//       console.error(`JobOrder not found for job_order: ${job_order}`);
+//       return;
+//     }
 
-    const jobOrderProduct = jobOrder.products.find((product) =>
-      product.product.equals(product_id)
-    );
-    if (!jobOrderProduct) {
-      console.error(`Product ${product_id} not found in JobOrder ${job_order}`);
-      return;
-    }
+//     const jobOrderProduct = jobOrder.products.find((product) =>
+//       product.product.equals(product_id)
+//     );
+//     if (!jobOrderProduct) {
+//       console.error(`Product ${product_id} not found in JobOrder ${job_order}`);
+//       return;
+//     }
 
-    const plannedQuantity = jobOrderProduct.planned_quantity;
+//     const plannedQuantity = jobOrderProduct.planned_quantity;
 
-    // Find the product in DailyProduction to get the current achieved_quantity
-    const dailyProduct = dailyProduction.products.find((p) =>
-      p.product_id.equals(product_id)
-    );
-    if (!dailyProduct) {
-      console.error(`Product ${product_id} not found in DailyProduction ${dailyProduction._id}`);
-      return;
-    }
+//     // Find the product in DailyProduction to get the current achieved_quantity
+//     const dailyProduct = dailyProduction.products.find((p) =>
+//       p.product_id.equals(product_id)
+//     );
+//     if (!dailyProduct) {
+//       console.error(`Product ${product_id} not found in DailyProduction ${dailyProduction._id}`);
+//       return;
+//     }
 
-    const currentAchievedQuantity = dailyProduct.achieved_quantity;
-    const newAchievedQuantity = currentAchievedQuantity + 1;
+//     const currentAchievedQuantity = dailyProduct.achieved_quantity;
+//     const newAchievedQuantity = currentAchievedQuantity + 1;
 
-    // Check if the new achieved_quantity would exceed the planned_quantity
-    if (newAchievedQuantity > plannedQuantity) {
-      console.log(`Planned quantity reached for job_order: ${job_order}, product_id: ${product_id}. Stopping production.`);
+//     // Check if the new achieved_quantity would exceed the planned_quantity
+//     if (newAchievedQuantity > plannedQuantity) {
+//       console.log(`Planned quantity reached for job_order: ${job_order}, product_id: ${product_id}. Stopping production.`);
 
-      // Stop production
-      dailyProduction.status = 'Pending QC';
-      dailyProduction.stopped_at = new Date();
-      dailyProduction.production_logs.push({
-        action: 'Stop',
-        timestamp: new Date(),
-        user: dailyProduction.updated_by, // Use the user who last updated the document
-        description: 'Production stopped automatically: Planned quantity reached',
-      });
+//       // Stop production
+//       dailyProduction.status = 'Pending QC';
+//       dailyProduction.stopped_at = new Date();
+//       dailyProduction.production_logs.push({
+//         action: 'Stop',
+//         timestamp: new Date(),
+//         user: dailyProduction.updated_by, // Use the user who last updated the document
+//         description: 'Production stopped automatically: Planned quantity reached',
+//       });
 
-      await dailyProduction.save();
-      console.log(`Production stopped for job_order: ${job_order}, product_id: ${product_id}`);
+//       await dailyProduction.save();
+//       console.log(`Production stopped for job_order: ${job_order}, product_id: ${product_id}`);
 
-      // Update inventory
-      const inventory = await Inventory.findOne({
-        work_order: dailyProduction.work_order,
-        product: product_id,
-      });
-      if (inventory) {
-        inventory.produced_quantity = dailyProduct.achieved_quantity; // Use current, not incremented value
-        inventory.updated_by = dailyProduction.updated_by;
-        await inventory.save();
-      }
+//       // Update inventory
+//       const inventory = await Inventory.findOne({
+//         work_order: dailyProduction.work_order,
+//         product: product_id,
+//       });
+//       if (inventory) {
+//         inventory.produced_quantity = dailyProduct.achieved_quantity; // Use current, not incremented value
+//         inventory.updated_by = dailyProduction.updated_by;
+//         await inventory.save();
+//       }
 
-      // Clear the production interval
-      const productionKey = `${job_order}_${product_id}`;
-      const intervalId = activeProductions.get(productionKey);
-      if (intervalId) {
-        clearInterval(intervalId);
-        activeProductions.delete(productionKey);
-      }
+//       // Clear the production interval
+//       const productionKey = `${job_order}_${product_id}`;
+//       const intervalId = activeProductions.get(productionKey);
+//       if (intervalId) {
+//         clearInterval(intervalId);
+//         activeProductions.delete(productionKey);
+//       }
 
-      return;
-    }
+//       return;
+//     }
 
-    // If planned quantity not exceeded, proceed with incrementing achieved_quantity
-    dailyProduction.products = dailyProduction.products.map((p) =>
-      p.product_id.equals(product_id)
-        ? { ...p.toObject(), achieved_quantity: newAchievedQuantity }
-        : p
-    );
+//     // If planned quantity not exceeded, proceed with incrementing achieved_quantity
+//     dailyProduction.products = dailyProduction.products.map((p) =>
+//       p.product_id.equals(product_id)
+//         ? { ...p.toObject(), achieved_quantity: newAchievedQuantity }
+//         : p
+//     );
 
-    await dailyProduction.save();
-    console.log(`Updated achieved_quantity for job_order: ${job_order}, product_id: ${product_id}`);
+//     await dailyProduction.save();
+//     console.log(`Updated achieved_quantity for job_order: ${job_order}, product_id: ${product_id}`);
 
-    // Update inventory
-    const inventory = await Inventory.findOne({
-      work_order: dailyProduction.work_order,
-      product: product_id,
-    });
-    if (inventory) {
-      const product = dailyProduction.products.find((p) => p.product_id.equals(product_id));
-      inventory.produced_quantity = product.achieved_quantity;
-      inventory.updated_by = dailyProduction.updated_by;
-      await inventory.save();
-    }
-  } catch (error) {
-    console.error(`Error updating achieved_quantity: ${error.message}`);
-  }
-};
+//     // Update inventory
+//     const inventory = await Inventory.findOne({
+//       work_order: dailyProduction.work_order,
+//       product: product_id,
+//     });
+//     if (inventory) {
+//       const product = dailyProduction.products.find((p) => p.product_id.equals(product_id));
+//       inventory.produced_quantity = product.achieved_quantity;
+//       inventory.updated_by = dailyProduction.updated_by;
+//       await inventory.save();
+//     }
+//   } catch (error) {
+//     console.error(`Error updating achieved_quantity: ${error.message}`);
+//   }
+// };
 
 
-export const handleDailyProductionAction = async (req, res) => {
-  console.log("came in production stage");
-  try {
-    const { action, job_order, product_id, pause_description } = req.body;
-    console.log("req.body", req.body);
+// export const handleDailyProductionAction = async (req, res) => {
+//   console.log("came in production stage");
+//   try {
+//     const { action, job_order, product_id, pause_description } = req.body;
+//     console.log("req.body", req.body);
 
-    if (!['start', 'stop', 'pause', 'resume'].includes(action)) {
-      return res.status(400).json({
-        success: false,
-        message: 'Invalid action. Must be "start", "stop", "pause", or "resume".',
-      });
-    }
+//     if (!['start', 'stop', 'pause', 'resume'].includes(action)) {
+//       return res.status(400).json({
+//         success: false,
+//         message: 'Invalid action. Must be "start", "stop", "pause", or "resume".',
+//       });
+//     }
 
-    if (!req.user || !req.user._id) {
-      return res.status(401).json({
-        success: false,
-        message: 'Unauthorized: User not authenticated.',
-      });
-    }
+//     if (!req.user || !req.user._id) {
+//       return res.status(401).json({
+//         success: false,
+//         message: 'Unauthorized: User not authenticated.',
+//       });
+//     }
 
-    if (!job_order || !product_id) {
-      return res.status(400).json({
-        success: false,
-        message: 'Missing required fields: job_order, product_id.',
-      });
-    }
+//     if (!job_order || !product_id) {
+//       return res.status(400).json({
+//         success: false,
+//         message: 'Missing required fields: job_order, product_id.',
+//       });
+//     }
 
-    const jobOrder = await JobOrder.findById(job_order).populate(
-      'work_order',
-      'work_order_number'
-    );
-    console.log("jobOrder", jobOrder);
+//     const jobOrder = await JobOrder.findById(job_order).populate(
+//       'work_order',
+//       'work_order_number'
+//     );
+//     console.log("jobOrder", jobOrder);
 
-    if (!jobOrder) {
-      return res.status(404).json({
-        success: false,
-        message: 'Job order not found.',
-      });
-    }
+//     if (!jobOrder) {
+//       return res.status(404).json({
+//         success: false,
+//         message: 'Job order not found.',
+//       });
+//     }
 
-    const jobOrderProduct = jobOrder.products.find((product) =>
-      product.product.equals(product_id)
-    );
-    if (!jobOrderProduct) {
-      return res.status(400).json({
-        success: false,
-        message: 'Product ID not found in job order.',
-      });
-    }
+//     const jobOrderProduct = jobOrder.products.find((product) =>
+//       product.product.equals(product_id)
+//     );
+//     if (!jobOrderProduct) {
+//       return res.status(400).json({
+//         success: false,
+//         message: 'Product ID not found in job order.',
+//       });
+//     }
 
-    const plannedQuantity = jobOrderProduct.planned_quantity;
+//     const plannedQuantity = jobOrderProduct.planned_quantity;
 
-    // Check achieved_quantity before starting or resuming production
-    let dailyProduction = await DailyProduction.findOne({
-      job_order,
-      'products.product_id': product_id,
-    });
+//     // Check achieved_quantity before starting or resuming production
+//     let dailyProduction = await DailyProduction.findOne({
+//       job_order,
+//       'products.product_id': product_id,
+//     });
 
-    if (dailyProduction) {
-      const dailyProduct = dailyProduction.products.find((p) =>
-        p.product_id.equals(product_id)
-      );
-      if (dailyProduct && dailyProduct.achieved_quantity >= plannedQuantity) {
-        return res.status(400).json({
-          success: false,
-          message: 'Cannot start or resume production: Planned quantity already reached.',
-        });
-      }
-    }
+//     if (dailyProduction) {
+//       const dailyProduct = dailyProduction.products.find((p) =>
+//         p.product_id.equals(product_id)
+//       );
+//       if (dailyProduct && dailyProduct.achieved_quantity >= plannedQuantity) {
+//         return res.status(400).json({
+//           success: false,
+//           message: 'Cannot start or resume production: Planned quantity already reached.',
+//         });
+//       }
+//     }
 
-    if (action === 'start') {
-      console.log("came here start");
+//     if (action === 'start') {
+//       console.log("came here start");
 
-      if (dailyProduction) {
-        if (dailyProduction.started_at) {
-          return res.status(400).json({
-            success: false,
-            message: 'Production already started for this job order and product.',
-          });
-        }
+//       if (dailyProduction) {
+//         if (dailyProduction.started_at) {
+//           return res.status(400).json({
+//             success: false,
+//             message: 'Production already started for this job order and product.',
+//           });
+//         }
 
-        dailyProduction.started_at = new Date();
-        dailyProduction.submitted_by = req.user._id;
-        dailyProduction.updated_by = req.user._id;
-        dailyProduction.status = 'In Progress';
-        dailyProduction.production_logs.push({
-          action: 'Start',
-          timestamp: new Date(),
-          user: req.user._id,
-          description: 'Production started',
-        });
+//         dailyProduction.started_at = new Date();
+//         dailyProduction.submitted_by = req.user._id;
+//         dailyProduction.updated_by = req.user._id;
+//         dailyProduction.status = 'In Progress';
+//         dailyProduction.production_logs.push({
+//           action: 'Start',
+//           timestamp: new Date(),
+//           user: req.user._id,
+//           description: 'Production started',
+//         });
 
-        const updatedProduction = await dailyProduction.save();
-        console.log("updatedProduction", updatedProduction);
+//         const updatedProduction = await dailyProduction.save();
+//         console.log("updatedProduction", updatedProduction);
 
-        // Start production simulation only for the requested product
-        const productionKey = `${job_order}_${product_id}`;
-        if (!activeProductions.has(productionKey)) {
-          const intervalId = setInterval(
-            () => simulateProductionCount(job_order, product_id),
-            10000
-          );
-          activeProductions.set(productionKey, intervalId);
-        }
+//         // Start production simulation only for the requested product
+//         const productionKey = `${job_order}_${product_id}`;
+//         if (!activeProductions.has(productionKey)) {
+//           const intervalId = setInterval(
+//             () => simulateProductionCount(job_order, product_id),
+//             10000
+//           );
+//           activeProductions.set(productionKey, intervalId);
+//         }
 
-        return res.status(200).json({
-          success: true,
-          message: 'Production started successfully for the specified product.',
-          data: updatedProduction,
-        });
-      } else {
-        console.log("came in else as it is first daily production");
-        const schemaProducts = jobOrder.products
-          .filter((product) => product.product.equals(product_id))
-          .map((product) => ({
-            product_id: product.product,
-            achieved_quantity: 0,
-            rejected_quantity: 0,
-            recycled_quantity: 0,
-          }));
+//         return res.status(200).json({
+//           success: true,
+//           message: 'Production started successfully for the specified product.',
+//           data: updatedProduction,
+//         });
+//       } else {
+//         console.log("came in else as it is first daily production");
+//         const schemaProducts = jobOrder.products
+//           .filter((product) => product.product.equals(product_id))
+//           .map((product) => ({
+//             product_id: product.product,
+//             achieved_quantity: 0,
+//             rejected_quantity: 0,
+//             recycled_quantity: 0,
+//           }));
 
-        if (schemaProducts.length === 0) {
-          return res.status(400).json({
-            success: false,
-            message: 'No matching product found to start production.',
-          });
-        }
+//         if (schemaProducts.length === 0) {
+//           return res.status(400).json({
+//             success: false,
+//             message: 'No matching product found to start production.',
+//           });
+//         }
 
-        const newProduction = new DailyProduction({
-          work_order: jobOrder.work_order._id,
-          job_order,
-          products: schemaProducts,
-          submitted_by: req.user._id,
-          started_at: new Date(),
-          created_by: req.user._id,
-          updated_by: req.user._id,
-          status: 'In Progress',
-          production_logs: [
-            {
-              action: 'Start',
-              timestamp: new Date(),
-              user: req.user._id,
-              description: 'Production started',
-            },
-          ],
-        });
+//         const newProduction = new DailyProduction({
+//           work_order: jobOrder.work_order._id,
+//           job_order,
+//           products: schemaProducts,
+//           submitted_by: req.user._id,
+//           started_at: new Date(),
+//           created_by: req.user._id,
+//           updated_by: req.user._id,
+//           status: 'In Progress',
+//           production_logs: [
+//             {
+//               action: 'Start',
+//               timestamp: new Date(),
+//               user: req.user._id,
+//               description: 'Production started',
+//             },
+//           ],
+//         });
 
-        const savedProduction = await newProduction.save();
-        console.log("savedProduction", savedProduction);
+//         const savedProduction = await newProduction.save();
+//         console.log("savedProduction", savedProduction);
 
-        // Start production simulation only for the requested product
-        const productionKey = `${job_order}_${product_id}`;
-        const intervalId = setInterval(
-          () => simulateProductionCount(job_order, product_id),
-          10000
-        );
-        activeProductions.set(productionKey, intervalId);
+//         // Start production simulation only for the requested product
+//         const productionKey = `${job_order}_${product_id}`;
+//         const intervalId = setInterval(
+//           () => simulateProductionCount(job_order, product_id),
+//           10000
+//         );
+//         activeProductions.set(productionKey, intervalId);
 
-        return res.status(201).json({
-          success: true,
-          message: 'Production started successfully.',
-          data: savedProduction,
-        });
-      }
-    } else if (action === 'pause') {
-      if (!dailyProduction) {
-        return res.status(404).json({
-          success: false,
-          message: 'Daily production document not found for this job order and product.',
-        });
-      }
+//         return res.status(201).json({
+//           success: true,
+//           message: 'Production started successfully.',
+//           data: savedProduction,
+//         });
+//       }
+//     } else if (action === 'pause') {
+//       if (!dailyProduction) {
+//         return res.status(404).json({
+//           success: false,
+//           message: 'Daily production document not found for this job order and product.',
+//         });
+//       }
 
-      if (!dailyProduction.started_at) {
-        return res.status(400).json({
-          success: false,
-          message: 'Production has not started for this job order and product.',
-        });
-      }
-      if (dailyProduction.stopped_at) {
-        return res.status(400).json({
-          success: false,
-          message: 'Production already stopped for this job order and product.',
-        });
-      }
-      if (dailyProduction.status === 'Paused') {
-        return res.status(400).json({
-          success: false,
-          message: 'Production is already paused.',
-        });
-      }
+//       if (!dailyProduction.started_at) {
+//         return res.status(400).json({
+//           success: false,
+//           message: 'Production has not started for this job order and product.',
+//         });
+//       }
+//       if (dailyProduction.stopped_at) {
+//         return res.status(400).json({
+//           success: false,
+//           message: 'Production already stopped for this job order and product.',
+//         });
+//       }
+//       if (dailyProduction.status === 'Paused') {
+//         return res.status(400).json({
+//           success: false,
+//           message: 'Production is already paused.',
+//         });
+//       }
 
-      dailyProduction.status = 'Paused';
-      dailyProduction.updated_by = req.user._id;
-      dailyProduction.production_logs.push({
-        action: 'Pause',
-        timestamp: new Date(),
-        user: req.user._id,
-        description: pause_description || 'Production paused',
-      });
+//       dailyProduction.status = 'Paused';
+//       dailyProduction.updated_by = req.user._id;
+//       dailyProduction.production_logs.push({
+//         action: 'Pause',
+//         timestamp: new Date(),
+//         user: req.user._id,
+//         description: pause_description || 'Production paused',
+//       });
 
-      const updatedProduction = await dailyProduction.save();
-      console.log("updatedProduction", updatedProduction);
+//       const updatedProduction = await dailyProduction.save();
+//       console.log("updatedProduction", updatedProduction);
 
-      const productionKey = `${job_order}_${product_id}`;
-      const intervalId = activeProductions.get(productionKey);
-      if (intervalId) {
-        clearInterval(intervalId);
-        activeProductions.delete(productionKey);
-      }
+//       const productionKey = `${job_order}_${product_id}`;
+//       const intervalId = activeProductions.get(productionKey);
+//       if (intervalId) {
+//         clearInterval(intervalId);
+//         activeProductions.delete(productionKey);
+//       }
 
-      return res.status(200).json({
-        success: true,
-        message: 'Production paused successfully for the specified product.',
-        data: updatedProduction,
-      });
-    } else if (action === 'resume') {
-      if (!dailyProduction) {
-        return res.status(404).json({
-          success: false,
-          message: 'Daily production document not found for this job order and product.',
-        });
-      }
+//       return res.status(200).json({
+//         success: true,
+//         message: 'Production paused successfully for the specified product.',
+//         data: updatedProduction,
+//       });
+//     } else if (action === 'resume') {
+//       if (!dailyProduction) {
+//         return res.status(404).json({
+//           success: false,
+//           message: 'Daily production document not found for this job order and product.',
+//         });
+//       }
 
-      if (!dailyProduction.started_at) {
-        return res.status(400).json({
-          success: false,
-          message: 'Production has not started for this job order and product.',
-        });
-      }
-      if (dailyProduction.stopped_at) {
-        return res.status(400).json({
-          success: false,
-          message: 'Production already stopped for this job order and product.',
-        });
-      }
-      if (dailyProduction.status !== 'Paused') {
-        return res.status(400).json({
-          success: false,
-          message: 'Production is not paused.',
-        });
-      }
+//       if (!dailyProduction.started_at) {
+//         return res.status(400).json({
+//           success: false,
+//           message: 'Production has not started for this job order and product.',
+//         });
+//       }
+//       if (dailyProduction.stopped_at) {
+//         return res.status(400).json({
+//           success: false,
+//           message: 'Production already stopped for this job order and product.',
+//         });
+//       }
+//       if (dailyProduction.status !== 'Paused') {
+//         return res.status(400).json({
+//           success: false,
+//           message: 'Production is not paused.',
+//         });
+//       }
 
-      dailyProduction.status = 'In Progress';
-      dailyProduction.updated_by = req.user._id;
-      dailyProduction.production_logs.push({
-        action: 'Resume',
-        timestamp: new Date(),
-        user: req.user._id,
-        description: 'Production resumed',
-      });
+//       dailyProduction.status = 'In Progress';
+//       dailyProduction.updated_by = req.user._id;
+//       dailyProduction.production_logs.push({
+//         action: 'Resume',
+//         timestamp: new Date(),
+//         user: req.user._id,
+//         description: 'Production resumed',
+//       });
 
-      const updatedProduction = await dailyProduction.save();
-      console.log("updatedProduction", updatedProduction);
+//       const updatedProduction = await dailyProduction.save();
+//       console.log("updatedProduction", updatedProduction);
 
-      const productionKey = `${job_order}_${product_id}`;
-      if (!activeProductions.has(productionKey)) {
-        const intervalId = setInterval(
-          () => simulateProductionCount(job_order, product_id),
-          10000
-        );
-        activeProductions.set(productionKey, intervalId);
-      }
+//       const productionKey = `${job_order}_${product_id}`;
+//       if (!activeProductions.has(productionKey)) {
+//         const intervalId = setInterval(
+//           () => simulateProductionCount(job_order, product_id),
+//           10000
+//         );
+//         activeProductions.set(productionKey, intervalId);
+//       }
 
-      return res.status(200).json({
-        success: true,
-        message: 'Production resumed successfully for the specified product.',
-        data: updatedProduction,
-      });
-    } else if (action === 'stop') {
-      if (!dailyProduction) {
-        return res.status(404).json({
-          success: false,
-          message: 'Daily production document not found for this job order and product.',
-        });
-      }
+//       return res.status(200).json({
+//         success: true,
+//         message: 'Production resumed successfully for the specified product.',
+//         data: updatedProduction,
+//       });
+//     } else if (action === 'stop') {
+//       if (!dailyProduction) {
+//         return res.status(404).json({
+//           success: false,
+//           message: 'Daily production document not found for this job order and product.',
+//         });
+//       }
 
-      if (!dailyProduction.started_at) {
-        return res.status(400).json({
-          success: false,
-          message: 'Production has not started for this job order and product.',
-        });
-      }
-      if (dailyProduction.stopped_at) {
-        return res.status(400).json({
-          success: false,
-          message: 'Production already stopped for this job order and product.',
-        });
-      }
+//       if (!dailyProduction.started_at) {
+//         return res.status(400).json({
+//           success: false,
+//           message: 'Production has not started for this job order and product.',
+//         });
+//       }
+//       if (dailyProduction.stopped_at) {
+//         return res.status(400).json({
+//           success: false,
+//           message: 'Production already stopped for this job order and product.',
+//         });
+//       }
 
-      dailyProduction.stopped_at = new Date();
-      dailyProduction.updated_by = req.user._id;
-      dailyProduction.status = 'Pending QC';
-      dailyProduction.production_logs.push({
-        action: 'Stop',
-        timestamp: new Date(),
-        user: req.user._id,
-        description: 'Production stopped',
-      });
+//       dailyProduction.stopped_at = new Date();
+//       dailyProduction.updated_by = req.user._id;
+//       dailyProduction.status = 'Pending QC';
+//       dailyProduction.production_logs.push({
+//         action: 'Stop',
+//         timestamp: new Date(),
+//         user: req.user._id,
+//         description: 'Production stopped',
+//       });
 
-      const updatedProduction = await dailyProduction.save();
-      console.log("updatedProduction", updatedProduction);
+//       const updatedProduction = await dailyProduction.save();
+//       console.log("updatedProduction", updatedProduction);
 
-      const product = dailyProduction.products.find((p) => p.product_id.equals(product_id));
-      const inventory = await Inventory.findOne({
-        work_order: dailyProduction.work_order,
-        product: product_id,
-      });
-      if (inventory) {
-        inventory.produced_quantity = product.achieved_quantity;
-        inventory.updated_by = req.user._id;
-        await inventory.save();
-      }
+//       const product = dailyProduction.products.find((p) => p.product_id.equals(product_id));
+//       const inventory = await Inventory.findOne({
+//         work_order: dailyProduction.work_order,
+//         product: product_id,
+//       });
+//       if (inventory) {
+//         inventory.produced_quantity = product.achieved_quantity;
+//         inventory.updated_by = req.user._id;
+//         await inventory.save();
+//       }
 
-      const productionKey = `${job_order}_${product_id}`;
-      const intervalId = activeProductions.get(productionKey);
-      if (intervalId) {
-        clearInterval(intervalId);
-        activeProductions.delete(productionKey);
-      }
+//       const productionKey = `${job_order}_${product_id}`;
+//       const intervalId = activeProductions.get(productionKey);
+//       if (intervalId) {
+//         clearInterval(intervalId);
+//         activeProductions.delete(productionKey);
+//       }
 
-      return res.status(200).json({
-        success: true,
-        message: 'Production stopped successfully for the specified product.',
-        data: updatedProduction,
-      });
-    }
-  } catch (error) {
-    console.error('Error handling daily production action:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Internal Server Error',
-      error: error.message,
-    });
-  }
-};
+//       return res.status(200).json({
+//         success: true,
+//         message: 'Production stopped successfully for the specified product.',
+//         data: updatedProduction,
+//       });
+//     }
+//   } catch (error) {
+//     console.error('Error handling daily production action:', error);
+//     res.status(500).json({
+//       success: false,
+//       message: 'Internal Server Error',
+//       error: error.message,
+//     });
+//   }
+// };
 
 ///FINAL WAS WORKING BUT CHANGES MADE FOR HABNDELING UNIQUE PRODUCTION=>
 
-const simulateProductionCounts = async (job_order, product_id) => {
+const simulateProductionCounts_19_08_2025 = async (job_order, product_id) => {
   try {
     // console.log("Came in simulated count api###");
 
@@ -2969,7 +3171,7 @@ const simulateProductionCounts = async (job_order, product_id) => {
     console.error(`Error updating achieved_quantity: ${error.message}`);
   }
 };
-export const handleDailyProductionActions = async (req, res) => {
+export const handleDailyProductionActions_19_08_2025 = async (req, res) => {
   console.log("came in production stage");
   try {
     const { action, job_order, product_id, pause_description } = req.body;
@@ -3802,6 +4004,490 @@ export const handleDailyProductionActions_18_08_2025 = async (req, res) => {
         message: 'Production stopped successfully for the specified product.',
         data: updatedProduction,
       });
+    }
+  } catch (error) {
+    console.error('Error handling daily production action:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal Server Error',
+      error: error.message,
+    });
+  }
+};
+
+
+
+
+
+
+
+
+
+
+
+const simulateProductionCounts = async (job_order, product_id, prodId) => {
+  try {
+    // Find the specific DailyProduction document using prodId
+    const dailyProduction = await DailyProduction.findOne({
+      _id: prodId,
+      job_order,
+      'products.product_id': product_id,
+    });
+
+    if (!dailyProduction) {
+      console.error(`DailyProduction not found for _id: ${prodId}, job_order: ${job_order}, product_id: ${product_id}`);
+      return;
+    }
+
+    if (dailyProduction.status === 'Paused') {
+      console.log(`Production is paused for _id: ${prodId}, job_order: ${job_order}, product_id: ${product_id}`);
+      return;
+    }
+
+    if (dailyProduction.status === 'Pending QC') {
+      console.log(`Production already stopped for _id: ${prodId}, job_order: ${job_order}, product_id: ${product_id}`);
+      return;
+    }
+
+    // Find the JobOrder to get the planned_quantity
+    const jobOrder = await JobOrder.findById(job_order);
+    if (!jobOrder) {
+      console.error(`JobOrder not found for job_order: ${job_order}`);
+      return;
+    }
+
+    const jobOrderProduct = jobOrder.products.find((product) =>
+      product.product.equals(product_id)
+    );
+    if (!jobOrderProduct) {
+      console.error(`Product ${product_id} not found in JobOrder ${job_order}`);
+      return;
+    }
+
+    const plannedQuantity = jobOrderProduct.planned_quantity;
+
+    // Find the product in DailyProduction to get the current achieved_quantity
+    const dailyProduct = dailyProduction.products.find((p) =>
+      p.product_id.equals(product_id)
+    );
+    if (!dailyProduct) {
+      console.error(`Product ${product_id} not found in DailyProduction ${dailyProduction._id}`);
+      return;
+    }
+
+    const currentAchievedQuantity = dailyProduct.achieved_quantity;
+    const newAchievedQuantity = currentAchievedQuantity + 1;
+
+    // Check if the new achieved_quantity would exceed the planned_quantity
+    if (newAchievedQuantity > plannedQuantity) {
+      console.log(`Planned quantity reached for _id: ${prodId}, job_order: ${job_order}, product_id: ${product_id}. Stopping production.`);
+
+      // Stop production
+      dailyProduction.status = 'Pending QC';
+      dailyProduction.stopped_at = new Date();
+      dailyProduction.production_logs.push({
+        action: 'Stop',
+        timestamp: new Date(),
+        user: dailyProduction.updated_by,
+        description: 'Production stopped automatically: Planned quantity reached',
+      });
+
+      await dailyProduction.save();
+      console.log(`Production stopped for _id: ${prodId}, job_order: ${job_order}, product_id: ${product_id}`);
+
+      // Update inventory
+      await updateInventory(dailyProduction.work_order, product_id, dailyProduction.updated_by);
+
+      // Clear the production interval
+      const productionKey = `${job_order}_${product_id}_${prodId}`;
+      const intervalId = activeProductions.get(productionKey);
+      if (intervalId) {
+        clearInterval(intervalId);
+        activeProductions.delete(productionKey);
+      }
+
+      return;
+    }
+
+    // Update achieved_quantity
+    dailyProduction.products = dailyProduction.products.map((p) =>
+      p.product_id.equals(product_id)
+        ? { ...p.toObject(), achieved_quantity: newAchievedQuantity }
+        : p
+    );
+
+    await dailyProduction.save();
+    console.log(`Updated achieved_quantity for _id: ${prodId}, job_order: ${job_order}, product_id: ${product_id}`);
+
+    // Update inventory
+    await updateInventory(dailyProduction.work_order, product_id, dailyProduction.updated_by);
+  } catch (error) {
+    console.error(`Error updating achieved_quantity for _id: ${prodId}: ${error.message}`);
+  }
+};
+
+// Helper function to update inventory
+const updateInventory = async (work_order, product_id, updated_by) => {
+  const allDailyProductions = await DailyProduction.find({
+    work_order,
+    'products.product_id': product_id,
+  });
+
+  let totalAchievedQuantity = 0;
+  allDailyProductions.forEach((dp) => {
+    const product = dp.products.find((p) => p.product_id.equals(product_id));
+    if (product) {
+      totalAchievedQuantity += product.achieved_quantity;
+    }
+  });
+
+  const inventory = await Inventory.findOne({
+    work_order,
+    product: product_id,
+  });
+  if (inventory) {
+    inventory.produced_quantity = totalAchievedQuantity;
+    inventory.updated_by = updated_by;
+    await inventory.save();
+  }
+};
+
+export const handleDailyProductionActions = async (req, res) => {
+  try {
+    // const { action, job_order, product_id, pause_description } = req.body;
+
+    const { action, job_order, product_id, prodId, pause_description } = req.body;
+    // if (!['start', 'stop', 'pause', 'resume'].includes(action)) {
+
+
+    if (!['start', 'stop', 'pause', 'resume'].includes(action)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid action. Must be "start", "stop", "pause", or "resume".',
+      });
+    }
+
+    if (!req.user || !req.user._id) {
+      return res.status(401).json({
+        success: false,
+        message: 'Unauthorized: User not authenticated.',
+      });
+    }
+
+    if (!job_order || !product_id) {
+      return res.status(400).json({
+        success: false,
+        message: 'Missing required fields: job_order, product_id.',
+      });
+    }
+
+    const jobOrder = await JobOrder.findById(job_order).populate(
+      'work_order',
+      'work_order_number'
+    );
+    if (!jobOrder) {
+      return res.status(404).json({
+        success: false,
+        message: 'Job order not found.',
+      });
+    }
+
+    const jobOrderProduct = jobOrder.products.find((product) =>
+      product.product.equals(product_id)
+    );
+    if (!jobOrderProduct) {
+      return res.status(400).json({
+        success: false,
+        message: 'Product ID not found in job order.',
+      });
+    }
+
+    const plannedQuantity = jobOrderProduct.planned_quantity;
+
+    let dailyProduction;
+
+    if (action === 'start') {
+      // For 'start', either use provided prodId or create a new DailyProduction
+      if (prodId) {
+        dailyProduction = await DailyProduction.findOne({
+          _id: prodId,
+          job_order,
+          'products.product_id': product_id,
+        });
+        if (!dailyProduction) {
+          return res.status(404).json({
+            success: false,
+            message: `Daily production not found for prodId: ${prodId}.`,
+          });
+        }
+
+        if (dailyProduction.started_at) {
+          return res.status(400).json({
+            success: false,
+            message: 'Production already started for this daily production.',
+          });
+        }
+
+        // Check achieved_quantity
+        const dailyProduct = dailyProduction.products.find((p) =>
+          p.product_id.equals(product_id)
+        );
+        if (dailyProduct && dailyProduct.achieved_quantity >= plannedQuantity) {
+          return res.status(400).json({
+            success: false,
+            message: 'Cannot start production: Planned quantity already reached.',
+          });
+        }
+
+        dailyProduction.started_at = new Date();
+        dailyProduction.submitted_by = req.user._id;
+        dailyProduction.updated_by = req.user._id;
+        dailyProduction.status = 'In Progress';
+        dailyProduction.production_logs.push({
+          action: 'Start',
+          timestamp: new Date(),
+          user: req.user._id,
+          description: 'Production started',
+        });
+
+        const updatedProduction = await dailyProduction.save();
+
+        // Start production simulation
+        const productionKey = `${job_order}_${product_id}_${prodId}`;
+        if (!activeProductions.has(productionKey)) {
+          const intervalId = setInterval(
+            () => simulateProductionCounts(job_order, product_id, prodId),
+            10000
+          );
+          activeProductions.set(productionKey, intervalId);
+        }
+
+        return res.status(200).json({
+          success: true,
+          message: 'Production started successfully.',
+          data: updatedProduction,
+        });
+      } else {
+        // Create a new DailyProduction
+        const schemaProducts = jobOrder.products
+          .filter((product) => product.product.equals(product_id))
+          .map((product) => ({
+            product_id: product.product,
+            achieved_quantity: 0,
+            rejected_quantity: 0,
+            recycled_quantity: 0,
+          }));
+
+        if (schemaProducts.length === 0) {
+          return res.status(400).json({
+            success: false,
+            message: 'No matching product found to start production.',
+          });
+        }
+
+        const newProduction = new DailyProduction({
+          work_order: jobOrder.work_order._id,
+          job_order,
+          products: schemaProducts,
+          submitted_by: req.user._id,
+          started_at: new Date(),
+          created_by: req.user._id,
+          updated_by: req.user._id,
+          status: 'In Progress',
+          date: new Date(Date.UTC(
+            new Date().getUTCFullYear(),
+            new Date().getUTCMonth(),
+            new Date().getUTCDate()
+          )),
+          production_logs: [
+            {
+              action: 'Start',
+              timestamp: new Date(),
+              user: req.user._id,
+              description: 'Production started',
+            },
+          ],
+        });
+
+        const savedProduction = await newProduction.save();
+
+        // Start production simulation
+        const productionKey = `${job_order}_${product_id}_${savedProduction._id}`;
+        const intervalId = setInterval(
+          () => simulateProductionCounts(job_order, product_id, savedProduction._id),
+          10000
+        );
+        activeProductions.set(productionKey, intervalId);
+
+        return res.status(201).json({
+          success: true,
+          message: 'Production started successfully.',
+          data: savedProduction,
+        });
+      }
+    } else {
+      // For pause, resume, stop, prodId is required
+      if (!prodId) {
+        return res.status(400).json({
+          success: false,
+          message: 'prodId is required for pause, resume, or stop actions.',
+        });
+      }
+
+      dailyProduction = await DailyProduction.findOne({
+        _id: prodId,
+        job_order,
+        'products.product_id': product_id,
+      });
+
+      if (!dailyProduction) {
+        return res.status(404).json({
+          success: false,
+          message: `Daily production not found for prodId: ${prodId}.`,
+        });
+      }
+
+      // Check achieved_quantity
+      const dailyProduct = dailyProduction.products.find((p) =>
+        p.product_id.equals(product_id)
+      );
+      if (dailyProduct && dailyProduct.achieved_quantity >= plannedQuantity && action !== 'stop') {
+        return res.status(400).json({
+          success: false,
+          message: 'Cannot perform action: Planned quantity already reached.',
+        });
+      }
+
+      if (action === 'pause') {
+        if (!dailyProduction.started_at) {
+          return res.status(400).json({
+            success: false,
+            message: 'Production has not started for this daily production.',
+          });
+        }
+        if (dailyProduction.stopped_at) {
+          return res.status(400).json({
+            success: false,
+            message: 'Production already stopped for this daily production.',
+          });
+        }
+        if (dailyProduction.status === 'Paused') {
+          return res.status(400).json({
+            success: false,
+            message: 'Production is already paused.',
+          });
+        }
+
+        dailyProduction.status = 'Paused';
+        dailyProduction.updated_by = req.user._id;
+        dailyProduction.production_logs.push({
+          action: 'Pause',
+          timestamp: new Date(),
+          user: req.user._id,
+          description: pause_description || 'Production paused',
+        });
+
+        const updatedProduction = await dailyProduction.save();
+
+        const productionKey = `${job_order}_${product_id}_${prodId}`;
+        const intervalId = activeProductions.get(productionKey);
+        if (intervalId) {
+          clearInterval(intervalId);
+          activeProductions.delete(productionKey);
+        }
+
+        return res.status(200).json({
+          success: true,
+          message: 'Production paused successfully.',
+          data: updatedProduction,
+        });
+      } else if (action === 'resume') {
+        if (!dailyProduction.started_at) {
+          return res.status(400).json({
+            success: false,
+            message: 'Production has not started for this daily production.',
+          });
+        }
+        if (dailyProduction.stopped_at) {
+          return res.status(400).json({
+            success: false,
+            message: 'Production already stopped for this daily production.',
+          });
+        }
+        if (dailyProduction.status !== 'Paused') {
+          return res.status(400).json({
+            success: false,
+            message: 'Production is not paused.',
+          });
+        }
+
+        dailyProduction.status = 'In Progress';
+        dailyProduction.updated_by = req.user._id;
+        dailyProduction.production_logs.push({
+          action: 'Resume',
+          timestamp: new Date(),
+          user: req.user._id,
+          description: 'Production resumed',
+        });
+
+        const updatedProduction = await dailyProduction.save();
+
+        const productionKey = `${job_order}_${product_id}_${prodId}`;
+        if (!activeProductions.has(productionKey)) {
+          const intervalId = setInterval(
+            () => simulateProductionCounts(job_order, product_id, prodId),
+            10000
+          );
+          activeProductions.set(productionKey, intervalId);
+        }
+
+        return res.status(200).json({
+          success: true,
+          message: 'Production resumed successfully.',
+          data: updatedProduction,
+        });
+      } else if (action === 'stop') {
+        if (!dailyProduction.started_at) {
+          return res.status(400).json({
+            success: false,
+            message: 'Production has not started for this daily production.',
+          });
+        }
+        if (dailyProduction.stopped_at) {
+          return res.status(400).json({
+            success: false,
+            message: 'Production already stopped for this daily production.',
+          });
+        }
+
+        dailyProduction.stopped_at = new Date();
+        dailyProduction.updated_by = req.user._id;
+        dailyProduction.status = 'Pending QC';
+        dailyProduction.production_logs.push({
+          action: 'Stop',
+          timestamp: new Date(),
+          user: req.user._id,
+          description: 'Production stopped',
+        });
+
+        const updatedProduction = await dailyProduction.save();
+
+        // Update inventory
+        await updateInventory(dailyProduction.work_order, product_id, req.user._id);
+
+        const productionKey = `${job_order}_${product_id}_${prodId}`;
+        const intervalId = activeProductions.get(productionKey);
+        if (intervalId) {
+          clearInterval(intervalId);
+          activeProductions.delete(productionKey);
+        }
+
+        return res.status(200).json({
+          success: true,
+          message: 'Production stopped successfully.',
+          data: updatedProduction,
+        });
+      }
     }
   } catch (error) {
     console.error('Error handling daily production action:', error);

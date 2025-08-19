@@ -486,17 +486,17 @@ export const createJobOrder = async (req, res, next) => {
     }
 
     const dailyProductionPromises = validatedData.products.map(async (product) => {
+      console.log("product",product);
       const schemaProduct = {
         product_id: product.product,
-        // objId: product._id,
+        objId: product._id,
         achieved_quantity: 0,
         rejected_quantity: 0,
         recycled_quantity: 0,
       };
-      console.log("validatedData", validatedData);
+      // console.log("validatedData", validatedData);
 
-      console.log("date", product.scheduled_date
-      );
+      console.log("schemaProduct", schemaProduct);
       // date:new Date(product.scheduled_date),
 
 
