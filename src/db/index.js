@@ -2,7 +2,8 @@ import mongoose from 'mongoose';
 import { Admin } from '../models/admin.model.js';
 import seedAdminData from '../seeders/admin.seeder.js';
 import dotenv from 'dotenv';
-dotenv.config();
+import path from 'path';
+dotenv.config({ path: './.env' });
 
 // const connectDB = async () => {
 //   try {
