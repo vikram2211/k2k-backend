@@ -31,11 +31,11 @@ const WorkOrderSchema = new mongoose.Schema({
         {
             file_name: {
                 type: String,
-                required: true,
+                required: false,
             },
             file_url: {
                 type: String,
-                required: true,
+                required: false,
             },
             uploaded_at: {
                 type: Date,

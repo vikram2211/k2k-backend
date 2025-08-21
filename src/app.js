@@ -14,7 +14,7 @@ const app = express();
 app.use(morgan('combined'));
 // app.use(cors({ origin: process.env.CORS_ORIGIN, credentials: true }));
 // app.use(cors({ origin: ['https://k2k-iot.kods.app', 'http://13.201.103.133'], credentials: true }));
-const allowedOrigins = ['https://k2k-iot.kods.app', 'http://13.201.103.133', 'https://k2k.kods.work'];
+const allowedOrigins = ['https://k2k-iot.kods.app', 'http://13.201.103.133', 'https://k2k.kods.work','http://15.206.247.30'];
 
 app.use(cors({
   origin: function (origin, callback) {

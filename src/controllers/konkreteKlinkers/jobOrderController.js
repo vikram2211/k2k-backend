@@ -489,7 +489,7 @@ export const createJobOrder = async (req, res, next) => {
       console.log("product",product);
       const schemaProduct = {
         product_id: product.product,
-        objId: product._id,
+        // objId: product._id,
         achieved_quantity: 0,
         rejected_quantity: 0,
         recycled_quantity: 0,
