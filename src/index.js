@@ -11,12 +11,40 @@ import errorHandler from './middlewares/errorHandler.js';
 import mongoose from 'mongoose';
 
 const app = express();
+const allowedOrigins = [
+  'https://k2k-iot.kods.app',
+  'http://13.201.103.133',
+  'https://k2k.kods.work',
+  'http://15.206.247.30'
+];
+
+app.use(cors({
+  origin: function(origin, callback) {
+    if (!origin) return callback(null, true); // allow non-browser requests like Postman
+    if (allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    } else {
+      return callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true
+}));
+
+// Handle preflight requests
+app.options('*', cors({
+  origin: function(origin, callback) {
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.includes(origin)) return callback(null, true);
+    return callback(new Error('Not allowed by CORS'));
+  },
+  credentials: true
+}));
 
 
 
 // Middleware setup
 app.use(morgan('combined'));
-app.use(cors({ origin: process.env.CORS_ORIGIN || '*', credentials: true }));
+// app.use(cors({ origin: process.env.CORS_ORIGIN || '*', credentials: true }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
