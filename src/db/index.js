@@ -3,7 +3,9 @@ import { Admin } from '../models/admin.model.js';
 import seedAdminData from '../seeders/admin.seeder.js';
 import dotenv from 'dotenv';
 import path from 'path';
-dotenv.config({ path: './.env' });
+// dotenv.config({ path: './.env' });
+dotenv.config({ path: path.resolve(process.cwd(), '.env') });
+
 
 // const connectDB = async () => {
 //   try {
