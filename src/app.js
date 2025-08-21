@@ -14,46 +14,18 @@ const app = express();
 app.use(morgan('combined'));
 // app.use(cors({ origin: process.env.CORS_ORIGIN, credentials: true }));
 // app.use(cors({ origin: ['https://k2k-iot.kods.app', 'http://13.201.103.133'], credentials: true }));
-const allowedOrigins = [
-  'https://k2k-iot.kods.app',
-  'http://13.201.103.133',
-  'https://k2k.kods.work',
-  'http://15.206.247.30'
-];
-// app.use(cors({
-//   origin: function (origin, callback) {
-//     if (!origin || allowedOrigins.includes(origin)) {
-//       callback(null, true);
-//     } else {
-//       callback(new Error('Not allowed by CORS'));
-//     }
-//   },
-//   credentials: true,
-// }));
+const allowedOrigins = ['https://k2k-iot.kods.app', 'http://13.201.103.133', 'https://k2k.kods.work','http://15.206.247.30'];
 
-
-const corsOptions = {
+app.use(cors({
   origin: function (origin, callback) {
-    // Allow requests with no origin (like Postman)
-    if (!origin) return callback(null, true);
-
-    if (allowedOrigins.includes(origin)) {
-      return callback(null, true);
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
     } else {
-      console.log('Blocked by CORS:', origin);
-      return callback(new Error('Not allowed by CORS'));
+      callback(new Error('Not allowed by CORS'));
     }
   },
   credentials: true,
-  methods: ['GET','POST','PUT','DELETE','OPTIONS'],
-  allowedHeaders: ['Content-Type','Authorization'],
-  optionsSuccessStatus: 200 // for legacy browsers
-};
-
-app.use(cors(corsOptions));
-
-// Handle preflight OPTIONS requests globally
-app.options('*', cors(corsOptions));
+}));
 
 
 app.use(express.json());
