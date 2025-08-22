@@ -14,6 +14,10 @@ import path from 'path';
 import fs from 'fs';
 import { z } from 'zod';
 
+const sanitizeFilename = (filename) => {
+    return filename.replace(/[^a-zA-Z0-9.-]/g, '_');
+};
+
 // const getScannedProductsData = asyncHandler(async (req, res) => {
 //     try {
 //       const qrId = req.query.id;
@@ -46,7 +50,7 @@ const getScannedProductsData = asyncHandler(async (req, res) => {
             return res.status(404).json({ success: false, message: "No packing entry found for QR ID" });
         }
         console.log("packingEntry", packingEntry);
-        
+
         if (packingEntry.delivery_stage !== 'Packed') {
             return res.status(400).json({ success: false, message: "This product has already been dispatched or delivered" });
         }
@@ -486,20 +490,39 @@ const createDispatch = async (req, res, next) => {
         hardware_included: hardware_included,
     }];
 
+    // const files = req.files || [];
+    // let invoiceFileUrls = [];
+    // if (files.length > 0) {
+    //     for (const file of files) {
+    //         const tempFilePath = path.join('./public/temp', file.filename);
+    //         const fileBuffer = fs.readFileSync(tempFilePath);
+    //         const { url } = await putObject(
+    //             { data: fileBuffer, mimetype: file.mimetype },
+    //             `dispatch/${Date.now()}-${file.originalname}`
+    //         );
+    //         invoiceFileUrls.push(url);
+    //         fs.unlinkSync(tempFilePath);
+    //     }
+    // }
+
+
     const files = req.files || [];
     let invoiceFileUrls = [];
     if (files.length > 0) {
         for (const file of files) {
-            const tempFilePath = path.join('./public/temp', file.filename);
-            const fileBuffer = fs.readFileSync(tempFilePath);
-            const { url } = await putObject(
-                { data: fileBuffer, mimetype: file.mimetype },
-                `dispatch/${Date.now()}-${file.originalname}`
-            );
-            invoiceFileUrls.push(url);
-            fs.unlinkSync(tempFilePath);
+            try {
+                const s3Key = `dispatch/${Date.now()}-${sanitizeFilename(file.originalname)}`;
+                const { url } = await putObject(
+                    { data: file.buffer, mimetype: file.mimetype },
+                    s3Key
+                );
+                invoiceFileUrls.push(url);
+            } catch (err) {
+                return next(new ApiError(500, `Failed to upload invoice file: ${err.message}`));
+            }
         }
     }
+
 
     // Create Dispatch Entry
     const dispatchEntry = await falocnDispatch.create({
@@ -868,31 +891,48 @@ const updateFalconDispatch = asyncHandler(async (req, res, next) => {
 
     // 3. Handle file upload to S3 if provided
     let invoiceFileUrls = [];
-    if (files && Array.isArray(files) && files.length > 0) {
+    // if (files && Array.isArray(files) && files.length > 0) {
+    //     for (const file of files) {
+    //         const tempFilePath = path.join('./public/temp', file.filename);
+    //         try {
+    //             const fileBuffer = fs.readFileSync(tempFilePath);
+    //             const s3Path = `dispatch/${Date.now()}-${file.originalname}`;
+    //             const { url } = await putObject(
+    //                 { data: fileBuffer, mimetype: file.mimetype },
+    //                 s3Path
+    //             );
+    //             invoiceFileUrls.push(url);
+    //         } catch (error) {
+    //             return next(new ApiError(500, `Failed to upload invoice file to S3: ${error.message}`));
+    //         } finally {
+    //             try {
+    //                 if (fs.existsSync(tempFilePath)) {
+    //                     fs.unlinkSync(tempFilePath);
+    //                 }
+    //             } catch (error) {
+    //                 console.error(`Failed to delete temp file ${tempFilePath}:`, error);
+    //             }
+    //         }
+    //     }
+    //     updateFields.invoice_file = invoiceFileUrls; // Replace existing array
+    // }
+
+    if (files && files.length > 0) {
         for (const file of files) {
-            const tempFilePath = path.join('./public/temp', file.filename);
             try {
-                const fileBuffer = fs.readFileSync(tempFilePath);
-                const s3Path = `dispatch/${Date.now()}-${file.originalname}`;
+                const s3Key = `dispatch/${Date.now()}-${sanitizeFilename(file.originalname)}`;
                 const { url } = await putObject(
-                    { data: fileBuffer, mimetype: file.mimetype },
-                    s3Path
+                    { data: file.buffer, mimetype: file.mimetype },
+                    s3Key
                 );
                 invoiceFileUrls.push(url);
-            } catch (error) {
-                return next(new ApiError(500, `Failed to upload invoice file to S3: ${error.message}`));
-            } finally {
-                try {
-                    if (fs.existsSync(tempFilePath)) {
-                        fs.unlinkSync(tempFilePath);
-                    }
-                } catch (error) {
-                    console.error(`Failed to delete temp file ${tempFilePath}:`, error);
-                }
+            } catch (err) {
+                return next(new ApiError(500, `Failed to upload invoice file: ${err.message}`));
             }
         }
-        updateFields.invoice_file = invoiceFileUrls; // Replace existing array
+        updateFields.invoice_file = invoiceFileUrls;
     }
+    
 
     // 4. Check if there are fields to update
     if (Object.keys(updateFields).length === 1 && updateFields.updated_by && !invoiceFileUrls.length) {
