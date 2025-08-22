@@ -174,42 +174,73 @@ const createFalconJobOrder = asyncHandler(async (req, res) => {
     const jobOrderId = `JO-${String(counter.sequence_value).padStart(3, '0')}`;
 
     // 5. Handle file uploads
-    const uploadedFiles = [];
-    if (req.files && req.files.length > 0) {
-        try {
-            for (const file of req.files) {
-                const tempFilePath = path.join('./public/temp', file.filename);
-                const fileBuffer = fs.readFileSync(tempFilePath);
-                const sanitizedFilename = sanitizeFilename(file.originalname);
-                console.log('filename', file.originalname);
-                console.log('sanitizedFilename', sanitizedFilename);
+    // const uploadedFiles = [];
+    // if (req.files && req.files.length > 0) {
+    //     try {
+    //         for (const file of req.files) {
+    //             const tempFilePath = path.join('./public/temp', file.filename);
+    //             const fileBuffer = fs.readFileSync(tempFilePath);
+    //             const sanitizedFilename = sanitizeFilename(file.originalname);
+    //             console.log('filename', file.originalname);
+    //             console.log('sanitizedFilename', sanitizedFilename);
 
-                // Upload to S3
-                const { url } = await putObject(
-                    { data: fileBuffer, mimetype: file.mimetype },
-                    `falcon-job-orders/${Date.now()}-${sanitizedFilename}`
-                );
+    //             // Upload to S3
+    //             const { url } = await putObject(
+    //                 { data: fileBuffer, mimetype: file.mimetype },
+    //                 `falcon-job-orders/${Date.now()}-${sanitizedFilename}`
+    //             );
 
-                // Delete temp file
-                fs.unlinkSync(tempFilePath);
+    //             // Delete temp file
+    //             fs.unlinkSync(tempFilePath);
 
-                uploadedFiles.push({
-                    file_name: file.originalname,
-                    file_url: url,
-                    uploaded_at: new Date(),
-                });
-            }
-        } catch (error) {
-            // Cleanup temp files on upload error
-            if (req.files) {
-                req.files.forEach((file) => {
-                    const tempFilePath = path.join('./public/temp', file.filename);
-                    if (fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath);
-                });
-            }
-            throw new ApiError(500, `File upload failed: ${error.message}`);
+    //             uploadedFiles.push({
+    //                 file_name: file.originalname,
+    //                 file_url: url,
+    //                 uploaded_at: new Date(),
+    //             });
+    //         }
+    //     } catch (error) {
+    //         // Cleanup temp files on upload error
+    //         if (req.files) {
+    //             req.files.forEach((file) => {
+    //                 const tempFilePath = path.join('./public/temp', file.filename);
+    //                 if (fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath);
+    //             });
+    //         }
+    //         throw new ApiError(500, `File upload failed: ${error.message}`);
+    //     }
+    // }
+
+
+
+
+        // 5. Handle file uploads
+const uploadedFiles = [];
+if (req.files && req.files.length > 0) {
+    try {
+        for (const file of req.files) {
+            const sanitizedFilename = sanitizeFilename(file.originalname);
+
+            // Upload directly from memory (buffer)
+            const { url } = await putObject(
+                { data: file.buffer, mimetype: file.mimetype },
+                `falcon-job-orders/${Date.now()}-${sanitizedFilename}`
+            );
+
+            uploadedFiles.push({
+                file_name: file.originalname,
+                file_url: url,
+                uploaded_at: new Date(),
+            });
         }
+    } catch (error) {
+        throw new ApiError(500, `File upload failed: ${error.message}`);
     }
+}
+
+
+
+
 
     // 6. Prepare job order data
     const jobOrderData = {
