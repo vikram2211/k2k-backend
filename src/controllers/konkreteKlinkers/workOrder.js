@@ -86,6 +86,13 @@ import { Packing } from '../../models/konkreteKlinkers/packing.model.js';
 
 
 
+const sanitizeFilename = (filename) => {
+  return filename.replace(/[^a-zA-Z0-9.-]/g, '_');
+};
+
+
+
+
 const createWorkOrderSchema = z.object({
   client_id: z.string().refine((val) => !val || mongoose.isValidObjectId(val), {
     message: 'Invalid client ID',
@@ -569,7 +576,7 @@ export const createWorkOrder = async (req, res) => {
   try {
     // 1. Parse form-data
     const bodyData = req.body;
-    console.log("bodyData",bodyData);
+    console.log("bodyData", bodyData);
     const userId = req.user._id.toString();
 
     // 2. Parse stringified fields if needed
@@ -636,27 +643,52 @@ export const createWorkOrder = async (req, res) => {
     );
 
     // 4. Handle file uploads
+    // const uploadedFiles = [];
+    // if (req.files && req.files.length > 0) {
+    //   for (const file of req.files) {
+    //     const tempFilePath = path.join('./public/temp', file.filename);
+    //     const fileBuffer = fs.readFileSync(tempFilePath);
+
+    //     // Upload to S3
+    //     const { url } = await putObject(
+    //       { data: fileBuffer, mimetype: file.mimetype },
+    //       `work-orders/${Date.now()}-${file.originalname}`
+    //     );
+
+    //     // Delete temp file
+    //     fs.unlinkSync(tempFilePath);
+
+    //     uploadedFiles.push({
+    //       file_name: file.originalname,
+    //       file_url: url,
+    //     });
+    //   }
+    // }
+
+
     const uploadedFiles = [];
     if (req.files && req.files.length > 0) {
       for (const file of req.files) {
-        const tempFilePath = path.join('./public/temp', file.filename);
-        const fileBuffer = fs.readFileSync(tempFilePath);
+        try {
+          const s3Key = `work-orders/${Date.now()}-${sanitizeFilename(file.originalname)}`;
+          const { url } = await putObject(
+            { data: file.buffer, mimetype: file.mimetype },
+            s3Key
+          );
 
-        // Upload to S3
-        const { url } = await putObject(
-          { data: fileBuffer, mimetype: file.mimetype },
-          `work-orders/${Date.now()}-${file.originalname}`
-        );
-
-        // Delete temp file
-        fs.unlinkSync(tempFilePath);
-
-        uploadedFiles.push({
-          file_name: file.originalname,
-          file_url: url,
-        });
+          uploadedFiles.push({
+            file_name: file.originalname,
+            file_url: url,
+          });
+        } catch (err) {
+          return res.status(500).json({
+            success: false,
+            message: `File upload failed: ${err.message}`,
+          });
+        }
       }
     }
+
 
     // 5. Prepare and validate data
     const workOrderData = {
@@ -748,23 +780,23 @@ export const createWorkOrder = async (req, res) => {
 export const getWorkOrder = async (req, res) => {
   try {
 
-      // 1. Read pagination params
-      // const page = parseInt(req.query.page) || 1;
-      // const limit = parseInt(req.query.limit) || 10;
-      // const skip = (page - 1) * limit;
-  
-      // // 2. Count total documents
-      // const totalWorkOrders = await WorkOrder.countDocuments({});
+    // 1. Read pagination params
+    // const page = parseInt(req.query.page) || 1;
+    // const limit = parseInt(req.query.limit) || 10;
+    // const skip = (page - 1) * limit;
+
+    // // 2. Count total documents
+    // const totalWorkOrders = await WorkOrder.countDocuments({});
 
 
     const workOrders = await WorkOrder.find()
       .populate('client_id', 'name')
       .populate('project_id', 'name')
       .populate('created_by', 'username');
-      // .skip(skip)
-      // .limit(limit)
-      // .sort({ createdAt: -1 });
-      
+    // .skip(skip)
+    // .limit(limit)
+    // .sort({ createdAt: -1 });
+
     if (!workOrders?.length) {
       return res.status(404).json({
         success: true,
@@ -2127,26 +2159,54 @@ export const updateWorkOrder = async (req, res) => {
     }
 
     // 8. Handle file uploads if provided
+    // if (req.files && req.files.length > 0) {
+    //   const uploadedFiles = [];
+    //   for (const file of req.files) {
+    //     const tempFilePath = path.join("./public/temp", file.filename);
+    //     const fileBuffer = fs.readFileSync(tempFilePath);
+
+    //     const { url } = await putObject(
+    //       { data: fileBuffer, mimetype: file.mimetype },
+    //       `work-orders/${Date.now()}-${file.originalname}`
+    //     );
+
+    //     fs.unlinkSync(tempFilePath);
+
+    //     uploadedFiles.push({
+    //       file_name: file.originalname,
+    //       file_url: url,
+    //     });
+    //   }
+    //   updateData.files = [...existingWorkOrder.files, ...uploadedFiles];
+    // }
+
+
+    // 8. Handle file uploads if provided
     if (req.files && req.files.length > 0) {
       const uploadedFiles = [];
       for (const file of req.files) {
-        const tempFilePath = path.join("./public/temp", file.filename);
-        const fileBuffer = fs.readFileSync(tempFilePath);
+        try {
+          const s3Key = `work-orders/${Date.now()}-${sanitizeFilename(file.originalname)}`;
+          const { url } = await putObject(
+            { data: file.buffer, mimetype: file.mimetype },
+            s3Key
+          );
 
-        const { url } = await putObject(
-          { data: fileBuffer, mimetype: file.mimetype },
-          `work-orders/${Date.now()}-${file.originalname}`
-        );
-
-        fs.unlinkSync(tempFilePath);
-
-        uploadedFiles.push({
-          file_name: file.originalname,
-          file_url: url,
-        });
+          uploadedFiles.push({
+            file_name: file.originalname,
+            file_url: url,
+          });
+        } catch (err) {
+          return res.status(500).json({
+            success: false,
+            message: `File upload failed: ${err.message}`,
+          });
+        }
       }
+
       updateData.files = [...existingWorkOrder.files, ...uploadedFiles];
     }
+
 
     // 9. Check if there's anything to update
     if (Object.keys(updateData).length === 0) {
