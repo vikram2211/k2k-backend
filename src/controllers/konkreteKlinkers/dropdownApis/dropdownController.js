@@ -79,7 +79,7 @@ export const getProductByWorkOrder_18_08_2025 = async (req, res) => {
     }
 };
 
-export const getProductByWorkOrder = async (req, res) => {
+export const getProductByWorkOrder_22_08_2025 = async (req, res) => {
     try {
         // 1. Validate query parameters
         const validatedData = getProductByWorkOrderSchema.parse(req.query);
@@ -176,6 +176,136 @@ export const getProductByWorkOrder = async (req, res) => {
         });
     }
 };
+
+
+export const getProductByWorkOrder = async (req, res) => {
+    try {
+      // 1. Validate query params
+      const validatedData = getProductByWorkOrderSchema.parse(req.query);
+      const { work_order_id } = validatedData;
+  
+      // 2. Fetch WorkOrder with populated products
+      const workOrder = await WorkOrder.findById(work_order_id)
+        .populate({
+          path: "products.product_id",
+          select: "material_code description uom qty_in_bundle isDeleted",
+          match: { isDeleted: false },
+        })
+        .lean();
+  
+      if (!workOrder) {
+        return res.status(404).json({
+          success: false,
+          message: "Work order not found",
+        });
+      }
+  
+      // 3. Get Achieved Quantities (from DailyProduction)
+      const productionAgg = await DailyProduction.aggregate([
+        { $match: { work_order: workOrder._id } },
+        { $unwind: "$products" },
+        {
+          $group: {
+            _id: "$products.product_id",
+            totalAchieved: { $sum: "$products.achieved_quantity" },
+          },
+        },
+      ]);
+      const achievedMap = new Map(
+        productionAgg.map((item) => [item._id.toString(), item.totalAchieved])
+      );
+  
+      // 4. Get Packed Quantities (from Packing)
+      const packingAgg = await Packing.aggregate([
+        {
+          $match: {
+            work_order: workOrder._id,
+            delivery_stage: { $in: ["Packed", "Dispatched"] },
+          },
+        },
+        {
+          $group: {
+            _id: "$product",
+            totalPacked: { $sum: "$product_quantity" },
+          },
+        },
+      ]);
+      const packedMap = new Map(
+        packingAgg.map((item) => [item._id.toString(), item.totalPacked])
+      );
+  
+      // 5. Get Planned Quantities (from JobOrder)
+      const jobOrderAgg = await JobOrder.aggregate([
+        { $match: { work_order: workOrder._id } },
+        { $unwind: "$products" },
+        {
+          $group: {
+            _id: "$products.product",
+            totalPlanned: { $sum: "$products.planned_quantity" },
+          },
+        },
+      ]);
+      console.log("jobOrderAgg",jobOrderAgg);
+      
+      const plannedMap = new Map(
+        jobOrderAgg.map((item) => [item._id.toString(), item.totalPlanned])
+      );
+  
+      // 6. Format response
+      const formattedProducts = workOrder.products
+        .filter((product) => product.product_id)
+        .map((product) => {
+          const productIdStr = product.product_id._id.toString();
+  
+          const achieved = achievedMap.get(productIdStr) || 0;
+          const packed = packedMap.get(productIdStr) || 0;
+          const planned = plannedMap.get(productIdStr) || 0;
+  
+          const available = achieved - packed;
+          const remainingForJobOrder =
+            (product.qty_in_nos || 0) - planned >= 0
+              ? (product.qty_in_nos || 0) - planned
+              : 0;
+  
+          return {
+            product_id: productIdStr,
+            material_code: product.product_id.material_code,
+            description: product.product_id.description,
+            uom: product.uom,
+            po_quantity: product.po_quantity,
+            quantity_in_no: product.qty_in_nos,
+            delivery_date: product.delivery_date || null,
+            available_to_pack: available > 0 ? available : 0,
+            remaining_for_job_order: remainingForJobOrder, // 👈 NEW FIELD
+          };
+        });
+  
+      return res.status(200).json({
+        success: true,
+        message: "Products retrieved successfully",
+        data: formattedProducts,
+      });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({
+          success: false,
+          errors: error.errors.map((err) => ({
+            field: err.path.join("."),
+            message: err.message,
+          })),
+        });
+      }
+  
+      console.error("Error fetching products by work order:", error);
+      return res.status(500).json({
+        success: false,
+        message: "Internal Server Error",
+        error: error.message,
+      });
+    }
+  };
+
+
 
 export const getJobOrdersForDropdown = async (req, res, next) => {
     try {

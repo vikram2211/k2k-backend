@@ -1511,6 +1511,16 @@ export const getJobOrderById = async (req, res) => {
       },
       { $unwind: { path: '$client', preserveNullAndEmptyArrays: true } },
 
+      {
+        $lookup: {
+          from: 'projects',
+          localField: 'work_order.project_id',
+          foreignField: '_id',
+          as: 'project',
+        },
+      },
+      { $unwind: { path: '$project', preserveNullAndEmptyArrays: true } },
+
       // Lookup WorkOrder creator
       {
         $lookup: {
@@ -1750,6 +1760,8 @@ export const getJobOrderById = async (req, res) => {
           },
           client_name: { $ifNull: ['$client.name', 'N/A'] },
           client_address: { $ifNull: ['$client.address', 'N/A'] },
+          project_name: { $ifNull: ['$project.name', 'N/A'] },
+          project_address: { $ifNull: ['$project.address', 'N/A'] },
           work_order_details: {
             _id: '$work_order._id',
             work_order_number: '$work_order.work_order_number',
@@ -1792,6 +1804,10 @@ export const getJobOrderById = async (req, res) => {
           client: {
             name: '$client_name',
             address: '$client_address',
+          },
+          project: {
+            name: '$project_name',
+            address: '$project_address',
           },
         },
       },
