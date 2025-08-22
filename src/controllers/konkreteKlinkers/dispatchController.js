@@ -17,6 +17,11 @@ import { Jimp } from 'jimp';
 import QrCode from 'qrcode-reader';
 
 
+const sanitizeFilename = (filename) => {
+  return filename.replace(/[^a-zA-Z0-9.-]/g, '_');
+};
+
+
 
 
 // ✅ Validation Schema for Dispatch
@@ -121,23 +126,44 @@ export const createDispatch = asyncHandler(async (req, res, next) => {
 
     console.log("file", req.files);
     const files = req.files;
-    let invoiceFileUrls = [];
-    if (files && files.length > 0) {
-      for (const file of files) {
-        const tempFilePath = path.join('./public/temp', file.filename);
-        const fileBuffer = fs.readFileSync(tempFilePath);
+    // let invoiceFileUrls = [];
+    // if (files && files.length > 0) {
+    //   for (const file of files) {
+    //     const tempFilePath = path.join('./public/temp', file.filename);
+    //     const fileBuffer = fs.readFileSync(tempFilePath);
 
-        // Upload to S3
-        const { url } = await putObject(
-            { data: fileBuffer, mimetype: file.mimetype },
-            `dispatch/${Date.now()}-${file.originalname}`
-        );
-        invoiceFileUrls.push(url);
-        // Delete temp file
-        fs.unlinkSync(tempFilePath);
+    //     // Upload to S3
+    //     const { url } = await putObject(
+    //         { data: fileBuffer, mimetype: file.mimetype },
+    //         `dispatch/${Date.now()}-${file.originalname}`
+    //     );
+    //     invoiceFileUrls.push(url);
+    //     // Delete temp file
+    //     fs.unlinkSync(tempFilePath);
 
-        }
+    //     }
+    // }
+
+
+
+
+    // ✅ Handle invoice file uploads (S3 direct, no temp folder)
+let invoiceFileUrls = [];
+if (req.files && req.files.length > 0) {
+  for (const file of req.files) {
+    try {
+      const s3Key = `dispatch/${Date.now()}-${sanitizeFilename(file.originalname)}`;
+      const { url } = await putObject(
+        { data: file.buffer, mimetype: file.mimetype },
+        s3Key
+      );
+      invoiceFileUrls.push(url);
+    } catch (err) {
+      return next(new ApiError(500, `Failed to upload invoice file: ${err.message}`));
     }
+  }
+}
+
 
     // ✅ Create Dispatch Entry
     // const dispatchEntry = await Dispatch.create({
@@ -575,33 +601,57 @@ export const updateDispatch = asyncHandler(async (req, res, next) => {
     };
   
     // 4. Handle file upload to S3 if provided
-    let invoiceFileUrls = [];
-    if (files && Array.isArray(files) && files.length > 0) {
-      for (const file of files) {
-      const tempFilePath = path.join('./public/temp', file.filename);
-      try {
-        const fileBuffer = fs.readFileSync(tempFilePath);
-        const s3Path = `dispatch/${Date.now()}-${file.originalname}`;
-        const { url } = await putObject(
-          { data: fileBuffer, mimetype: file.mimetype },
-          s3Path
-        );
-        invoiceFileUrls.push(url);
-        // updateFields.invoice_file = invoiceFileUrl;
-      } catch (error) {
-        return next(new ApiError(500, `Failed to upload invoice file to S3: ${error.message}`));
-      } finally {
-        try {
-          if (fs.existsSync(tempFilePath)) {
-            fs.unlinkSync(tempFilePath);
-          }
-        } catch (error) {
-          console.error(`Failed to delete temp file ${tempFilePath}:`, error);
-        }
-      }
+    // let invoiceFileUrls = [];
+    // if (files && Array.isArray(files) && files.length > 0) {
+    //   for (const file of files) {
+    //   const tempFilePath = path.join('./public/temp', file.filename);
+    //   try {
+    //     const fileBuffer = fs.readFileSync(tempFilePath);
+    //     const s3Path = `dispatch/${Date.now()}-${file.originalname}`;
+    //     const { url } = await putObject(
+    //       { data: fileBuffer, mimetype: file.mimetype },
+    //       s3Path
+    //     );
+    //     invoiceFileUrls.push(url);
+    //     // updateFields.invoice_file = invoiceFileUrl;
+    //   } catch (error) {
+    //     return next(new ApiError(500, `Failed to upload invoice file to S3: ${error.message}`));
+    //   } finally {
+    //     try {
+    //       if (fs.existsSync(tempFilePath)) {
+    //         fs.unlinkSync(tempFilePath);
+    //       }
+    //     } catch (error) {
+    //       console.error(`Failed to delete temp file ${tempFilePath}:`, error);
+    //     }
+    //   }
+    // }
+    // updateFields.invoice_file = invoiceFileUrls; // Replace existing array
+    // }
+
+
+
+
+    // ✅ Handle invoice file uploads (S3 direct, no temp folder)
+let invoiceFileUrls = [];
+if (req.files && Array.isArray(req.files) && req.files.length > 0) {
+  for (const file of req.files) {
+    try {
+      const s3Key = `dispatch/${Date.now()}-${sanitizeFilename(file.originalname)}`;
+      const { url } = await putObject(
+        { data: file.buffer, mimetype: file.mimetype },
+        s3Key
+      );
+      invoiceFileUrls.push(url);
+    } catch (err) {
+      return next(new ApiError(500, `Failed to upload invoice file to S3: ${err.message}`));
     }
-    updateFields.invoice_file = invoiceFileUrls; // Replace existing array
-    }
+  }
+
+  // Replace old array with new uploaded files
+  updateFields.invoice_file = invoiceFileUrls;
+}
+
   
     // 5. Check if there are fields to update
     if (Object.keys(updateFields).length === 1 && updateFields.updated_by && !invoiceFileUrls.length) {
