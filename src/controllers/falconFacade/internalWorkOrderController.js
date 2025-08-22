@@ -2152,13 +2152,20 @@ const createInternalWorkOrder = asyncHandler(async (req, res) => {
 
                                         if (processFile) {
                                             const processFileName = `internal-work-orders/processes/${Date.now()}-${sanitizeFilename(processFile.originalname)}`;
-                                            const processFileData = {
-                                                data: fs.readFileSync(processFile.path),
-                                                mimetype: processFile.mimetype,
-                                            };
-                                            const processUploadResult = await putObject(processFileData, processFileName);
+                                            // const processFileData = {
+                                            //     data: fs.readFileSync(processFile.path),
+                                            //     mimetype: processFile.mimetype,
+                                            // };
+                                            // const processUploadResult = await putObject(processFileData, processFileName);
+                                            // processFileUrl = processUploadResult.url;
+                                            const processUploadResult = await putObject(
+                                                { data: processFile.buffer, mimetype: processFile.mimetype },
+                                                processFileName
+                                            );
                                             processFileUrl = processUploadResult.url;
+
                                         }
+
 
                                         lastProcess = processName;
                                         return {
@@ -3316,19 +3323,31 @@ const updateInternalWorkOrder_16_07_2025 = asyncHandler(async (req, res) => {
                         const sfFile = filesMap[sfFileField];
 
                         let sfFileUrl = sfDetail.file_url || (internalWorkOrder.products[productIndex]?.semifinished_details[sfIndex]?.file_url);
-                        if (sfFile) {
-                            // console.log("came for sf file");
-                            if (sfFileUrl) {
-                                const oldFileKey = sfFileUrl.split('/').slice(3).join('/');
-                                await deleteObject(oldFileKey);
-                            }
+                        // if (sfFile) {
+                        //     // console.log("came for sf file");
+                        //     if (sfFileUrl) {
+                        //         const oldFileKey = sfFileUrl.split('/').slice(3).join('/');
+                        //         await deleteObject(oldFileKey);
+                        //     }
 
+                        //     const sfFileName = `internal-work-orders/semifinished/${Date.now()}-${sanitizeFilename(sfFile.originalname)}`;
+                        //     const sfFileData = { data: fs.readFileSync(sfFile.path), mimetype: sfFile.mimetype };
+                        //     const sfUploadResult = await putObject(sfFileData, sfFileName);
+                        //     sfFileUrl = sfUploadResult.url;
+                        //     // console.log("sfFileUrl",sfFileUrl);
+                        // }
+
+                        if (sfFile) {
                             const sfFileName = `internal-work-orders/semifinished/${Date.now()}-${sanitizeFilename(sfFile.originalname)}`;
-                            const sfFileData = { data: fs.readFileSync(sfFile.path), mimetype: sfFile.mimetype };
-                            const sfUploadResult = await putObject(sfFileData, sfFileName);
+                            
+                            const sfUploadResult = await putObject(
+                                { data: sfFile.buffer, mimetype: sfFile.mimetype },
+                                sfFileName
+                            );
+                        
                             sfFileUrl = sfUploadResult.url;
-                            // console.log("sfFileUrl",sfFileUrl);
                         }
+                        
 
                         return {
                             semifinished_id: sfDetail.semifinished_id,
