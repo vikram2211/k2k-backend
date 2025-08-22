@@ -376,36 +376,71 @@ const createPackingBundle = asyncHandler(async (req, res) => {
     }
 
     // Handle file uploads once
+    // const uploadedFiles = [];
+    // if (req.files && Array.isArray(req.files) && req.files.length > 0) {
+    //     for (const file of req.files) {
+    //         try {
+    //             const sanitizedFilename = sanitizeFilename(file.originalname);
+    //             const tempFilePath = path.join(tempDir, sanitizedFilename);
+    //             console.log('Temp File Path:', tempFilePath);
+
+    //             if (!fs.existsSync(file.path)) {
+    //                 throw new Error(`File not found at: ${file.path}`);
+    //             }
+
+    //             if (file.path !== tempFilePath) {
+    //                 fs.renameSync(file.path, tempFilePath);
+    //                 console.log(`Moved file from ${file.path} to ${tempFilePath}`);
+    //             }
+
+    //             const fileBuffer = fs.readFileSync(tempFilePath);
+
+    //             const { url } = await putObject(
+    //                 { data: fileBuffer, mimetype: file.mimetype },
+    //                 `falcon-packing/${Date.now()}-${sanitizedFilename}`
+    //             );
+
+    //             try {
+    //                 fs.unlinkSync(tempFilePath);
+    //                 console.log('Deleted temp file:', tempFilePath);
+    //             } catch (unlinkError) {
+    //                 console.error('Failed to delete temp file:', unlinkError.message);
+    //             }
+
+    //             uploadedFiles.push({
+    //                 file_name: file.originalname,
+    //                 file_url: url,
+    //                 uploaded_at: new Date(),
+    //             });
+    //         } catch (error) {
+    //             for (const f of req.files) {
+    //                 const tmp = path.join(tempDir, sanitizeFilename(f.originalname));
+    //                 if (fs.existsSync(tmp)) {
+    //                     try {
+    //                         fs.unlinkSync(tmp);
+    //                         console.log('Cleaned up temp file:', tmp);
+    //                     } catch (err) {
+    //                         console.error('Cleanup error:', err.message);
+    //                     }
+    //                 }
+    //             }
+    //             throw new ApiError(500, `File upload failed: ${error.message}`);
+    //         }
+    //     }
+    // }
+
+
+
     const uploadedFiles = [];
-    if (req.files && Array.isArray(req.files) && req.files.length > 0) {
+    if (req.files && req.files.length > 0) {
         for (const file of req.files) {
             try {
                 const sanitizedFilename = sanitizeFilename(file.originalname);
-                const tempFilePath = path.join(tempDir, sanitizedFilename);
-                console.log('Temp File Path:', tempFilePath);
-
-                if (!fs.existsSync(file.path)) {
-                    throw new Error(`File not found at: ${file.path}`);
-                }
-
-                if (file.path !== tempFilePath) {
-                    fs.renameSync(file.path, tempFilePath);
-                    console.log(`Moved file from ${file.path} to ${tempFilePath}`);
-                }
-
-                const fileBuffer = fs.readFileSync(tempFilePath);
-
+                const s3Key = `falcon-packing/${Date.now()}-${sanitizedFilename}`;
                 const { url } = await putObject(
-                    { data: fileBuffer, mimetype: file.mimetype },
-                    `falcon-packing/${Date.now()}-${sanitizedFilename}`
+                    { data: file.buffer, mimetype: file.mimetype },
+                    s3Key
                 );
-
-                try {
-                    fs.unlinkSync(tempFilePath);
-                    console.log('Deleted temp file:', tempFilePath);
-                } catch (unlinkError) {
-                    console.error('Failed to delete temp file:', unlinkError.message);
-                }
 
                 uploadedFiles.push({
                     file_name: file.originalname,
@@ -413,21 +448,11 @@ const createPackingBundle = asyncHandler(async (req, res) => {
                     uploaded_at: new Date(),
                 });
             } catch (error) {
-                for (const f of req.files) {
-                    const tmp = path.join(tempDir, sanitizeFilename(f.originalname));
-                    if (fs.existsSync(tmp)) {
-                        try {
-                            fs.unlinkSync(tmp);
-                            console.log('Cleaned up temp file:', tmp);
-                        } catch (err) {
-                            console.error('Cleanup error:', err.message);
-                        }
-                    }
-                }
                 throw new ApiError(500, `File upload failed: ${error.message}`);
             }
         }
     }
+
 
     // Now process each packing item
     for (const item of packingItems) {
