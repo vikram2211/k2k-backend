@@ -1,12 +1,18 @@
 import { s3Client } from "./s3-credentials.js";
 import { PutObjectCommand } from "@aws-sdk/client-s3";
 
+console.log("region",process.env.AWS_REGION);
+console.log("accessKey",process.env.AWS_SECRET_KEY);
+console.log("bucket", process.env.AWS_S3_BUCKET);
+
+
 export const putObject = async (file, fileName) => {
     try {
         if (!file || !file.data) {
             throw new Error("File data is missing or empty");
         }
         console.log("bucket", process.env.AWS_S3_BUCKET);
+        console.log("fileName", fileName);
 
         const params = {
             Bucket: process.env.AWS_S3_BUCKET,

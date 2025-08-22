@@ -21,6 +21,7 @@ import { falconProduct } from '../../models/falconFacade/helpers/falconProduct.m
 
 
 
+
 const sendResponse = (res, response) => {
     return res.status(response.statusCode).json({
         statusCode: response.statusCode,
@@ -114,10 +115,10 @@ const createFalconWorkOrder = asyncHandler(async (req, res) => {
         // });
 
         // 2. Parse form-data
-       
-       
-       
-       
+
+
+
+
         const workOrderSchema = Joi.object({
             client_id: Joi.string()
                 .required()
@@ -163,13 +164,13 @@ const createFalconWorkOrder = asyncHandler(async (req, res) => {
                     return value;
                 }, 'ObjectId validation'),
         });
-       
-       
-       
+
+
+
         const bodyData = req.body;
-        console.log("bodyData", bodyData);
+        // console.log("bodyData", bodyData);
         const userId = req.user?._id?.toString();
-        console.log("userId", userId);
+        // console.log("userId", userId);
 
         // Validate userId
         if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
@@ -186,25 +187,58 @@ const createFalconWorkOrder = asyncHandler(async (req, res) => {
         }
 
         // 4. Handle file uploads
+        // const uploadedFiles = [];
+        // if (req.files && req.files.length > 0) {
+        //     try {
+        //         for (const file of req.files) {
+        //             const tempFilePath = path.join('./public/temp', file.filename);
+        //             console.log("tempFilePath",tempFilePath);
+        //             const fileBuffer = fs.readFileSync(tempFilePath);
+        //             const sanitizedFilename = sanitizeFilename(file.originalname);
+        //             console.log("fimename", file.originalname);
+        //             console.log("sanitizedFilename", sanitizedFilename);
+
+
+        //             // Upload to S3
+        //             const { url } = await putObject(
+        //                 { data: fileBuffer, mimetype: file.mimetype },
+        //                 `falcon-work-orders/${Date.now()}-${sanitizedFilename}`
+        //             );
+
+        //             // Delete temp file
+        //             fs.unlinkSync(tempFilePath);
+
+        //             uploadedFiles.push({
+        //                 file_name: file.originalname,
+        //                 file_url: url,
+        //                 uploaded_at: new Date(),
+        //             });
+        //         }
+        //     } catch (error) {
+        //         // Cleanup temp files on upload error
+        //         if (req.files) {
+        //             console.log("file***",req.files);
+        //             req.files.forEach((file) => {
+        //                 const tempFilePath = path.join('./public/temp', file.filename);
+        //                 if (fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath);
+        //             });
+        //         }
+        //         throw new ApiError(500, `File upload failed: ${error.message}`);
+        //     }
+        // }
+
+        // 4. Handle file uploads
         const uploadedFiles = [];
         if (req.files && req.files.length > 0) {
             try {
                 for (const file of req.files) {
-                    const tempFilePath = path.join('./public/temp', file.filename);
-                    const fileBuffer = fs.readFileSync(tempFilePath);
                     const sanitizedFilename = sanitizeFilename(file.originalname);
-                    console.log("fimename", file.originalname);
-                    console.log("sanitizedFilename", sanitizedFilename);
 
-
-                    // Upload to S3
+                    // Upload directly from memory (buffer)
                     const { url } = await putObject(
-                        { data: fileBuffer, mimetype: file.mimetype },
+                        { data: file.buffer, mimetype: file.mimetype },  // no need fs.readFileSync
                         `falcon-work-orders/${Date.now()}-${sanitizedFilename}`
                     );
-
-                    // Delete temp file
-                    fs.unlinkSync(tempFilePath);
 
                     uploadedFiles.push({
                         file_name: file.originalname,
@@ -213,16 +247,10 @@ const createFalconWorkOrder = asyncHandler(async (req, res) => {
                     });
                 }
             } catch (error) {
-                // Cleanup temp files on upload error
-                if (req.files) {
-                    req.files.forEach((file) => {
-                        const tempFilePath = path.join('./public/temp', file.filename);
-                        if (fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath);
-                    });
-                }
                 throw new ApiError(500, `File upload failed: ${error.message}`);
             }
         }
+
 
         // 5. Prepare work order data
         const workOrderData = {
@@ -442,57 +470,57 @@ const updateFalconWorkOrder = asyncHandler(async (req, res) => {
 
 
     // 1. Validation schema (all fields optional except updated_by)
-const productSchema = Joi.object({
-    product_name: Joi.string().messages({ 'string.empty': 'Product name is required' }),
-    sac_code: Joi.string(),
-    uom: Joi.string(),
-    po_quantity: Joi.number().min(0).messages({
-        'number.base': 'PO quantity must be a number',
-        'number.min': 'PO quantity must be non-negative',
-    }),
-});
+    const productSchema = Joi.object({
+        product_name: Joi.string().messages({ 'string.empty': 'Product name is required' }),
+        sac_code: Joi.string(),
+        uom: Joi.string(),
+        po_quantity: Joi.number().min(0).messages({
+            'number.base': 'PO quantity must be a number',
+            'number.min': 'PO quantity must be non-negative',
+        }),
+    });
 
-const fileSchema = Joi.object({
-    file_name: Joi.string().messages({ 'string.empty': 'File name is required' }),
-    file_url: Joi.string().uri().messages({ 'string.uri': 'File URL must be a valid URL' }),
-    uploaded_at: Joi.date().optional(),
-});
+    const fileSchema = Joi.object({
+        file_name: Joi.string().messages({ 'string.empty': 'File name is required' }),
+        file_url: Joi.string().uri().messages({ 'string.uri': 'File URL must be a valid URL' }),
+        uploaded_at: Joi.date().optional(),
+    });
 
-const updateWorkOrderSchema = Joi.object({
-    client_id: Joi.string()
-        .custom((value, helpers) => {
-            if (!mongoose.Types.ObjectId.isValid(value)) {
-                return helpers.error('any.invalid', { message: `Client ID (${value}) is not a valid ObjectId` });
-            }
-            return value;
-        }, 'ObjectId validation'),
-    project_id: Joi.string()
-        .custom((value, helpers) => {
-            if (!mongoose.Types.ObjectId.isValid(value)) {
-                return helpers.error('any.invalid', { message: `Project ID (${value}) is not a valid ObjectId` });
-            }
-            return value;
-        }, 'ObjectId validation'),
-    work_order_number: Joi.string(),
-    date: Joi.date(),
-    remarks: Joi.string(),
-    products: Joi.array().items(productSchema).min(1).messages({
-        'array.min': 'At least one product is required',
-    }),
-    files: Joi.array().items(fileSchema).optional(),
-    existing_files: Joi.array().items(Joi.string()).optional(), // Added to allow existing file IDs
-    status: Joi.string()
-        .valid('Pending', 'In Progress', 'Completed', 'Cancelled')
-        .messages({ 'any.only': 'Status must be Pending, In Progress, Completed, or Cancelled' }),
-    updated_by: Joi.string()
-        .required()
-        .custom((value, helpers) => {
-            if (!mongoose.Types.ObjectId.isValid(value)) {
-                return helpers.error('any.invalid', { message: `Updated by ID (${value}) is not a valid ObjectId` });
-            }
-            return value;
-        }, 'ObjectId validation'),
-});
+    const updateWorkOrderSchema = Joi.object({
+        client_id: Joi.string()
+            .custom((value, helpers) => {
+                if (!mongoose.Types.ObjectId.isValid(value)) {
+                    return helpers.error('any.invalid', { message: `Client ID (${value}) is not a valid ObjectId` });
+                }
+                return value;
+            }, 'ObjectId validation'),
+        project_id: Joi.string()
+            .custom((value, helpers) => {
+                if (!mongoose.Types.ObjectId.isValid(value)) {
+                    return helpers.error('any.invalid', { message: `Project ID (${value}) is not a valid ObjectId` });
+                }
+                return value;
+            }, 'ObjectId validation'),
+        work_order_number: Joi.string(),
+        date: Joi.date(),
+        remarks: Joi.string(),
+        products: Joi.array().items(productSchema).min(1).messages({
+            'array.min': 'At least one product is required',
+        }),
+        files: Joi.array().items(fileSchema).optional(),
+        existing_files: Joi.array().items(Joi.string()).optional(), // Added to allow existing file IDs
+        status: Joi.string()
+            .valid('Pending', 'In Progress', 'Completed', 'Cancelled')
+            .messages({ 'any.only': 'Status must be Pending, In Progress, Completed, or Cancelled' }),
+        updated_by: Joi.string()
+            .required()
+            .custom((value, helpers) => {
+                if (!mongoose.Types.ObjectId.isValid(value)) {
+                    return helpers.error('any.invalid', { message: `Updated by ID (${value}) is not a valid ObjectId` });
+                }
+                return value;
+            }, 'ObjectId validation'),
+    });
 
     // 2. Parse form-data
     const bodyData = req.body;
@@ -758,16 +786,16 @@ const getFalconWorkOrderById = asyncHandler(async (req, res) => {
 
     const systemIds = new Set();
     const productSystemIds = new Set();
-    console.log("internalWorkOrders",internalWorkOrders);
+    console.log("internalWorkOrders", internalWorkOrders);
 
     internalWorkOrders.forEach(iwo => {
         iwo.products.forEach(prod => {
-            console.log("prod",prod);
+            console.log("prod", prod);
             systemIds.add(prod.system?.toString());
             productSystemIds.add(prod.product_system?.toString());
         });
     });
-    console.log("productSystemIds",productSystemIds);
+    console.log("productSystemIds", productSystemIds);
 
     const systemDocs = await falconSystem.find({ _id: { $in: Array.from(systemIds) } }).select('name').lean();
     const productSystemDocs = await falconProductSystem.find({ _id: { $in: Array.from(productSystemIds) } }).select('name').lean();
@@ -906,7 +934,7 @@ const getFalconWorkOrderById = asyncHandler(async (req, res) => {
                     steps
                 });
             }
-            console.log("relatedJobOrder",relatedJobOrder);
+            console.log("relatedJobOrder", relatedJobOrder);
 
 
             jobOrderSemiDetails.push({

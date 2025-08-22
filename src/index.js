@@ -15,7 +15,8 @@ const allowedOrigins = [
   'https://k2k-iot.kods.app',
   'http://13.201.103.133',
   'https://k2k.kods.work',
-  'http://15.206.247.30'
+  'http://15.206.247.30',
+  'http://localhost:5173'
 ];
 
 app.use(cors({

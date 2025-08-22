@@ -1,5 +1,7 @@
 // const { S3Client } = require("@aws-sdk/client-s3");
 import { S3Client } from "@aws-sdk/client-s3";
+console.log("region",process.env.AWS_REGION);
+console.log("accessKey",process.env.AWS_SECRET_KEY);
 export const s3Client = new S3Client({
     region: process.env.AWS_REGION,
     credentials: {

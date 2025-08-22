@@ -37,43 +37,10 @@ const userSchema = new Schema(
   {  timestamps: true }
 );
 
-// userSchema.methods.generateAccessToken = function () {
-//   return jwt.sign(
-//     {
-//       _id: this._id,
-//       phoneNumber: this.phoneNumber,
-//       fullName: this.fullName,
-//     },
-//     process.env.ACCESS_TOKEN_SECRET,
-//     {
-//       expiresIn: process.env.ACCESS_TOKEN_EXPIRY,
-//     }
-//   );
-// };
-// userSchema.methods.generateRefreshToken = function () {
-//   return jwt.sign(
-//     {
-//       _id: this._id,
-//     },
-//     process.env.REFRESH_TOKEN_SECRET,
-//     {
-//       expiresIn: process.env.REFRESH_TOKEN_EXPIRY,
-//     }
-//   );
-// };
-
-// export const User = mongoose.model("User", userSchema);
 
 
-// {
-//   "_id": "userId1",
-//   "name": "John Doe",
-//   "email": "john@example.com",
-//   "role": "Admin",
-//   "permissions": ["createWorkOrders", "manageInventory", "viewReports"],
-//   "createdAt": "2024-12-30",
-//   "updatedAt": "2024-12-30"
-// }
+
+
 
 
 userSchema.pre("save", async function (next) {
