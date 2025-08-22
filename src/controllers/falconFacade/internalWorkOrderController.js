@@ -4268,16 +4268,30 @@ const updateInternalWorkOrder = asyncHandler(async (req, res) => {
                             const oldFileKey = sfFileUrl.split('/').slice(3).join('/');
                             await deleteObject(oldFileKey);
                             sfFileUrl = undefined;
-                        } else if (sfFile) {
-                            if (sfFileUrl) {
-                                const oldFileKey = sfFileUrl.split('/').slice(3).join('/');
-                                await deleteObject(oldFileKey);
-                            }
-                            const sfFileName = `internal-work-orders/semifinished/${Date.now()}-${sanitizeFilename(sfFile.originalname)}`;
-                            const sfFileData = { data: fs.readFileSync(sfFile.path), mimetype: sfFile.mimetype };
-                            const sfUploadResult = await putObject(sfFileData, sfFileName);
-                            sfFileUrl = sfUploadResult.url;
+                        } 
+                        // else if (sfFile) {
+                        //     if (sfFileUrl) {
+                        //         const oldFileKey = sfFileUrl.split('/').slice(3).join('/');
+                        //         await deleteObject(oldFileKey);
+                        //     }
+                        //     const sfFileName = `internal-work-orders/semifinished/${Date.now()}-${sanitizeFilename(sfFile.originalname)}`;
+                        //     const sfFileData = { data: fs.readFileSync(sfFile.path), mimetype: sfFile.mimetype };
+                        //     const sfUploadResult = await putObject(sfFileData, sfFileName);
+                        //     sfFileUrl = sfUploadResult.url;
+                        // }
+                    else if (sfFile) {
+                        if (sfFileUrl) {
+                            const oldFileKey = sfFileUrl.split('/').slice(3).join('/');
+                            await deleteObject(oldFileKey);
                         }
+                        const sfFileName = `internal-work-orders/semifinished/${Date.now()}-${sanitizeFilename(sfFile.originalname)}`;
+                        const sfUploadResult = await putObject(
+                            { data: sfFile.buffer, mimetype: sfFile.mimetype },
+                            sfFileName
+                        );
+                        sfFileUrl = sfUploadResult.url;
+                    }
+                    
 
                         return {
                             semifinished_id: sfDetail.semifinished_id,
@@ -4296,14 +4310,27 @@ const updateInternalWorkOrder = asyncHandler(async (req, res) => {
                                     const oldFileKey = processFileUrl.split('/').slice(3).join('/');
                                     await deleteObject(oldFileKey);
                                     processFileUrl = undefined;
-                                } else if (processFile) {
+                                } 
+                                // else if (processFile) {
+                                //     if (processFileUrl) {
+                                //         const oldFileKey = processFileUrl.split('/').slice(3).join('/');
+                                //         await deleteObject(oldFileKey);
+                                //     }
+                                //     const processFileName = `internal-work-orders/processes/${Date.now()}-${sanitizeFilename(processFile.originalname)}`;
+                                //     const processFileData = { data: fs.readFileSync(processFile.path), mimetype: processFile.mimetype };
+                                //     const processUploadResult = await putObject(processFileData, processFileName);
+                                //     processFileUrl = processUploadResult.url;
+                                // }
+                                else if (processFile) {
                                     if (processFileUrl) {
                                         const oldFileKey = processFileUrl.split('/').slice(3).join('/');
                                         await deleteObject(oldFileKey);
                                     }
                                     const processFileName = `internal-work-orders/processes/${Date.now()}-${sanitizeFilename(processFile.originalname)}`;
-                                    const processFileData = { data: fs.readFileSync(processFile.path), mimetype: processFile.mimetype };
-                                    const processUploadResult = await putObject(processFileData, processFileName);
+                                    const processUploadResult = await putObject(
+                                        { data: processFile.buffer, mimetype: processFile.mimetype },
+                                        processFileName
+                                    );
                                     processFileUrl = processUploadResult.url;
                                 }
 
