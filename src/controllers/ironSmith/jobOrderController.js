@@ -596,15 +596,15 @@ const createIronJobOrder = asyncHandler(async (req, res) => {
       const file = { data: qrCodeBuffer, mimetype: 'image/png' };
       let qrCodeUrl;
       try {
-        // const { url } = await putObject(file, fileName);
-        // qrCodeUrl = url;
+        const { url } = await putObject(file, fileName);
+        qrCodeUrl = url;
       } catch (error) {
         throw new ApiError(500, `Failed to upload QR code to S3 for ${qrCodeId}: ${error.message}`);
       }
       return {
         ...product,
         qr_code_id: qrCodeId,
-        // qr_code_url: qrCodeUrl,
+        qr_code_url: qrCodeUrl,
         schedule_date: product.schedule_date ? new Date(product.schedule_date) : undefined,
         selected_machines: product.selected_machines || [],
       };
