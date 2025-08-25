@@ -386,47 +386,79 @@ const createIronWorkOrder = asyncHandler(async (req, res) => {
     }
 
     // 4. Handle file uploads (unchanged)
-    const uploadedFiles = [];
-    if (req.files && req.files.length > 0) {
-        try {
-            for (const file of req.files) {
-                const tempFilePath = path.join('./public/temp', file.filename);
-                const fileBuffer = fs.readFileSync(tempFilePath);
-                const sanitizedFilename = sanitizeFilename(file.originalname);
+    // const uploadedFiles = [];
+    // if (req.files && req.files.length > 0) {
+    //     try {
+    //         for (const file of req.files) {
+    //             const tempFilePath = path.join('./public/temp', file.filename);
+    //             const fileBuffer = fs.readFileSync(tempFilePath);
+    //             const sanitizedFilename = sanitizeFilename(file.originalname);
 
-                const maxFileSize = 5 * 1024 * 1024; // 5MB
-                if (file.size > maxFileSize) {
-                    fs.unlinkSync(tempFilePath);
-                    throw new ApiError(400, `File ${file.originalname} exceeds maximum size of 5MB`);
-                }
+    //             const maxFileSize = 5 * 1024 * 1024; // 5MB
+    //             if (file.size > maxFileSize) {
+    //                 fs.unlinkSync(tempFilePath);
+    //                 throw new ApiError(400, `File ${file.originalname} exceeds maximum size of 5MB`);
+    //             }
 
-                const { url } = await putObject(
-                    { data: fileBuffer, mimetype: file.mimetype },
-                    `iron-work-orders/${Date.now()}-${sanitizedFilename}`
-                );
+    //             const { url } = await putObject(
+    //                 { data: fileBuffer, mimetype: file.mimetype },
+    //                 `iron-work-orders/${Date.now()}-${sanitizedFilename}`
+    //             );
 
-                try {
-                    fs.unlinkSync(tempFilePath);
-                } catch (error) {
-                    console.error(`Failed to delete temp file ${tempFilePath}:`, error);
-                }
+    //             try {
+    //                 fs.unlinkSync(tempFilePath);
+    //             } catch (error) {
+    //                 console.error(`Failed to delete temp file ${tempFilePath}:`, error);
+    //             }
 
-                uploadedFiles.push({
-                    file_name: file.originalname,
-                    file_url: url,
-                    uploaded_at: new Date(),
-                });
+    //             uploadedFiles.push({
+    //                 file_name: file.originalname,
+    //                 file_url: url,
+    //                 uploaded_at: new Date(),
+    //             });
+    //         }
+    //     } catch (error) {
+    //         if (req.files) {
+    //             req.files.forEach((file) => {
+    //                 const tempFilePath = path.join('./public/temp', file.filename);
+    //                 if (fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath);
+    //             });
+    //         }
+    //         throw new ApiError(500, `File upload failed: ${error.message}`);
+    //     }
+    // }
+
+
+
+    // 4. Handle file uploads (directly from memory, no temp folder)
+const uploadedFiles = [];
+if (req.files && req.files.length > 0) {
+    try {
+        for (const file of req.files) {
+            const sanitizedFilename = sanitizeFilename(file.originalname);
+
+            const maxFileSize = 5 * 1024 * 1024; // 5MB
+            if (file.size > maxFileSize) {
+                throw new ApiError(400, `File ${file.originalname} exceeds maximum size of 5MB`);
             }
-        } catch (error) {
-            if (req.files) {
-                req.files.forEach((file) => {
-                    const tempFilePath = path.join('./public/temp', file.filename);
-                    if (fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath);
-                });
-            }
-            throw new ApiError(500, `File upload failed: ${error.message}`);
+
+            // Upload directly to S3 from memory buffer
+            const { url } = await putObject(
+                { data: file.buffer, mimetype: file.mimetype },
+                `iron-work-orders/${Date.now()}-${sanitizedFilename}`
+            );
+
+            uploadedFiles.push({
+                file_name: file.originalname,
+                file_url: url,
+                uploaded_at: new Date(),
+            });
         }
+    } catch (error) {
+        throw new ApiError(500, `File upload failed: ${error.message}`);
     }
+}
+
 
     // 5. Prepare work order data
     const workOrderData = {
@@ -1756,40 +1788,76 @@ const updateIronWorkOrder = asyncHandler(async (req, res) => {
     }
 
     // Handle file uploads
-    const newFiles = [];
-    if (req.files && req.files.length > 0) {
-        for (const file of req.files) {
-            const tempPath = path.join('./public/temp', file.filename);
-            const buffer = fs.readFileSync(tempPath);
-            const sanitized = sanitizeFilename(file.originalname);
+    // const newFiles = [];
+    // if (req.files && req.files.length > 0) {
+    //     for (const file of req.files) {
+    //         const tempPath = path.join('./public/temp', file.filename);
+    //         const buffer = fs.readFileSync(tempPath);
+    //         const sanitized = sanitizeFilename(file.originalname);
 
-            if (file.size > 5 * 1024 * 1024) {
-                fs.unlinkSync(tempPath);
-                throw new ApiError(400, `${file.originalname} exceeds 5MB`);
-            }
+    //         if (file.size > 5 * 1024 * 1024) {
+    //             fs.unlinkSync(tempPath);
+    //             throw new ApiError(400, `${file.originalname} exceeds 5MB`);
+    //         }
 
-            const { url } = await putObject(
-                { data: buffer, mimetype: file.mimetype },
-                `iron-work-orders/${Date.now()}-${sanitized}`
-            );
+    //         const { url } = await putObject(
+    //             { data: buffer, mimetype: file.mimetype },
+    //             `iron-work-orders/${Date.now()}-${sanitized}`
+    //         );
 
-            fs.unlinkSync(tempPath);
+    //         fs.unlinkSync(tempPath);
 
-            newFiles.push({
-                file_name: file.originalname,
-                file_url: url,
-                uploaded_at: new Date(),
-            });
+    //         newFiles.push({
+    //             file_name: file.originalname,
+    //             file_url: url,
+    //             uploaded_at: new Date(),
+    //         });
+    //     }
+
+    //     // Delete old files from S3
+    //     if (existingWorkOrder.files?.length > 0) {
+    //         for (const oldFile of existingWorkOrder.files) {
+    //             const key = oldFile.file_url.split('/').slice(-1)[0];
+    //             await deleteObject(`iron-work-orders/${key}`);
+    //         }
+    //     }
+    // }
+
+
+
+
+    // Handle file uploads (directly from memory, no temp folder)
+const newFiles = [];
+if (req.files && req.files.length > 0) {
+    for (const file of req.files) {
+        const sanitized = sanitizeFilename(file.originalname);
+
+        if (file.size > 5 * 1024 * 1024) {
+            throw new ApiError(400, `${file.originalname} exceeds 5MB`);
         }
 
-        // Delete old files from S3
-        if (existingWorkOrder.files?.length > 0) {
-            for (const oldFile of existingWorkOrder.files) {
-                const key = oldFile.file_url.split('/').slice(-1)[0];
-                await deleteObject(`iron-work-orders/${key}`);
-            }
+        // Upload directly from memory buffer
+        const { url } = await putObject(
+            { data: file.buffer, mimetype: file.mimetype },
+            `iron-work-orders/${Date.now()}-${sanitized}`
+        );
+
+        newFiles.push({
+            file_name: file.originalname,
+            file_url: url,
+            uploaded_at: new Date(),
+        });
+    }
+
+    // Delete old files from S3 if completely replacing
+    if (existingWorkOrder.files?.length > 0 && !bodyData.existing_files) {
+        for (const oldFile of existingWorkOrder.files) {
+            const key = oldFile.file_url.split('/').slice(-1)[0];
+            await deleteObject(`iron-work-orders/${key}`);
         }
     }
+}
+
 
     // Handle existing files
     let files = newFiles;

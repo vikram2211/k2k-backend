@@ -19,8 +19,12 @@ const sendResponse = (res, response) => {
   });
 };
 
+const sanitizeFilename = (filename) => {
+  return filename.replace(/[^a-zA-Z0-9.-]/g, '_');
+};
+
 // Create a shape
-const createIronShape = asyncHandler(async (req, res) => {
+const createIronShape_25_08_2025 = asyncHandler(async (req, res) => {
   console.log("Inside iron shape creation API");
   console.log("Shape creation request:", req.body, req.files);
 
@@ -89,8 +93,80 @@ const createIronShape = asyncHandler(async (req, res) => {
   return sendResponse(res, new ApiResponse(201, shape, 'Shape created successfully'));
 });
 
+
+
+
+
+
+const createIronShape = asyncHandler(async (req, res) => {
+  console.log("Inside iron shape creation API");
+  console.log("Shape creation request:", req.body, req.files);
+
+  // ✅ Validation schema for request body
+  const shapeSchema = Joi.object({
+    dimension: Joi.string().required().messages({ 'string.empty': 'Dimension is required' }),
+    description: Joi.string().required().messages({ 'string.empty': 'Description is required' }),
+    shape_code: Joi.string().required().messages({ 'string.empty': 'Shape code is required' }),
+  });
+
+  const { error, value } = shapeSchema.validate(req.body, { abortEarly: false });
+  if (error) {
+    throw new ApiError(400, 'Validation failed for shape creation', error.details);
+  }
+
+  const { dimension, description, shape_code } = value;
+  const created_by = req.user?._id;
+
+  if (!created_by || !mongoose.Types.ObjectId.isValid(created_by)) {
+    throw new ApiError(400, 'Invalid or missing user ID in request');
+  }
+
+  // ✅ Validate file upload
+  if (!req.files || req.files.length === 0) {
+    throw new ApiError(400, 'At least one file is required');
+  }
+
+  // ✅ Handle file upload directly from memory
+  const uploadedFiles = [];
+  for (const file of req.files) {
+    try {
+      const s3Key = `shapes/${Date.now()}-${sanitizeFilename(file.originalname)}`;
+      const { url } = await putObject(
+        { data: file.buffer, mimetype: file.mimetype },
+        s3Key
+      );
+
+      uploadedFiles.push({
+        file_name: file.originalname,
+        file_url: url,
+      });
+    } catch (err) {
+      throw new ApiError(500, `Failed to upload shape file: ${err.message}`);
+    }
+  }
+
+  // Use the first uploaded file (assuming single file upload for now)
+  const fileData = uploadedFiles[0];
+
+  // ✅ Create shape
+  const shape = await ironShape.create({
+    dimension,
+    description,
+    shape_code,
+    file: fileData,
+    created_by,
+    isDeleted: false,
+  });
+
+  return sendResponse(res, new ApiResponse(201, shape, 'Shape created successfully'));
+});
+
+
+
+
+
 // Update a shape
-const updateIronShape = asyncHandler(async (req, res) => {
+const updateIronShape_25_08_2025 = asyncHandler(async (req, res) => {
     // Validation schema
     const shapeSchema = Joi.object({
       dimension: Joi.string().optional().allow('').messages({ 'string.empty': 'Dimension cannot be empty' }),
@@ -177,6 +253,91 @@ const updateIronShape = asyncHandler(async (req, res) => {
     // Send response
     return sendResponse(res, new ApiResponse(200, formattedShape, 'Shape updated successfully'));
   });
+
+
+  const updateIronShape = asyncHandler(async (req, res) => {
+    // ✅ Validation schema
+    const shapeSchema = Joi.object({
+      dimension: Joi.string().optional().allow('').messages({ 'string.empty': 'Dimension cannot be empty' }),
+      description: Joi.string().optional().allow('').messages({ 'string.empty': 'Description cannot be empty' }),
+      shape_code: Joi.string().optional().allow('').messages({ 'string.empty': 'Shape code cannot be empty' }),
+      created_by: Joi.string()
+        .optional()
+        .custom((value, helpers) => {
+          if (value && !mongoose.Types.ObjectId.isValid(value)) {
+            return helpers.error('any.invalid', { message: `User ID (${value}) is not a valid ObjectId` });
+          }
+          return value;
+        }, 'ObjectId validation'),
+    });
+  
+    console.log("body", req.body);
+  
+    const { error, value } = shapeSchema.validate(req.body, { abortEarly: false });
+    if (error) {
+      throw new ApiError(400, 'Validation failed for shape update', error.details);
+    }
+  
+    const { id: shapeId } = req.params;
+    console.log("id", shapeId);
+  
+    if (!mongoose.Types.ObjectId.isValid(shapeId)) {
+      throw new ApiError(400, `Provided Shape ID (${shapeId}) is not a valid ObjectId`);
+    }
+  
+    // ✅ Prepare update object
+    const updateData = {};
+    if (value.dimension !== undefined) updateData.dimension = value.dimension;
+    if (value.description !== undefined) updateData.description = value.description;
+    if (value.shape_code !== undefined) updateData.shape_code = value.shape_code;
+    if (value.created_by) updateData.created_by = value.created_by;
+  
+    // ✅ Handle file uploads (direct to S3, no temp folder)
+    if (req.files && req.files.length > 0) {
+      const uploadedFiles = [];
+      for (const file of req.files) {
+        try {
+          const s3Key = `shapes/${Date.now()}-${sanitizeFilename(file.originalname)}`;
+          const { url } = await putObject(
+            { data: file.buffer, mimetype: file.mimetype },
+            s3Key
+          );
+  
+          uploadedFiles.push({
+            file_name: file.originalname,
+            file_url: url,
+          });
+        } catch (err) {
+          throw new ApiError(500, `Failed to upload shape file: ${err.message}`);
+        }
+      }
+  
+      updateData.file = uploadedFiles[0]; // if only one file supported
+      // or: updateData.files = uploadedFiles; // if you want multiple files
+    }
+  
+    if (Object.keys(updateData).length === 0) {
+      throw new ApiError(400, 'At least one valid field must be provided for update');
+    }
+  
+    // ✅ Update in DB
+    const shape = await ironShape.findOneAndUpdate(
+      { _id: shapeId, isDeleted: false },
+      updateData,
+      { new: true }
+    )
+      .populate('created_by', 'username email')
+      .lean();
+  
+    if (!shape) {
+      throw new ApiError(404, 'No non-deleted shape found with the given ID');
+    }
+  
+    const formattedShape = formatDateToIST(shape);
+  
+    return sendResponse(res, new ApiResponse(200, formattedShape, 'Shape updated successfully'));
+  });
+  
 
 // Fetch all shapes
 // const getAllIronShapes = asyncHandler(async (req, res) => {

@@ -2080,7 +2080,7 @@ const createInternalWorkOrder = asyncHandler(async (req, res) => {
 
         // Define valid process transitions
         const validTransitions = {
-            '': ['cutting', 'machining'], // Initial processes
+            '': ['cutting', 'machining','assembling'], // Initial processes
             'cutting': ['machining', 'assembling', 'glass fixing / glazing'],
             'machining': ['assembling', 'glass fixing / glazing'],
             'assembling': ['glass fixing / glazing'],
