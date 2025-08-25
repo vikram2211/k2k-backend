@@ -1174,6 +1174,8 @@ const startProduction = asyncHandler(async (req, res) => {
 
         // Fetch production record
         const production = await falconProduction.findById(id);
+        console.log("production",production);
+        
         if (!production) {
             return res.status(404).json({
                 success: false,
