@@ -22,6 +22,8 @@ const qcCheckSchema = new mongoose.Schema(
       ref: 'Product',
       required: true,
     },
+    production_id: { type: mongoose.Schema.Types.ObjectId, ref: 'DailyProduction', required: true },
+
     rejected_quantity: {
       type: Number,
       default: 0, // Defective products identified
