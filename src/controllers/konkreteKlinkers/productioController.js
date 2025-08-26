@@ -5258,6 +5258,7 @@ export const getDowntimeByProduct_26_08_2025 = async (req, res, next) => {
         data: [],
       });
     }
+    dailyProduction.downtime.map((downtime) => console.log(downtime.downtime_start_time));
 
     // Prepare the response with only downtime entries
     const downtimeRecords = dailyProduction.downtime && dailyProduction.downtime.length > 0
@@ -5291,9 +5292,19 @@ export const getDowntimeByProduct_26_08_2025 = async (req, res, next) => {
 
 
 
+// const convertToIST = (date) => {
+//   if (!date) return null;
+//   return new Date(date).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
+// };
+
 const convertToIST = (date) => {
   if (!date) return null;
-  return new Date(date).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
+  const d = new Date(date);
+
+  // Shift the UTC date back to IST without double converting
+  const istOffset = 5.5 * 60; // IST offset in minutes
+  const utc = d.getTime() + d.getTimezoneOffset() * 60000;
+  return new Date(utc + istOffset * 60000).toLocaleString('en-IN');
 };
 
 export const getDowntimeByProduct = async (req, res, next) => {
