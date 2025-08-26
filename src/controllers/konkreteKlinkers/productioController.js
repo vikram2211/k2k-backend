@@ -5304,6 +5304,7 @@ const convertToIST = (date) => {
   // Shift the UTC date back to IST without double converting
   const istOffset = 5.5 * 60; // IST offset in minutes
   const utc = d.getTime() + d.getTimezoneOffset() * 60000;
+  console.log("date",new Date(utc + istOffset * 60000).toLocaleString('en-IN'));
   return new Date(utc + istOffset * 60000).toLocaleString('en-IN');
 };
 
@@ -5346,8 +5347,8 @@ export const getDowntimeByProduct = async (req, res, next) => {
                 : null;
 
             return {
-              start_time: convertToIST(start_time_raw), // ✅ IST conversion
-              end_time: convertToIST(end_time_raw),     // ✅ IST conversion
+              start_time: start_time_raw, // ✅ IST conversion convertToIST(
+              end_time: end_time_raw,     // ✅ IST conversion convertToIST(
               reason: downtime.description || 'N/A',
               total_duration: downtime.minutes != null ? downtime.minutes : null,
               remarks: downtime.remarks || null,
