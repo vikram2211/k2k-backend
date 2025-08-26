@@ -5000,7 +5000,7 @@ export const addDowntime_20_08_2025 = async (req, res, next) => {
   }
 };
 
-export const addDowntime_26_08_2025 = async (req, res, next) => {
+export const addDowntime = async (req, res, next) => {
   try {
     const { prodId, job_order, product_id, description, minutes, remarks, downtime_start_time } = req.body;
 
@@ -5088,7 +5088,7 @@ export const addDowntime_26_08_2025 = async (req, res, next) => {
 
 // import { parse } from 'date-fns';
 
-export const addDowntime = async (req, res, next) => {
+export const addDowntime_26_08_2025 = async (req, res, next) => {
   try {
     const { prodId, job_order, product_id, description, minutes, remarks, downtime_start_time } = req.body;
 
@@ -5231,7 +5231,7 @@ export const getDowntimeByProduct_20_08_2025 = async (req, res, next) => {
 import { formatInTimeZone } from 'date-fns-tz';
 
 
-export const getDowntimeByProduct = async (req, res, next) => {
+export const getDowntimeByProduct_26_08_2025 = async (req, res, next) => {
   try {
     const { prodId, product_id, job_order } = req.query;
 
@@ -5289,6 +5289,72 @@ export const getDowntimeByProduct = async (req, res, next) => {
   }
 };
 
+
+
+const convertToIST = (date) => {
+  if (!date) return null;
+  return new Date(date).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
+};
+
+export const getDowntimeByProduct = async (req, res, next) => {
+  try {
+    const { prodId, product_id, job_order } = req.query;
+
+    // Validate required fields
+    if (!prodId || !product_id || !mongoose.isValidObjectId(product_id)) {
+      return res.status(400).json({ success: false, message: 'Valid prodId and product_id are required' });
+    }
+    if (!job_order || !mongoose.isValidObjectId(job_order)) {
+      return res.status(400).json({ success: false, message: 'Valid job_order is required' });
+    }
+
+    // Fetch DailyProduction document using prodId
+    const dailyProduction = await DailyProduction.findOne({
+      _id: prodId,
+      job_order: job_order,
+      'products.product_id': product_id,
+    }).lean();
+
+    // If no DailyProduction document found
+    if (!dailyProduction) {
+      return res.status(200).json({
+        success: true,
+        message: 'No downtime records found for the specified prodId, product, and job order',
+        data: [],
+      });
+    }
+
+    // Prepare the response with only downtime entries
+    const downtimeRecords =
+      dailyProduction.downtime && dailyProduction.downtime.length > 0
+        ? dailyProduction.downtime.map((downtime) => {
+            const start_time_raw = downtime.downtime_start_time || null;
+            const end_time_raw =
+              start_time_raw && downtime.minutes != null
+                ? addMinutes(new Date(start_time_raw), downtime.minutes)
+                : null;
+
+            return {
+              start_time: convertToIST(start_time_raw), // ✅ IST conversion
+              end_time: convertToIST(end_time_raw),     // ✅ IST conversion
+              reason: downtime.description || 'N/A',
+              total_duration: downtime.minutes != null ? downtime.minutes : null,
+              remarks: downtime.remarks || null,
+              _id: downtime._id,
+            };
+          })
+        : [];
+
+    return res.status(200).json({
+      success: true,
+      message: 'Downtime records fetched successfully',
+      data: downtimeRecords,
+    });
+  } catch (error) {
+    console.error('Error fetching downtime records:', error);
+    return res.status(500).json({ success: false, message: 'Internal Server Error' });
+  }
+};
 
 
 
