@@ -475,10 +475,13 @@ const createPackingBundle = asyncHandler(async (req, res) => {
         // Check achieved_quantity from the last production process
         const lastProduction = await mongoose.model('falconProduction').findOne({
             semifinished_id: value.semi_finished_id,
-        }).sort({ createdAt: -1 }); // Latest record
+        }).sort({'process_sequence.current.index': -1, createdAt: -1 }); // Latest record
+        console.log("lastProduction",lastProduction);
+        console.log("last ach qty",lastProduction.product.achieved_quantity);
+        
 
         if (!lastProduction || lastProduction.product.achieved_quantity <= 0) {
-            throw new ApiError(400, `Cannot create packing bundle for semi_finished_id ${value.semi_finished_id}. Achieved quantity is zero or production record not found.`);
+            throw new ApiError(400, `Cannot create bundle for semi_finished_id ${value.semi_finished_id}as achieved quantity is zero.`);
         }
 
         // Calculate total packed quantity for this semi_finished_id
@@ -1643,152 +1646,306 @@ const getWorkOrderDetails = asyncHandler(async (req, res) => {
             });
         }
 
+        // const jobOrderDetails = await falconJobOrder.aggregate([
+        //     {
+        //         $match: {
+        //             _id: new mongoose.Types.ObjectId(jobOrderId),
+        //             work_order_number: new mongoose.Types.ObjectId(workOrderId)
+        //         }
+        //     },
+        //     {
+        //         $lookup: {
+        //             from: 'falconinternalworkorders',
+        //             let: { job_order_id: '$_id' },
+        //             pipeline: [
+        //                 {
+        //                     $match: {
+        //                         $expr: { $eq: ['$job_order_id', '$$job_order_id'] }
+        //                     }
+        //                 },
+        //                 { $unwind: '$products' },
+        //                 {
+        //                     $project: {
+        //                         _id: 0,
+        //                         product_id: '$products.product',
+        //                         semifinished_id: { $arrayElemAt: ['$products.semifinished_details.semifinished_id', 0] },
+        //                         code: '$products.code'
+        //                     }
+        //                 }
+        //             ],
+        //             as: 'internalWorkOrderDetails'
+        //         }
+        //     },
+        //     {
+        //         $lookup: {
+        //             from: 'falconproductions',
+        //             let: { job_order_id: '$_id' },
+        //             pipeline: [
+        //                 {
+        //                     $match: {
+        //                         $expr: { $eq: ['$job_order', '$$job_order_id'] }
+        //                     }
+        //                 },
+        //                 { $unwind: '$product' },
+        //                 {
+        //                     $project: {
+        //                         _id: 0,
+        //                         product_id: '$product.product_id',
+        //                         semifinished_id: '$semifinished_id',
+        //                         achieved_quantity: '$product.achieved_quantity'
+        //                     }
+        //                 }
+        //             ],
+        //             as: 'productionAggregates'
+        //         }
+        //     },
+        //     {
+        //         $addFields: {
+        //             products: {
+        //                 $map: {
+        //                     input: '$products',
+        //                     as: 'p',
+        //                     in: {
+        //                         $mergeObjects: [
+        //                             '$$p',
+        //                             {
+        //                                 semifinished_ids: {
+        //                                     $map: {
+        //                                         input: {
+        //                                             $filter: {
+        //                                                 input: '$internalWorkOrderDetails',
+        //                                                 as: 'iwo',
+        //                                                 cond: {
+        //                                                     $and: [
+        //                                                         { $eq: ['$$iwo.product_id', '$$p.product'] },
+        //                                                         { $eq: ['$$iwo.code', '$$p.code'] }
+        //                                                     ]
+        //                                                 }
+        //                                             }
+        //                                         },
+        //                                         as: 'm',
+        //                                         in: '$$m.semifinished_id'
+        //                                     }
+        //                                 },
+        //                                 achieved_quantity: {
+        //                                     $let: {
+        //                                         vars: {
+        //                                             matchProd: {
+        //                                                 $filter: {
+        //                                                     input: '$productionAggregates',
+        //                                                     as: 'pa',
+        //                                                     cond: {
+        //                                                         $and: [
+        //                                                             { $eq: ['$$pa.product_id', '$$p.product'] },
+        //                                                             {
+        //                                                                 $in: ['$$pa.semifinished_id',
+        //                                                                     {
+        //                                                                         $map: {
+        //                                                                             input: {
+        //                                                                                 $filter: {
+        //                                                                                     input: '$internalWorkOrderDetails',
+        //                                                                                     as: 'iwo',
+        //                                                                                     cond: {
+        //                                                                                         $and: [
+        //                                                                                             { $eq: ['$$iwo.product_id', '$$p.product'] },
+        //                                                                                             { $eq: ['$$iwo.code', '$$p.code'] }
+        //                                                                                         ]
+        //                                                                                     }
+        //                                                                                 }
+        //                                                                             },
+        //                                                                             as: 'm',
+        //                                                                             in: '$$m.semifinished_id'
+        //                                                                         }
+        //                                                                     }
+        //                                                                 ]
+        //                                                             }
+        //                                                         ]
+        //                                                     }
+        //                                                 }
+        //                                             }
+        //                                         },
+        //                                         in: {
+        //                                             $cond: [
+        //                                                 { $gt: [{ $size: '$$matchProd' }, 0] },
+        //                                                 { $arrayElemAt: ['$$matchProd.achieved_quantity', 0] },
+        //                                                 0
+        //                                             ]
+        //                                         }
+        //                                     }
+        //                                 }
+        //                             }
+        //                         ]
+        //                     }
+        //                 }
+        //             }
+        //         }
+        //     },
+        //     {
+        //         $project: {
+        //             _id: 1,
+        //             job_order_id: 1,
+        //             work_order_number: 1,
+        //             date: 1,
+        //             prod_requset_date: 1,
+        //             prod_requirement_date: 1,
+        //             products: 1
+        //         }
+        //     }
+        // ]);
+
+
+
+
+
         const jobOrderDetails = await falconJobOrder.aggregate([
             {
-                $match: {
-                    _id: new mongoose.Types.ObjectId(jobOrderId),
-                    work_order_number: new mongoose.Types.ObjectId(workOrderId)
-                }
+              $match: {
+                _id: new mongoose.Types.ObjectId(jobOrderId),
+                work_order_number: new mongoose.Types.ObjectId(workOrderId)
+              }
             },
             {
-                $lookup: {
-                    from: 'falconinternalworkorders',
-                    let: { job_order_id: '$_id' },
-                    pipeline: [
-                        {
-                            $match: {
-                                $expr: { $eq: ['$job_order_id', '$$job_order_id'] }
-                            }
-                        },
-                        { $unwind: '$products' },
-                        {
-                            $project: {
-                                _id: 0,
-                                product_id: '$products.product',
-                                semifinished_id: { $arrayElemAt: ['$products.semifinished_details.semifinished_id', 0] },
-                                code: '$products.code'
-                            }
-                        }
-                    ],
-                    as: 'internalWorkOrderDetails'
-                }
-            },
-            {
-                $lookup: {
-                    from: 'falconproductions',
-                    let: { job_order_id: '$_id' },
-                    pipeline: [
-                        {
-                            $match: {
-                                $expr: { $eq: ['$job_order', '$$job_order_id'] }
-                            }
-                        },
-                        { $unwind: '$product' },
-                        {
-                            $project: {
-                                _id: 0,
-                                product_id: '$product.product_id',
-                                semifinished_id: '$semifinished_id',
-                                achieved_quantity: '$product.achieved_quantity'
-                            }
-                        }
-                    ],
-                    as: 'productionAggregates'
-                }
-            },
-            {
-                $addFields: {
-                    products: {
-                        $map: {
-                            input: '$products',
-                            as: 'p',
-                            in: {
-                                $mergeObjects: [
-                                    '$$p',
-                                    {
-                                        semifinished_ids: {
-                                            $map: {
-                                                input: {
-                                                    $filter: {
-                                                        input: '$internalWorkOrderDetails',
-                                                        as: 'iwo',
-                                                        cond: {
-                                                            $and: [
-                                                                { $eq: ['$$iwo.product_id', '$$p.product'] },
-                                                                { $eq: ['$$iwo.code', '$$p.code'] }
-                                                            ]
-                                                        }
-                                                    }
-                                                },
-                                                as: 'm',
-                                                in: '$$m.semifinished_id'
-                                            }
-                                        },
-                                        achieved_quantity: {
-                                            $let: {
-                                                vars: {
-                                                    matchProd: {
-                                                        $filter: {
-                                                            input: '$productionAggregates',
-                                                            as: 'pa',
-                                                            cond: {
-                                                                $and: [
-                                                                    { $eq: ['$$pa.product_id', '$$p.product'] },
-                                                                    {
-                                                                        $in: ['$$pa.semifinished_id',
-                                                                            {
-                                                                                $map: {
-                                                                                    input: {
-                                                                                        $filter: {
-                                                                                            input: '$internalWorkOrderDetails',
-                                                                                            as: 'iwo',
-                                                                                            cond: {
-                                                                                                $and: [
-                                                                                                    { $eq: ['$$iwo.product_id', '$$p.product'] },
-                                                                                                    { $eq: ['$$iwo.code', '$$p.code'] }
-                                                                                                ]
-                                                                                            }
-                                                                                        }
-                                                                                    },
-                                                                                    as: 'm',
-                                                                                    in: '$$m.semifinished_id'
-                                                                                }
-                                                                            }
-                                                                        ]
-                                                                    }
-                                                                ]
-                                                            }
-                                                        }
-                                                    }
-                                                },
-                                                in: {
-                                                    $cond: [
-                                                        { $gt: [{ $size: '$$matchProd' }, 0] },
-                                                        { $arrayElemAt: ['$$matchProd.achieved_quantity', 0] },
-                                                        0
-                                                    ]
-                                                }
-                                            }
-                                        }
-                                    }
-                                ]
-                            }
-                        }
+              $lookup: {
+                from: 'falconinternalworkorders',
+                let: { job_order_id: '$_id' },
+                pipeline: [
+                  {
+                    $match: {
+                      $expr: { $eq: ['$job_order_id', '$$job_order_id'] }
                     }
-                }
+                  },
+                  { $unwind: '$products' },
+                  {
+                    $project: {
+                      _id: 0,
+                      product_id: '$products.product',
+                      semifinished_id: { $arrayElemAt: ['$products.semifinished_details.semifinished_id', 0] },
+                      code: '$products.code'
+                    }
+                  }
+                ],
+                as: 'internalWorkOrderDetails'
+              }
             },
             {
-                $project: {
-                    _id: 1,
-                    job_order_id: 1,
-                    work_order_number: 1,
-                    date: 1,
-                    prod_requset_date: 1,
-                    prod_requirement_date: 1,
-                    products: 1
+              $lookup: {
+                from: 'falconproductions',
+                let: { job_order_id: '$_id' },
+                pipeline: [
+                  {
+                    $match: {
+                      $expr: { $eq: ['$job_order', '$$job_order_id'] }
+                    }
+                  },
+                  {
+                    $sort: {
+                      'process_sequence.current.index': -1,
+                      createdAt: -1
+                    }
+                  },
+                  {
+                    $group: {
+                      _id: {
+                        semifinished_id: '$semifinished_id',
+                        product_id: '$product.product_id'
+                      },
+                      achieved_quantity: { $first: '$product.achieved_quantity' }
+                    }
+                  },
+                  {
+                    $project: {
+                      _id: 0,
+                      semifinished_id: '$_id.semifinished_id',
+                      product_id: '$_id.product_id',
+                      achieved_quantity: 1
+                    }
+                  }
+                ],
+                as: 'lastProcessAchievedQuantities'
+              }
+            },
+            {
+              $addFields: {
+                products: {
+                  $map: {
+                    input: '$products',
+                    as: 'p',
+                    in: {
+                      $mergeObjects: [
+                        '$$p',
+                        {
+                          semifinished_ids: {
+                            $map: {
+                              input: {
+                                $filter: {
+                                  input: '$internalWorkOrderDetails',
+                                  as: 'iwo',
+                                  cond: {
+                                    $and: [
+                                      { $eq: ['$$iwo.product_id', '$$p.product'] },
+                                      { $eq: ['$$iwo.code', '$$p.code'] }
+                                    ]
+                                  }
+                                }
+                              },
+                              as: 'iwo',
+                              in: {
+                                $mergeObjects: [
+                                  { id: '$$iwo.semifinished_id' },
+                                  {
+                                    achieved_quantity: {
+                                      $let: {
+                                        vars: {
+                                          lastProcess: {
+                                            $arrayElemAt: [
+                                              {
+                                                $filter: {
+                                                  input: '$lastProcessAchievedQuantities',
+                                                  as: 'lpaq',
+                                                  cond: {
+                                                    $and: [
+                                                      { $eq: ['$$lpaq.semifinished_id', '$$iwo.semifinished_id'] },
+                                                      { $eq: ['$$lpaq.product_id', '$$p.product'] }
+                                                    ]
+                                                  }
+                                                }
+                                              },
+                                              0
+                                            ]
+                                          }
+                                        },
+                                        in: {
+                                          $ifNull: ['$$lastProcess.achieved_quantity', 0]
+                                        }
+                                      }
+                                    }
+                                  }
+                                ]
+                              }
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  }
                 }
+              }
+            },
+            {
+              $project: {
+                _id: 1,
+                job_order_id: 1,
+                work_order_number: 1,
+                date: 1,
+                prod_requset_date: 1,
+                prod_requirement_date: 1,
+                products: 1
+              }
             }
-        ]);
+          ]);
+          
+
+
 
         if (!jobOrderDetails.length) {
             return res.status(404).json({
