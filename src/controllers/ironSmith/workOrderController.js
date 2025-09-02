@@ -369,17 +369,22 @@ const createIronWorkOrder = asyncHandler(async (req, res) => {
     // 2. Parse form-data
     const bodyData = req.body;
     console.log("bodyData", bodyData);
+    console.log("PRODUCTS", bodyData.products);
+
+    bodyData.products.map((pr)=>pr.dimensions.map((d)=>console.log("dimensions",d)))
     const userId = req.user?._id?.toString();
 
     // Validate userId
     if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
         throw new ApiError(401, 'Invalid or missing user ID in request');
     }
+    console.log("type",typeof bodyData.products);
 
     // 3. Parse stringified fields
     if (typeof bodyData.products === 'string') {
         try {
             bodyData.products = JSON.parse(bodyData.products);
+
         } catch (e) {
             throw new ApiError(400, 'Invalid products JSON format');
         }
@@ -432,6 +437,7 @@ const createIronWorkOrder = asyncHandler(async (req, res) => {
 
     // 4. Handle file uploads (directly from memory, no temp folder)
 const uploadedFiles = [];
+console.log("file",req.files);
 if (req.files && req.files.length > 0) {
     try {
         for (const file of req.files) {
@@ -457,6 +463,13 @@ if (req.files && req.files.length > 0) {
     } catch (error) {
         throw new ApiError(500, `File upload failed: ${error.message}`);
     }
+}
+else if (bodyData.files && Array.isArray(bodyData.files)) {
+    uploadedFiles = bodyData.files.map(f => ({
+        file_name: f.file_name,
+        file_url: f.file_url,   // must be a proper URL if Joi checks
+        uploaded_at: f.uploaded_at ? new Date(f.uploaded_at) : new Date(),
+    }));
 }
 
 
