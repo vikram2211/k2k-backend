@@ -5348,20 +5348,20 @@ export const getDowntimeByProduct = async (req, res, next) => {
               : null;
           console.log("end-time", end_time_raw);
 
-        
-            // Format start_time and end_time to 12-hour format
-            const formatDateTime = (date) => {
-              if (!date) return null;
-              const d = new Date(date);
-              let hours = d.getHours();
-              const minutes = d.getMinutes().toString().padStart(2, '0');
-              const ampm = hours >= 12 ? 'PM' : 'AM';
-              hours = hours % 12;
-              hours = hours ? hours : 12; // Convert 0 to 12 for 12-hour format
-              const formattedTime = `${hours}:${minutes} ${ampm}`;
-              const formattedDate = d.toISOString().split('T')[0];
-              return `${formattedDate} ${formattedTime}`;
-            };
+
+          // Format start_time and end_time to 12-hour format
+          const formatDateTime = (date) => {
+            if (!date) return null;
+            const d = new Date(date);
+            let hours = d.getHours();
+            const minutes = d.getMinutes().toString().padStart(2, '0');
+            const ampm = hours >= 12 ? 'PM' : 'AM';
+            hours = hours % 12;
+            hours = hours ? hours : 12; // Convert 0 to 12 for 12-hour format
+            const formattedTime = `${hours}:${minutes} ${ampm}`;
+            const formattedDate = d.toISOString().split('T')[0];
+            return `${formattedDate} ${formattedTime}`;
+          };
 
 
           return {
