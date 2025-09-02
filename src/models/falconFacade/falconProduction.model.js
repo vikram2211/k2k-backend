@@ -185,6 +185,10 @@ const falconProductionSchema = new mongoose.Schema(
       default: 'Pending',
     },
     remarks: String,
+    invite_qc:{
+      type: Boolean,
+      default: false
+    },
     created_by: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
