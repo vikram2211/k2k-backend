@@ -9,7 +9,7 @@ import { falconClient } from '../../models/falconFacade/helpers/falconClient.mod
 import { falconProject } from '../../models/falconFacade/helpers/falconProject.model.js';
 import mongoose from 'mongoose';
 
-const standaloneQCCheck = asyncHandler(async (req, res) => {
+const standaloneQCCheck_30_08_2025 = asyncHandler(async (req, res) => {
     try {
         const { job_order, product_id, semifinished_id, rejected_quantity, recycled_quantity, remarks } = req.body;
         console.log("product_id", product_id);
@@ -95,6 +95,129 @@ const standaloneQCCheck = asyncHandler(async (req, res) => {
         });
     }
 });
+
+
+
+
+
+const standaloneQCCheck = asyncHandler(async (req, res) => {
+    try {
+        const { productionId } = req.params; // Get productionId from URL params
+        const { rejected_quantity, recycled_quantity, remarks } = req.body;
+        const userId = req.user?._id;
+
+        // Validate inputs
+        if (!productionId || !mongoose.Types.ObjectId.isValid(productionId)) {
+            return res.status(400).json({
+                success: false,
+                message: 'Valid Production ID is required',
+            });
+        }
+        if (typeof rejected_quantity !== 'number' || rejected_quantity < 0) {
+            return res.status(400).json({
+                success: false,
+                message: 'Rejected quantity must be a non-negative number',
+            });
+        }
+        if (typeof recycled_quantity !== 'number' || recycled_quantity < 0) {
+            return res.status(400).json({
+                success: false,
+                message: 'Recycled quantity must be a non-negative number',
+            });
+        }
+        if (!userId) {
+            return res.status(401).json({
+                success: false,
+                message: 'User not authenticated',
+            });
+        }
+
+        // Fetch the production record using productionId
+        const production = await falconProduction.findById(productionId);
+        if (!production) {
+            return res.status(404).json({
+                success: false,
+                message: 'Production record not found',
+            });
+        }
+
+        // Validate rejected_quantity against achieved_quantity
+        if (rejected_quantity > production.product.achieved_quantity) {
+            return res.status(400).json({
+                success: false,
+                message: `Rejected quantity (${rejected_quantity}) cannot exceed achieved quantity (${production.product.achieved_quantity})`,
+            });
+        }
+
+        // Subtract rejected_quantity from achieved_quantity
+        production.product.achieved_quantity -= rejected_quantity;
+
+        // Create a new QC Check record
+        const qcCheck = new falconQCCheck({
+            production: productionId,
+            job_order: production.job_order,
+            product_id: production.product.product_id,
+            semifinished_id: production.semifinished_id,
+            rejected_quantity,
+            recycled_quantity,
+            process_name: production.process_name,
+            remarks,
+            checked_by: userId,
+            updated_by: userId,
+        });
+
+        await qcCheck.save();
+
+        // Aggregate rejected and recycled quantities from all QC checks for this production
+        const qcChecks = await falconQCCheck.find({ production: productionId });
+        const totalRejected = qcChecks.reduce((sum, check) => sum + check.rejected_quantity, 0);
+        const totalRecycled = qcChecks.reduce((sum, check) => sum + check.recycled_quantity, 0);
+
+        // Update production record with aggregated values
+        production.product.rejected_quantity = totalRejected;
+        production.product.recycled_quantity = totalRecycled;
+        production.qc_checked_by = userId;
+        production.updated_by = userId;
+        production.status = rejected_quantity > 0 ? 'Pending QC' : production.status;
+
+        await production.save();
+
+        // Format response
+        return res.status(201).json({
+            success: true,
+            message: 'QC check completed successfully',
+            data: {
+                qc_check_id: qcCheck._id,
+                production_id: production._id,
+                job_order: production.job_order,
+                semifinished_id: production.semifinished_id,
+                product: {
+                    product_id: production.product.product_id,
+                    po_quantity: production.product.po_quantity,
+                    achieved_quantity: production.product.achieved_quantity,
+                    rejected_quantity: production.product.rejected_quantity,
+                    recycled_quantity: production.product.recycled_quantity,
+                },
+                process_name: production.process_name,
+                remarks,
+                checked_by: userId,
+                status: production.status,
+                created_at: qcCheck.createdAt.toISOString(),
+                updated_at: qcCheck.updatedAt.toISOString(),
+            },
+        });
+    } catch (error) {
+        console.error('Error in QC check:', error);
+        return res.status(500).json({
+            success: false,
+            message: 'Error creating QC check: ' + error.message,
+        });
+    }
+});
+
+
+
+
 
 const getAllQCChecks = asyncHandler(async (req, res) => {
     try {
@@ -233,7 +356,7 @@ const getQCCheckDetailsById = asyncHandler(async (req, res) => {
 });
 
 
-const getSemifinishedIds = asyncHandler(async (req, res) => {
+const getSemifinishedIds_30_08_2025 = asyncHandler(async (req, res) => {
     try {
         const { jobOrderId, productId } = req.query;
 
@@ -287,6 +410,66 @@ const getSemifinishedIds = asyncHandler(async (req, res) => {
         });
     }
 })
+
+
+
+
+const getSemifinishedIds = asyncHandler(async (req, res) => {
+    try {
+        const { jobOrderId, productId } = req.query;
+        if (!jobOrderId || !productId) {
+            return res.status(400).json({
+                success: false,
+                message: "Both jobOrderId and productId are required",
+            });
+        }
+
+        const internalWO = await falconInternalWorkOrder.findOne({
+            job_order_id: jobOrderId,
+            "products.product": productId
+        }).lean();
+
+        if (!internalWO) {
+            return res.status(404).json({
+                success: false,
+                message: "Internal Work Order not found",
+            });
+        }
+
+        // Find the specific product entry
+        const matchedProduct = internalWO.products.find(
+            (prod) => prod.product.toString() === productId
+        );
+
+        if (!matchedProduct) {
+            return res.status(404).json({
+                success: false,
+                message: "Product not found in internal work order",
+            });
+        }
+
+        // Extract semifinished_ids and their processes
+        const semifinishedDetails = matchedProduct.semifinished_details.map(
+            (semi) => ({
+                semifinished_id: semi.semifinished_id,
+                processes: semi.processes,
+            })
+        );
+
+        return res.status(200).json({
+            success: true,
+            message: "Semifinished IDs and processes fetched successfully",
+            semifinishedDetails,
+        });
+    } catch (error) {
+        console.error('Error in getSemifinishedIds:', error);
+        return res.status(500).json({
+            success: false,
+            message: 'Error fetching semifinished IDs and processes: ' + error.message,
+        });
+    }
+});
+
 const updateFalconQc = asyncHandler(async (req, res) => {
     try {
         // console.log("came here");
