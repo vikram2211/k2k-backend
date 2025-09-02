@@ -3,7 +3,7 @@ import { Router } from 'express';
 import { verifyJWT } from '../../middlewares/auth.middleware.js';
 import { upload } from '../../middlewares/multer.middleware.js';
 import {
-    getProductionsByProcess, startProduction, productionQCCheck,getProductionById, getProductionProcesses
+    getProductionsByProcess, startProduction, productionQCCheck,getProductionById, getProductionProcesses,updateInvieQc,getProductionsWithInviteQC
 
 } from '../../controllers/falconFacade/falconProductionController.js';
 
@@ -17,5 +17,7 @@ router.patch('/falcon-production/:id/start', startProduction);
 router.patch('/falcon-production/:productionId/qc-check', productionQCCheck);
 router.get('/falcon-production/:productionId', getProductionById);
 router.get('/falcon-production-processes', getProductionProcesses);
+router.put('/invite-qc', updateInvieQc);
+router.get('/invite-qc-by-process', getProductionsWithInviteQC);
 
 export default router;
