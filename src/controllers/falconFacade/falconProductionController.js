@@ -2684,9 +2684,182 @@ const getProductionProcesses = asyncHandler(async (req, res) => {
 
 
 
+const updateInvieQc = asyncHandler(async (req, res) => {
+    const { productionId } = req.query;
+    // 1. Validate input
+    if (!productionId) {
+        return res.status(400).json({
+            success: false,
+            message: "productionId is required",
+        });
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(productionId)) {
+        return res.status(400).json({
+            success: false,
+            message: "Invalid productionId",
+        });
+    }
+
+    // 2. Find and update the record
+    const updatedProduction = await falconProduction.findByIdAndUpdate(
+        productionId,
+        { invite_qc: true },
+        { new: true } // return updated doc
+    );
+
+    if (!updatedProduction) {
+        return res.status(404).json({
+            success: false,
+            message: "Production record not found",
+        });
+    }
+
+    // 3. Send response
+    return res.status(200).json({
+        success: true,
+        message: "Production record updated successfully",
+        data: updatedProduction,
+    });
+});
+
+const getProductionsWithInviteQC = asyncHandler(async (req, res) => {
+    try {
+        // 1. Get the process name from query parameters
+        const { process } = req.query;
+        console.log("process", process);
+        if (!process) {
+            return res.status(400).json({
+                success: false,
+                message: 'Process name is required in query parameters (e.g., ?process=cutting)',
+            });
+        }
+
+        // 2. Validate the process name against allowed values
+        const validProcesses = ['cutting', 'machining', 'assembling', 'glass fixing / glazing'];
+        const processName = process.toLowerCase();
+        if (!validProcesses.includes(processName)) {
+            return res.status(400).json({
+                success: false,
+                message: `Invalid process name. Allowed values are: ${validProcesses.join(', ')}`,
+            });
+        }
+
+        // 3. Query falconProduction with aggregation
+        const productions = await falconProduction.aggregate([
+            // Step 1: Match documents by process_name and invite_qc:true
+            {
+                $match: {
+                    process_name: processName,
+                    invite_qc: true,
+                    'product.product_id': { $exists: true, $ne: null }
+                }
+            },
+            // Step 2: Lookup job order details
+            {
+                $lookup: {
+                    from: 'falconjoborders',
+                    localField: 'job_order',
+                    foreignField: '_id',
+                    as: 'jobOrderDetails'
+                }
+            },
+            { $unwind: { path: '$jobOrderDetails', preserveNullAndEmptyArrays: true } },
+
+            // Step 3: Lookup work order details
+            {
+                $lookup: {
+                    from: 'falconworkorders',
+                    localField: 'jobOrderDetails.work_order_number',
+                    foreignField: '_id',
+                    as: 'workOrderDetails'
+                }
+            },
+            { $unwind: { path: '$workOrderDetails', preserveNullAndEmptyArrays: true } },
+
+            // Step 4: Lookup product details
+            {
+                $lookup: {
+                    from: 'falconproducts',
+                    localField: 'product.product_id',
+                    foreignField: '_id',
+                    as: 'productDetails'
+                }
+            },
+            { $unwind: { path: '$productDetails', preserveNullAndEmptyArrays: true } },
+
+            // Step 5: Lookup created_by details
+            {
+                $lookup: {
+                    from: 'users',
+                    localField: 'created_by',
+                    foreignField: '_id',
+                    as: 'createdByDetails'
+                }
+            },
+            { $unwind: { path: '$createdByDetails', preserveNullAndEmptyArrays: true } },
+
+            // Step 6: Project the desired fields
+            {
+                $project: {
+                    _id: 1,
+                    job_order: '$jobOrderDetails.job_order_id',
+                    work_order_id: '$jobOrderDetails.work_order_number',
+                    work_order_number: '$workOrderDetails.work_order_number',
+                    semifinished_id: 1,
+                    product_id: '$product.product_id',
+                    name: '$productDetails.name',
+                    product: {
+                        product_id: '$product.product_id',
+                        code: '$product.code',
+                        po_quantity: '$product.po_quantity',
+                        achieved_quantity: '$product.achieved_quantity',
+                        rejected_quantity: '$product.rejected_quantity'
+                    },
+                    po_quantity: '$product.po_quantity',
+                    achieved_quantity: '$product.achieved_quantity',
+                    rejected_quantity: '$product.rejected_quantity',
+                    process_name: 1,
+                    invite_qc: 1, // include invite_qc flag
+                    date: 1,
+                    status: 1,
+                    created_by: '$createdByDetails.username',
+                    updated_by: 1,
+                    createdAt: 1,
+                    updatedAt: 1
+                }
+            }
+        ]);
+
+        // 4. Check if any productions were found
+        if (productions.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: `No invited QC production records found for process: ${process}`,
+            });
+        }
+
+        // 5. Return the filtered productions
+        return res.status(200).json({
+            success: true,
+            message: `Production records with invite_qc:true fetched successfully for process: ${process}`,
+            data: formatDateToIST(productions),
+        });
+    } catch (error) {
+        console.log('Error:', error);
+        return res.status(500).json({
+            success: false,
+            message: `Error fetching invited QC production records: ${error.message}`,
+        });
+    }
+});
+
+
+
+
 
 export {
-    getProductionsByProcess, startProduction, productionQCCheck, getProductionById, getProductionProcesses
+    getProductionsByProcess, startProduction, productionQCCheck, getProductionById, getProductionProcesses,updateInvieQc, getProductionsWithInviteQC
 }
 
 // {
