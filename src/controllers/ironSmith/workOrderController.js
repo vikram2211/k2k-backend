@@ -104,7 +104,7 @@ const createIronWorkOrder_04_08_2025 = asyncHandler(async (req, res) => {
 
     // 2. Parse form-data
     const bodyData = req.body;
-    console.log("bodyData",bodyData);
+    console.log("bodyData", bodyData);
     const userId = req.user?._id?.toString();
 
     // Validate userId
@@ -195,7 +195,7 @@ const createIronWorkOrder_04_08_2025 = asyncHandler(async (req, res) => {
                 if (fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath);
             });
         }
-        console.log("errorrrrr",error.details);
+        console.log("errorrrrr", error.details);
         throw new ApiError(400, 'Validation failed for work order creation', error.details);
     }
 
@@ -371,14 +371,14 @@ const createIronWorkOrder = asyncHandler(async (req, res) => {
     console.log("bodyData", bodyData);
     console.log("PRODUCTS", bodyData.products);
 
-    bodyData.products.map((pr)=>pr.dimensions.map((d)=>console.log("dimensions",d)))
+    bodyData.products.map((pr) => pr.dimensions.map((d) => console.log("dimensions", d)))
     const userId = req.user?._id?.toString();
 
     // Validate userId
     if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
         throw new ApiError(401, 'Invalid or missing user ID in request');
     }
-    console.log("type",typeof bodyData.products);
+    console.log("type", typeof bodyData.products);
 
     // 3. Parse stringified fields
     if (typeof bodyData.products === 'string') {
@@ -433,44 +433,86 @@ const createIronWorkOrder = asyncHandler(async (req, res) => {
     //     }
     // }
 
-
+    ///////////////////////////////////////
+    //CORRECT FILE UPLOAD -
 
     // 4. Handle file uploads (directly from memory, no temp folder)
-const uploadedFiles = [];
-console.log("file",req.files);
-if (req.files && req.files.length > 0) {
-    try {
-        for (const file of req.files) {
-            const sanitizedFilename = sanitizeFilename(file.originalname);
+    // const uploadedFiles = [];
+    // console.log("file", req.files);
+    // if (req.files && req.files.length > 0) {
+    //     try {
+    //         for (const file of req.files) {
+    //             const sanitizedFilename = sanitizeFilename(file.originalname);
 
-            const maxFileSize = 5 * 1024 * 1024; // 5MB
-            if (file.size > maxFileSize) {
-                throw new ApiError(400, `File ${file.originalname} exceeds maximum size of 5MB`);
+    //             const maxFileSize = 5 * 1024 * 1024; // 5MB
+    //             if (file.size > maxFileSize) {
+    //                 throw new ApiError(400, `File ${file.originalname} exceeds maximum size of 5MB`);
+    //             }
+
+    //             // Upload directly to S3 from memory buffer
+    //             const { url } = await putObject(
+    //                 { data: file.buffer, mimetype: file.mimetype },
+    //                 `iron-work-orders/${Date.now()}-${sanitizedFilename}`
+    //             );
+
+    //             uploadedFiles.push({
+    //                 file_name: file.originalname,
+    //                 file_url: url,
+    //                 uploaded_at: new Date(),
+    //             });
+    //         }
+    //     } catch (error) {
+    //         throw new ApiError(500, `File upload failed: ${error.message}`);
+    //     }
+    // }
+    // else if (bodyData.files && Array.isArray(bodyData.files)) {
+    //     uploadedFiles = bodyData.files.map(f => ({
+    //         file_name: f.file_name,
+    //         file_url: f.file_url,   // must be a proper URL if Joi checks
+    //         uploaded_at: f.uploaded_at ? new Date(f.uploaded_at) : new Date(),
+    //     }));
+    // }
+
+
+    let uploadedFiles = [];
+    console.log("file", req.files);
+    if (req.files && req.files.length > 0) {
+        try {
+            for (const file of req.files) {
+                const sanitizedFilename = sanitizeFilename(file.originalname);
+
+                const maxFileSize = 5 * 1024 * 1024; // 5MB
+                if (file.size > maxFileSize) {
+                    throw new ApiError(400, `File ${file.originalname} exceeds maximum size of 5MB`);
+                }
+
+                // Upload directly to S3 from memory buffer
+                const { url } = await putObject(
+                    { data: file.buffer, mimetype: file.mimetype },
+                    `iron-work-orders/${Date.now()}-${sanitizedFilename}`
+                );
+
+                uploadedFiles.push({
+                    file_name: file.originalname,
+                    file_url: url,
+                    uploaded_at: new Date(),
+                });
             }
-
-            // Upload directly to S3 from memory buffer
-            const { url } = await putObject(
-                { data: file.buffer, mimetype: file.mimetype },
-                `iron-work-orders/${Date.now()}-${sanitizedFilename}`
-            );
-
-            uploadedFiles.push({
-                file_name: file.originalname,
-                file_url: url,
-                uploaded_at: new Date(),
-            });
+        } catch (error) {
+            throw new ApiError(500, `File upload failed: ${error.message}`);
         }
-    } catch (error) {
-        throw new ApiError(500, `File upload failed: ${error.message}`);
+    } else if (bodyData.files && Array.isArray(bodyData.files)) {
+        // Validate that file_url is a proper URL
+        const fileValidation = Joi.array().items(fileSchema).validate(bodyData.files, { abortEarly: false });
+        if (fileValidation.error) {
+            throw new ApiError(400, 'Invalid file data', fileValidation.error.details);
+        }
+        uploadedFiles = bodyData.files.map(f => ({
+            file_name: f.file_name,
+            file_url: f.file_url,
+            uploaded_at: f.uploaded_at ? new Date(f.uploaded_at) : new Date(),
+        }));
     }
-}
-else if (bodyData.files && Array.isArray(bodyData.files)) {
-    uploadedFiles = bodyData.files.map(f => ({
-        file_name: f.file_name,
-        file_url: f.file_url,   // must be a proper URL if Joi checks
-        uploaded_at: f.uploaded_at ? new Date(f.uploaded_at) : new Date(),
-    }));
-}
 
 
     // 5. Prepare work order data
@@ -788,21 +830,21 @@ else if (bodyData.files && Array.isArray(bodyData.files)) {
 //         'string.base': 'ToDate must be a string',
 //       }),
 //     });
-  
+
 //     // 2. Validate query parameters
 //     const { error, value } = querySchema.validate(req.query, { abortEarly: false });
 //     if (error) {
 //       throw new ApiError(400, 'Invalid query parameters', error.details);
 //     }
-  
+
 //     const { page, limit, sortBy, sortOrder, search, fromDate, toDate } = value;
-  
+
 //     // 3. Validate user authentication
 //     const userId = req.user?._id?.toString();
 //     if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
 //       throw new ApiError(401, 'Invalid or missing user ID in request');
 //     }
-  
+
 //     // 4. Build query
 //     const query = {};
 //     if (search) {
@@ -818,14 +860,14 @@ else if (bodyData.files && Array.isArray(bodyData.files)) {
 //       if (fromDate) query.workOrderDate.$gte = new Date(fromDate);
 //       if (toDate) query.workOrderDate.$lte = new Date(toDate);
 //     }
-  
+
 //     // 5. Calculate pagination
 //     const skip = (page - 1) * limit;
-  
+
 //     // 6. Build sort options
 //     const sortOptions = {};
 //     sortOptions[sortBy] = sortOrder === 'asc' ? 1 : -1;
-  
+
 //     // 7. Fetch work orders with pagination, sorting, and population
 //     const [workOrders, totalCount] = await Promise.all([
 //       ironWorkOrder
@@ -859,7 +901,7 @@ else if (bodyData.files && Array.isArray(bodyData.files)) {
 //         .lean(),
 //       ironWorkOrder.countDocuments(query),
 //     ]);
-  
+
 //     // 8. Format timestamps to IST
 //     const formatDateToIST = (data) => {
 //       const convertToIST = (date) => {
@@ -881,9 +923,9 @@ else if (bodyData.files && Array.isArray(bodyData.files)) {
 //         })),
 //       }));
 //     };
-  
+
 //     const formattedWorkOrders = formatDateToIST(workOrders);
-  
+
 //     // 9. Prepare pagination metadata
 //     const pagination = {
 //       total: totalCount,
@@ -891,7 +933,7 @@ else if (bodyData.files && Array.isArray(bodyData.files)) {
 //       limit,
 //       totalPages: Math.ceil(totalCount / limit),
 //     };
-  
+
 //     // 10. Return response
 //     return res.status(200).json(
 //       new ApiResponse(
@@ -910,33 +952,33 @@ else if (bodyData.files && Array.isArray(bodyData.files)) {
 const getAllIronWorkOrders = asyncHandler(async (req, res) => {
     // 1. Validation schema for query parameters
     const querySchema = Joi.object({
-      sortBy: Joi.string()
-        .valid('workOrderNumber', 'clientId.name', 'projectId.name', 'createdAt', 'updatedAt', 'status')
-        .default('createdAt')
-        .messages({
-          'any.only': 'SortBy must be one of workOrderNumber, clientId.name, projectId.name, createdAt, updatedAt, status',
+        sortBy: Joi.string()
+            .valid('workOrderNumber', 'clientId.name', 'projectId.name', 'createdAt', 'updatedAt', 'status')
+            .default('createdAt')
+            .messages({
+                'any.only': 'SortBy must be one of workOrderNumber, clientId.name, projectId.name, createdAt, updatedAt, status',
+            }),
+        sortOrder: Joi.string()
+            .valid('asc', 'desc')
+            .default('desc')
+            .messages({
+                'any.only': 'SortOrder must be asc or desc',
+            }),
+        search: Joi.string().allow('').default('').messages({
+            'string.base': 'Search must be a string',
         }),
-      sortOrder: Joi.string()
-        .valid('asc', 'desc')
-        .default('desc')
-        .messages({
-          'any.only': 'SortOrder must be asc or desc',
+        fromDate: Joi.string().allow('').default('').messages({
+            'string.base': 'FromDate must be a string',
         }),
-      search: Joi.string().allow('').default('').messages({
-        'string.base': 'Search must be a string',
-      }),
-      fromDate: Joi.string().allow('').default('').messages({
-        'string.base': 'FromDate must be a string',
-      }),
-      toDate: Joi.string().allow('').default('').messages({
-        'string.base': 'ToDate must be a string',
-      }),
+        toDate: Joi.string().allow('').default('').messages({
+            'string.base': 'ToDate must be a string',
+        }),
     });
 
     // 2. Validate query parameters
     const { error, value } = querySchema.validate(req.query, { abortEarly: false });
     if (error) {
-      throw new ApiError(400, 'Invalid query parameters', error.details);
+        throw new ApiError(400, 'Invalid query parameters', error.details);
     }
 
     const { sortBy, sortOrder, search, fromDate, toDate } = value;
@@ -944,23 +986,23 @@ const getAllIronWorkOrders = asyncHandler(async (req, res) => {
     // 3. Validate user authentication
     const userId = req.user?._id?.toString();
     if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
-      throw new ApiError(401, 'Invalid or missing user ID in request');
+        throw new ApiError(401, 'Invalid or missing user ID in request');
     }
 
     // 4. Build query
     const query = {};
     if (search) {
-      query.$or = [
-        { workOrderNumber: { $regex: search, $options: 'i' } },
-        { 'clientId.name': { $regex: search, $options: 'i' } },
-        { 'projectId.name': { $regex: search, $options: 'i' } },
-        { status: { $regex: search, $options: 'i' } },
-      ];
+        query.$or = [
+            { workOrderNumber: { $regex: search, $options: 'i' } },
+            { 'clientId.name': { $regex: search, $options: 'i' } },
+            { 'projectId.name': { $regex: search, $options: 'i' } },
+            { status: { $regex: search, $options: 'i' } },
+        ];
     }
     if (fromDate || toDate) {
-      query.workOrderDate = {};
-      if (fromDate) query.workOrderDate.$gte = new Date(fromDate);
-      if (toDate) query.workOrderDate.$lte = new Date(toDate);
+        query.workOrderDate = {};
+        if (fromDate) query.workOrderDate.$gte = new Date(fromDate);
+        if (toDate) query.workOrderDate.$lte = new Date(toDate);
     }
 
     // 5. Build sort options
@@ -969,62 +1011,62 @@ const getAllIronWorkOrders = asyncHandler(async (req, res) => {
 
     // 6. Fetch work orders with sorting and population
     const workOrders = await ironWorkOrder
-      .find(query)
-      .sort(sortOptions)
-      .populate({
-        path: 'clientId',
-        select: 'name address',
-      })
-      .populate({
-        path: 'projectId',
-        select: 'name address',
-      })
-      .populate({
-        path: 'products.shapeId',
-        select: 'name',
-        match: { isDeleted: false },
-      })
-      .populate({
-        path: 'created_by',
-        select: 'username email',
-      })
-      .populate({
-        path: 'updated_by',
-        select: 'username email',
-      })
-      .lean();
+        .find(query)
+        .sort(sortOptions)
+        .populate({
+            path: 'clientId',
+            select: 'name address',
+        })
+        .populate({
+            path: 'projectId',
+            select: 'name address',
+        })
+        .populate({
+            path: 'products.shapeId',
+            select: 'name',
+            match: { isDeleted: false },
+        })
+        .populate({
+            path: 'created_by',
+            select: 'username email',
+        })
+        .populate({
+            path: 'updated_by',
+            select: 'username email',
+        })
+        .lean();
 
     // 7. Format timestamps to IST
     const formatDateToIST = (data) => {
-      const convertToIST = (date) => {
-        if (!date) return null;
-        return new Date(date).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
-      };
-      return data.map((item) => ({
-        ...item,
-        workOrderDate: convertToIST(item.workOrderDate),
-        createdAt: convertToIST(item.createdAt),
-        updatedAt: convertToIST(item.createdAt),
-        products: item.products.map((p) => ({
-          ...p,
-          deliveryDate: convertToIST(p.deliveryDate),
-        })),
-        files: item.files.map((f) => ({
-          ...f,
-          uploaded_at: convertToIST(f.uploaded_at),
-        })),
-      }));
+        const convertToIST = (date) => {
+            if (!date) return null;
+            return new Date(date).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
+        };
+        return data.map((item) => ({
+            ...item,
+            workOrderDate: convertToIST(item.workOrderDate),
+            createdAt: convertToIST(item.createdAt),
+            updatedAt: convertToIST(item.createdAt),
+            products: item.products.map((p) => ({
+                ...p,
+                deliveryDate: convertToIST(p.deliveryDate),
+            })),
+            files: item.files.map((f) => ({
+                ...f,
+                uploaded_at: convertToIST(f.uploaded_at),
+            })),
+        }));
     };
 
     const formattedWorkOrders = formatDateToIST(workOrders);
 
     // 8. Return response
     return res.status(200).json(
-      new ApiResponse(
-        200,
-        formattedWorkOrders, // Return array directly
-        'Work orders retrieved successfully'
-      )
+        new ApiResponse(
+            200,
+            formattedWorkOrders, // Return array directly
+            'Work orders retrieved successfully'
+        )
     );
 });
 
@@ -1237,23 +1279,23 @@ const getIronWorkOrderById = asyncHandler(async (req, res) => {
         const [time, period] = timePart.split(' ');
         return `${day}-${month}-${year} ${time} ${period}`;
     };
-    workOrder.products.map((product) =>console.log("product",product))
+    workOrder.products.map((product) => console.log("product", product))
 
     // 6. Structure response to match desired format
     const formattedWorkOrder = {
         client_id: workOrder.clientId
             ? {
-                  _id: workOrder.clientId._id,
-                  name: workOrder.clientId.name,
-                  address: workOrder.clientId.address,
-              }
+                _id: workOrder.clientId._id,
+                name: workOrder.clientId.name,
+                address: workOrder.clientId.address,
+            }
             : null,
         project_id: workOrder.projectId
             ? {
-                  _id: workOrder.projectId._id,
-                  name: workOrder.projectId.name,
-                  address: workOrder.projectId.address,
-              }
+                _id: workOrder.projectId._id,
+                name: workOrder.projectId.name,
+                address: workOrder.projectId.address,
+            }
             : null,
         work_order_details: {
             _id: workOrder._id,
@@ -1266,10 +1308,10 @@ const getIronWorkOrderById = asyncHandler(async (req, res) => {
         products: workOrder.products.map((product) => ({
             shapeId: product.shapeId
                 ? {
-                      _id: product.shapeId._id,
-                      shape_code: product.shapeId.shape_code,
-                      description: product.shapeId.description,
-                  }
+                    _id: product.shapeId._id,
+                    shape_code: product.shapeId.shape_code,
+                    description: product.shapeId.description,
+                }
                 : null,
             barMark: product.barMark || '',
             uom: product.uom,
@@ -1307,14 +1349,14 @@ const getIronWorkOrderById = asyncHandler(async (req, res) => {
 
 const updateIronWorkOrder_04_08_2025 = asyncHandler(async (req, res) => {
     const workOrderId = req.params.workOrderId;
-    console.log("workOrderId",workOrderId);
+    console.log("workOrderId", workOrderId);
 
     if (!mongoose.Types.ObjectId.isValid(workOrderId)) {
         throw new ApiError(400, 'Invalid Work Order ID');
     }
 
     const bodyData = req.body;
-    console.log("bodyData",bodyData.products.dimensions);
+    console.log("bodyData", bodyData.products.dimensions);
     const userId = req.user?._id?.toString();
 
     if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
@@ -1343,7 +1385,7 @@ const updateIronWorkOrder_04_08_2025 = asyncHandler(async (req, res) => {
             const tempPath = path.join('./public/temp', file.filename);
             const buffer = fs.readFileSync(tempPath);
             const sanitized = sanitizeFilename(file.originalname);
-            console.log("sanitized",sanitized);
+            console.log("sanitized", sanitized);
 
             // const allowedTypes = ['image/jpeg', 'image/png', 'application/pdf'];
             // console.log("allowedTypes",allowedTypes);
@@ -1840,36 +1882,36 @@ const updateIronWorkOrder = asyncHandler(async (req, res) => {
 
 
     // Handle file uploads (directly from memory, no temp folder)
-const newFiles = [];
-if (req.files && req.files.length > 0) {
-    for (const file of req.files) {
-        const sanitized = sanitizeFilename(file.originalname);
+    const newFiles = [];
+    if (req.files && req.files.length > 0) {
+        for (const file of req.files) {
+            const sanitized = sanitizeFilename(file.originalname);
 
-        if (file.size > 5 * 1024 * 1024) {
-            throw new ApiError(400, `${file.originalname} exceeds 5MB`);
+            if (file.size > 5 * 1024 * 1024) {
+                throw new ApiError(400, `${file.originalname} exceeds 5MB`);
+            }
+
+            // Upload directly from memory buffer
+            const { url } = await putObject(
+                { data: file.buffer, mimetype: file.mimetype },
+                `iron-work-orders/${Date.now()}-${sanitized}`
+            );
+
+            newFiles.push({
+                file_name: file.originalname,
+                file_url: url,
+                uploaded_at: new Date(),
+            });
         }
 
-        // Upload directly from memory buffer
-        const { url } = await putObject(
-            { data: file.buffer, mimetype: file.mimetype },
-            `iron-work-orders/${Date.now()}-${sanitized}`
-        );
-
-        newFiles.push({
-            file_name: file.originalname,
-            file_url: url,
-            uploaded_at: new Date(),
-        });
-    }
-
-    // Delete old files from S3 if completely replacing
-    if (existingWorkOrder.files?.length > 0 && !bodyData.existing_files) {
-        for (const oldFile of existingWorkOrder.files) {
-            const key = oldFile.file_url.split('/').slice(-1)[0];
-            await deleteObject(`iron-work-orders/${key}`);
+        // Delete old files from S3 if completely replacing
+        if (existingWorkOrder.files?.length > 0 && !bodyData.existing_files) {
+            for (const oldFile of existingWorkOrder.files) {
+                const key = oldFile.file_url.split('/').slice(-1)[0];
+                await deleteObject(`iron-work-orders/${key}`);
+            }
         }
     }
-}
 
 
     // Handle existing files
@@ -2053,4 +2095,4 @@ const deleteIronWorkOrder = asyncHandler(async (req, res) => {
 
 
 
-export { createIronWorkOrder, getAllIronWorkOrders, getIronWorkOrderById,updateIronWorkOrder,deleteIronWorkOrder};
+export { createIronWorkOrder, getAllIronWorkOrders, getIronWorkOrderById, updateIronWorkOrder, deleteIronWorkOrder };
