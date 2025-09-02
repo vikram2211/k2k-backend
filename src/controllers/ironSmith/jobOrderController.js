@@ -1322,7 +1322,7 @@ const getProductDetailsByQrCode = asyncHandler(async (req, res) => {
 
   // 1. Find the job order by job_order_number
   const jobOrder = await mongoose
-    .model('ironJobOrder')
+    .model('ironJobOrder')  
     .findOne({ job_order_number: jobOrderNumber })
     .populate({
       path: 'work_order',
@@ -1537,7 +1537,7 @@ const getJobOrderById_07_08_2025 = asyncHandler(async (req, res) => {
     .populate({
       path: 'work_order',
       select: '_id workOrderNumber clientId projectId',
-      populate:[   {
+      populate: [{
         path: 'clientId',
         select: 'name address',
         model: 'ironClient',
@@ -1546,7 +1546,7 @@ const getJobOrderById_07_08_2025 = asyncHandler(async (req, res) => {
         path: 'projectId',
         select: 'name address',
         model: 'ironProject',
-      },{
+      }, {
         path: 'products', // Populate the entire products array, including quantity
         select: 'shapeId quantity', // Include shapeId and quantity
       },]
@@ -1586,19 +1586,19 @@ const getJobOrderById_07_08_2025 = asyncHandler(async (req, res) => {
     workOrderId: jobOrder.work_order._id,
     workOrderNumber: jobOrder.work_order.workOrderNumber,
     client: jobOrder.work_order.clientId
-    ? {
+      ? {
         _id: jobOrder.work_order.clientId._id,
         name: jobOrder.work_order.clientId.name,
         address: jobOrder.work_order.clientId.address,
       }
-    : null,
-  project: jobOrder.work_order.projectId
-    ? {
+      : null,
+    project: jobOrder.work_order.projectId
+      ? {
         _id: jobOrder.work_order.projectId._id,
         name: jobOrder.work_order.projectId.name,
         address: jobOrder.work_order.projectId.address,
       }
-    : null,
+      : null,
     date_range: {
       from: convertToIST(jobOrder.date_range.from),
       to: convertToIST(jobOrder.date_range.to),
@@ -1618,7 +1618,7 @@ const getJobOrderById_07_08_2025 = asyncHandler(async (req, res) => {
         uom: workOrderProduct.uom, // Add uom from shape
         member: workOrderProduct.memberDetails, // Add uom from shape
         barMark: workOrderProduct.barMark, // Add uom from shape
-        weight: workOrderProduct.weight, 
+        weight: workOrderProduct.weight,
         description: product.shape.description,
         planned_quantity: product.planned_quantity,
         schedule_date: convertToIST(product.schedule_date),
@@ -1715,17 +1715,17 @@ const getJobOrderById = asyncHandler(async (req, res) => {
     workOrderNumber: jobOrder.work_order.workOrderNumber,
     client: jobOrder.work_order.clientId
       ? {
-          _id: jobOrder.work_order.clientId._id,
-          name: jobOrder.work_order.clientId.name,
-          address: jobOrder.work_order.clientId.address,
-        }
+        _id: jobOrder.work_order.clientId._id,
+        name: jobOrder.work_order.clientId.name,
+        address: jobOrder.work_order.clientId.address,
+      }
       : null,
     project: jobOrder.work_order.projectId
       ? {
-          _id: jobOrder.work_order.projectId._id,
-          name: jobOrder.work_order.projectId.name,
-          address: jobOrder.work_order.projectId.address,
-        }
+        _id: jobOrder.work_order.projectId._id,
+        name: jobOrder.work_order.projectId.name,
+        address: jobOrder.work_order.projectId.address,
+      }
       : null,
     date_range: {
       from: convertToIST(jobOrder.date_range.from),
@@ -1760,9 +1760,9 @@ const getJobOrderById = asyncHandler(async (req, res) => {
         po_quantity: workOrderProduct ? workOrderProduct.quantity : 0,
         dimensions: workOrderProduct && workOrderProduct.dimensions
           ? workOrderProduct.dimensions.map((dim) => ({
-              name: dim.name,
-              value: dim.value,
-            }))
+            name: dim.name,
+            value: dim.value,
+          }))
           : [],
       };
     }),
