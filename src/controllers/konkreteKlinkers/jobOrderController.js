@@ -2043,64 +2043,172 @@ export const updateJobOrder = async (req, res) => {
     }
 
     // 9. Handle products update if provided
-    let productsToUpdate = [];
-    let newProducts = [];
-    if (bodyData.products !== undefined) {
-      let updatedProducts = bodyData.products;
+    // let productsToUpdate = [];
+    // let newProducts = [];
+    // if (bodyData.products !== undefined) {
+    //   let updatedProducts = bodyData.products;
 
-      // Parse stringified products array if needed
-      if (typeof bodyData.products === 'string') {
-        updatedProducts = JSON.parse(bodyData.products);
+    //   // Parse stringified products array if needed
+    //   if (typeof bodyData.products === 'string') {
+    //     updatedProducts = JSON.parse(bodyData.products);
+    //   }
+
+    //   // Validate and process each product
+    //   updateData.products = await Promise.all(
+    //     updatedProducts.map(async (product) => {
+    //       // Validate required fields
+    //       if (
+    //         !product.product ||
+    //         !product.machine_name ||
+    //         !product.planned_quantity ||
+    //         !product.scheduled_date
+    //       ) {
+    //         throw new Error(
+    //           'All product fields (product, machine_name, planned_quantity, scheduled_date) are required'
+    //         );
+    //       }
+
+    //       // Convert scheduled_date to Date object
+    //       return {
+    //         product: product.product,
+    //         machine_name: product.machine_name,
+    //         planned_quantity: product.planned_quantity,
+    //         scheduled_date: new Date(product.scheduled_date),
+    //       };
+    //     })
+    //   );
+
+    //   // Identify products with changed scheduled_date and new products
+    //   productsToUpdate = updateData.products.map((newProduct) => {
+    //     const existingProduct = existingJobOrder.products.find((p) =>
+    //       p.product.equals(newProduct.product)
+    //     );
+    //     const hasDateChanged =
+    //       existingProduct &&
+    //       new Date(existingProduct.scheduled_date).getTime() !==
+    //         new Date(newProduct.scheduled_date).getTime();
+    //     const isNewProduct = !existingProduct;
+    //     return {
+    //       product_id: newProduct.product,
+    //       scheduled_date: newProduct.scheduled_date,
+    //       hasDateChanged,
+    //       isNewProduct,
+    //     };
+    //   });
+
+    //   // Filter new products for creating DailyProduction records
+    //   newProducts = updateData.products.filter((newProduct) =>
+    //     !existingJobOrder.products.some((p) => p.product.equals(newProduct.product))
+    //   );
+    // }
+
+
+
+
+
+    // 9. Handle products update if provided
+let productsToUpdate = [];
+let newProducts = [];
+if (bodyData.products !== undefined) {
+  let updatedProducts = bodyData.products;
+
+  if (typeof bodyData.products === 'string') {
+    updatedProducts = JSON.parse(bodyData.products);
+  }
+
+  // Validate and process each product
+  updateData.products = await Promise.all(
+    updatedProducts.map(async (product) => {
+      if (
+        !product.product ||
+        !product.machine_name ||
+        !product.planned_quantity ||
+        !product.scheduled_date
+      ) {
+        throw new Error(
+          'All product fields (product, machine_name, planned_quantity, scheduled_date) are required'
+        );
       }
 
-      // Validate and process each product
-      updateData.products = await Promise.all(
-        updatedProducts.map(async (product) => {
-          // Validate required fields
-          if (
-            !product.product ||
-            !product.machine_name ||
-            !product.planned_quantity ||
-            !product.scheduled_date
-          ) {
-            throw new Error(
-              'All product fields (product, machine_name, planned_quantity, scheduled_date) are required'
-            );
-          }
+      return {
+        product: product.product,
+        machine_name: product.machine_name,
+        planned_quantity: product.planned_quantity,
+        scheduled_date: new Date(product.scheduled_date),
+      };
+    })
+  );
 
-          // Convert scheduled_date to Date object
-          return {
-            product: product.product,
-            machine_name: product.machine_name,
-            planned_quantity: product.planned_quantity,
-            scheduled_date: new Date(product.scheduled_date),
-          };
-        })
-      );
+  // Validate quantities for all products
+  const workOrder = await WorkOrder.findById(existingJobOrder.work_order);
+  if (!workOrder) {
+    return res.status(400).json({
+      success: false,
+      message: 'Invalid work_order ID associated with job order',
+    });
+  }
 
-      // Identify products with changed scheduled_date and new products
-      productsToUpdate = updateData.products.map((newProduct) => {
-        const existingProduct = existingJobOrder.products.find((p) =>
-          p.product.equals(newProduct.product)
-        );
-        const hasDateChanged =
-          existingProduct &&
-          new Date(existingProduct.scheduled_date).getTime() !==
-            new Date(newProduct.scheduled_date).getTime();
-        const isNewProduct = !existingProduct;
-        return {
-          product_id: newProduct.product,
-          scheduled_date: newProduct.scheduled_date,
-          hasDateChanged,
-          isNewProduct,
-        };
-      });
+  for (const product of updateData.products) {
+    const woProduct = workOrder.products.find((p) => p.product_id.equals(product.product));
+    if (!woProduct) {
+      throw new Error(`Product ${product.product} not found in work order`);
+    }
 
-      // Filter new products for creating DailyProduction records
-      newProducts = updateData.products.filter((newProduct) =>
-        !existingJobOrder.products.some((p) => p.product.equals(newProduct.product))
+    const existingJobOrders = await JobOrder.find({
+      work_order: existingJobOrder.work_order,
+      'products.product': product.product,
+      _id: { $ne: id }, // Exclude the current job order
+    });
+
+    const totalExistingPlannedQuantity = existingJobOrders.reduce((total, jo) => {
+      const joProduct = jo.products.find((p) => p.product.equals(product.product));
+      return total + (joProduct ? joProduct.planned_quantity : 0);
+    }, 0);
+
+    // For existing products, include their current planned_quantity in the calculation
+    const existingProduct = existingJobOrder.products.find((p) => p.product.equals(product.product));
+    const currentQuantity = existingProduct ? existingProduct.planned_quantity : 0;
+
+    const totalPlannedQuantity = totalExistingPlannedQuantity + product.planned_quantity;
+
+    if (totalPlannedQuantity > woProduct.qty_in_nos) {
+      throw new Error(
+        `Planned quantity for product ${product.product} exceeds available work order quantity. ` +
+        `Work order has qty_in_nos of ${woProduct.qty_in_nos}, ` +
+        `existing job orders (excluding this one) have a total planned quantity of ${totalExistingPlannedQuantity}, ` +
+        `current job order has ${currentQuantity}, ` +
+        `and you are trying to set ${product.planned_quantity}. ` +
+        `Maximum allowed quantity is ${woProduct.qty_in_nos - totalExistingPlannedQuantity}.`
       );
     }
+  }
+
+  // Identify products with changed scheduled_date and new products
+  productsToUpdate = updateData.products.map((newProduct) => {
+    const existingProduct = existingJobOrder.products.find((p) =>
+      p.product.equals(newProduct.product)
+    );
+    const hasDateChanged =
+      existingProduct &&
+      new Date(existingProduct.scheduled_date).getTime() !==
+        new Date(newProduct.scheduled_date).getTime();
+    const isNewProduct = !existingProduct;
+    return {
+      product_id: newProduct.product,
+      scheduled_date: newProduct.scheduled_date,
+      hasDateChanged,
+      isNewProduct,
+    };
+  });
+
+  newProducts = updateData.products.filter((newProduct) =>
+    !existingJobOrder.products.some((p) => p.product.equals(newProduct.product))
+  );
+}
+
+
+
+
 
     // 10. Check if there's anything to update
     if (Object.keys(updateData).length === 0) {
