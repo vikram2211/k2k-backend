@@ -669,6 +669,8 @@ export const createWorkOrder = async (req, res) => {
     const uploadedFiles = [];
     if (req.files && req.files.length > 0) {
       for (const file of req.files) {
+        console.log("files", file);
+
         try {
           const s3Key = `work-orders/${Date.now()}-${sanitizeFilename(file.originalname)}`;
           const { url } = await putObject(
@@ -2080,6 +2082,20 @@ export const updateWorkOrder = async (req, res) => {
 
     // 4. Initialize update data object
     const updateData = {};
+
+    if (bodyData.work_order_number) {
+      updateData.work_order_number = bodyData.work_order_number;
+    }
+
+    // Handle client_id update
+    if (bodyData.client_id) {
+      updateData.client_id = bodyData.client_id;
+    }
+
+    // Handle project_id update
+    if (bodyData.project_id) {
+      updateData.project_id = bodyData.project_id;
+    }
 
     // 5. Handle date update if provided
     if (bodyData.date) {
