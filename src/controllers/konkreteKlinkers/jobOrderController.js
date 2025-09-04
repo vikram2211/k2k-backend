@@ -2274,11 +2274,34 @@ if (bodyData.products !== undefined) {
         .filter((p) => p.hasDateChanged)
         .map(async (product) => {
           // Find DailyProduction records for this job order and product
+          // Note: Do not restrict to a specific status; reflect schedule changes regardless of current status
           const dailyProductions = await DailyProduction.find({
             job_order: id,
             'products.product_id': product.product_id,
-            status: 'Pending', // Only update if status is Pending
           });
+
+          if (dailyProductions.length === 0) {
+            // If none exists (e.g., product newly scheduled or previously cleaned), create one so it appears in planning
+            const schemaProduct = {
+              product_id: product.product_id,
+              achieved_quantity: 0,
+              rejected_quantity: 0,
+              recycled_quantity: 0,
+            };
+
+            const newProduction = new DailyProduction({
+              work_order: existingJobOrder.work_order,
+              job_order: id,
+              products: [schemaProduct],
+              date: new Date(product.scheduled_date),
+              submitted_by: req.user?._id,
+              created_by: req.user?._id,
+              updated_by: req.user?._id,
+              status: 'Pending',
+            });
+            await newProduction.save();
+            return newProduction;
+          }
 
           // Update date for each matching DailyProduction record
           return Promise.all(
