@@ -316,13 +316,20 @@ export const addQcCheck_04_09_2025 = async (req, res) => {
       });
     }
 
-    // 5. Update rejected & recycled qty + adjust achieved qty
+    // 5. Update rejected & recycled qty
+    // achieved_quantity = total production (good + rejected + recycled)
+    // When adding rejected/recycled, we need to ensure they don't exceed achieved_quantity
     dailyProduction.products[productIndex].rejected_quantity += validatedData.rejected_quantity;
     dailyProduction.products[productIndex].recycled_quantity += validatedData.recycled_quantity;
-    dailyProduction.products[productIndex].achieved_quantity -= validatedData.rejected_quantity;
-
-    if (dailyProduction.products[productIndex].achieved_quantity < 0) {
-      dailyProduction.products[productIndex].achieved_quantity = 0; // safety
+    
+    // Ensure rejected + recycled don't exceed achieved_quantity
+    const totalRejectedRecycled = dailyProduction.products[productIndex].rejected_quantity + 
+                                 dailyProduction.products[productIndex].recycled_quantity;
+    if (totalRejectedRecycled > dailyProduction.products[productIndex].achieved_quantity) {
+      return res.status(400).json({
+        success: false,
+        message: `Total rejected (${dailyProduction.products[productIndex].rejected_quantity}) + recycled (${dailyProduction.products[productIndex].recycled_quantity}) quantities cannot exceed achieved quantity (${dailyProduction.products[productIndex].achieved_quantity})`
+      });
     }
 
     dailyProduction.updated_by = req.user._id;
@@ -405,18 +412,20 @@ export const addQcCheck = async (req, res) => {
       });
     }
 
-    // 5. Update rejected & recycled qty + adjust achieved qty
+    // 5. Update rejected & recycled qty
+    // achieved_quantity = total production (good + rejected + recycled)
+    // When adding rejected/recycled, we need to ensure they don't exceed achieved_quantity
     dailyProduction.products[productIndex].rejected_quantity += validatedData.rejected_quantity || 0;
     dailyProduction.products[productIndex].recycled_quantity += validatedData.recycled_quantity || 0;
-
-    // Calculate total quantity to deduct from achieved_quantity
-    const totalDeduct = (validatedData.rejected_quantity || 0) + (validatedData.recycled_quantity || 0);
-
-    // Deduct the total quantity from achieved_quantity
-    dailyProduction.products[productIndex].achieved_quantity -= totalDeduct;
-
-    if (dailyProduction.products[productIndex].achieved_quantity < 0) {
-      dailyProduction.products[productIndex].achieved_quantity = 0; // safety
+    
+    // Ensure rejected + recycled don't exceed achieved_quantity
+    const totalRejectedRecycled = dailyProduction.products[productIndex].rejected_quantity + 
+                                 dailyProduction.products[productIndex].recycled_quantity;
+    if (totalRejectedRecycled > dailyProduction.products[productIndex].achieved_quantity) {
+      return res.status(400).json({
+        success: false,
+        message: `Total rejected (${dailyProduction.products[productIndex].rejected_quantity}) + recycled (${dailyProduction.products[productIndex].recycled_quantity}) quantities cannot exceed achieved quantity (${dailyProduction.products[productIndex].achieved_quantity})`
+      });
     }
 
     dailyProduction.updated_by = req.user._id;
@@ -939,17 +948,22 @@ export const updateQcCheck_04_09_2025 = async (req, res) => {
           p => p.product_id.toString() === oldQcCheck.product_id.toString()
         );
         if (product) {
-          // rollback old
+          // rollback old rejected/recycled quantities
           product.rejected_quantity -= oldQcCheck.rejected_quantity;
           product.recycled_quantity -= oldQcCheck.recycled_quantity;
-          product.achieved_quantity += oldQcCheck.rejected_quantity;
 
-          // apply new
+          // apply new rejected/recycled quantities
           product.rejected_quantity += validatedData.rejected_quantity ?? oldQcCheck.rejected_quantity;
           product.recycled_quantity += validatedData.recycled_quantity ?? oldQcCheck.recycled_quantity;
-          product.achieved_quantity -= validatedData.rejected_quantity ?? oldQcCheck.rejected_quantity;
-
-          if (product.achieved_quantity < 0) product.achieved_quantity = 0;
+          
+          // Ensure rejected + recycled don't exceed achieved_quantity
+          const totalRejectedRecycled = product.rejected_quantity + product.recycled_quantity;
+          if (totalRejectedRecycled > product.achieved_quantity) {
+            return res.status(400).json({
+              success: false,
+              message: `Total rejected (${product.rejected_quantity}) + recycled (${product.recycled_quantity}) quantities cannot exceed achieved quantity (${product.achieved_quantity})`
+            });
+          }
 
           dailyProduction.updated_by = req.user._id;
           await dailyProduction.save();
@@ -1010,21 +1024,22 @@ export const updateQcCheck = async (req, res) => {
           p => p.product_id.toString() === oldQcCheck.product_id.toString()
         );
         if (product) {
-          // Rollback old values
+          // Rollback old rejected/recycled values
           product.rejected_quantity -= (oldQcCheck.rejected_quantity || 0);
           product.recycled_quantity -= (oldQcCheck.recycled_quantity || 0);
-          product.achieved_quantity += (oldQcCheck.rejected_quantity || 0) + (oldQcCheck.recycled_quantity || 0);
 
-          // Apply new values
+          // Apply new rejected/recycled values
           product.rejected_quantity += (validatedData.rejected_quantity ?? oldQcCheck.rejected_quantity) || 0;
           product.recycled_quantity += (validatedData.recycled_quantity ?? oldQcCheck.recycled_quantity) || 0;
-
-          // Deduct both rejected and recycled quantities from achieved_quantity
-          const totalDeduct = ((validatedData.rejected_quantity ?? oldQcCheck.rejected_quantity) || 0) +
-                              ((validatedData.recycled_quantity ?? oldQcCheck.recycled_quantity) || 0);
-          product.achieved_quantity -= totalDeduct;
-
-          if (product.achieved_quantity < 0) product.achieved_quantity = 0;
+          
+          // Ensure rejected + recycled don't exceed achieved_quantity
+          const totalRejectedRecycled = product.rejected_quantity + product.recycled_quantity;
+          if (totalRejectedRecycled > product.achieved_quantity) {
+            return res.status(400).json({
+              success: false,
+              message: `Total rejected (${product.rejected_quantity}) + recycled (${product.recycled_quantity}) quantities cannot exceed achieved quantity (${product.achieved_quantity})`
+            });
+          }
 
           dailyProduction.updated_by = req.user._id;
           await dailyProduction.save();
