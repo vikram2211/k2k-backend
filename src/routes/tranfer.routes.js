@@ -1,6 +1,6 @@
 import { Router } from "express";
 import {
-    transferStock,getAllTransfers,getTransferById,updateTransfer,deleteTransfers,getWorkOrdersByProduct,getWorkOrderProductQuantity
+    transferStock,getAllTransfers,getTransferById,updateTransfer,deleteTransfers,getWorkOrdersByProduct,getWorkOrderProductQuantity,getToWorkOrdersByProduct
 } from "../controllers/konkreteKlinkers/stockTransferController.js";
 
 import { verifyJWT } from "../middlewares/auth.middleware.js";
@@ -11,6 +11,7 @@ router.route("/transfer/delete").post(verifyJWT,deleteTransfers);
 router.route("/transfer").get(verifyJWT,getAllTransfers);
 router.route("/transfer/:id").get(verifyJWT,getTransferById).put(verifyJWT,updateTransfer);
 router.route("/transfer-getworkorder").get(getWorkOrdersByProduct);
+router.route("/transfer-gettoworkorder").get(getToWorkOrdersByProduct);
 router.route("/transfer-getworkorderproduct").get(getWorkOrderProductQuantity);
 
 export default router;
