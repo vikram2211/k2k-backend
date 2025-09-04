@@ -1619,6 +1619,28 @@ export const getWorkOrderById = async (req, res) => {
           select: 'plant_code',
         },
       })
+      .populate({
+        path: 'buffer_transfer_logs',
+        select: 'from_work_order_id to_work_order_id product_id quantity_transferred transferred_by transfer_date isBufferTransfer',
+        populate: [
+          {
+            path: 'from_work_order_id',
+            select: 'work_order_number',
+          },
+          {
+            path: 'to_work_order_id',
+            select: 'work_order_number',
+          },
+          {
+            path: 'product_id',
+            select: 'description material_code',
+          },
+          {
+            path: 'transferred_by',
+            select: 'username',
+          },
+        ],
+      })
       .lean();
 
     if (!woData) {
@@ -1910,6 +1932,19 @@ export const getWorkOrderById = async (req, res) => {
       Packings: packingsArray,
       dispatches: dispatchesArray,
       qc_details: qcDetailsArray,
+      buffer_transfer_logs: woData.buffer_transfer_logs
+      ? woData.buffer_transfer_logs.map((log) => ({
+          _id: log._id,
+          from_work_order_id: log.from_work_order_id?.work_order_number || null,
+          to_work_order_id: log.to_work_order_id?.work_order_number || null,
+          material_code: log.product_id?.material_code || null,
+          description: log.product_id?.description || null,
+          quantity_transferred: log.quantity_transferred,
+          transferred_by: log.transferred_by?.username || null,
+          transfer_date: log.transfer_date,
+          isBufferTransfer: log.isBufferTransfer,
+        }))
+      : [],
     };
     console.log("transformedData", transformedData);
 
