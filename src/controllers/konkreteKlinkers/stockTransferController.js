@@ -8,6 +8,7 @@ import path from 'path';
 import { z } from 'zod';
 import mongoose from 'mongoose';
 import { Packing } from '../../models/konkreteKlinkers/packing.model.js';
+import {Inventory} from '../../models/konkreteKlinkers/inventory.model.js';
 
 const transferStockSchema = z.object({
     from_work_order_id: z.string().refine((val) => mongoose.isValidObjectId(val), {
@@ -216,6 +217,48 @@ export const transferStock = async (req, res) => {
                 stopped_at: null,
             }
         );
+
+
+
+
+        // Update inventory for source work order
+        const sourceInventory = await Inventory.findOne({
+            work_order: validatedData.from_work_order_id,
+            product: validatedData.product_id,
+        });
+
+        if (sourceInventory) {
+            sourceInventory.packed_quantity -= validatedData.quantity_transferred;
+            sourceInventory.produced_quantity -= validatedData.quantity_transferred;
+            sourceInventory.available_stock = sourceInventory.packed_quantity - sourceInventory.dispatched_quantity;
+            await sourceInventory.save();
+        }
+
+        // Update inventory for destination work order
+        let destinationInventory = await Inventory.findOne({
+            work_order: validatedData.to_work_order_id,
+            product: validatedData.product_id,
+        });
+
+        if (destinationInventory) {
+            destinationInventory.packed_quantity += validatedData.quantity_transferred;
+            destinationInventory.available_stock = destinationInventory.packed_quantity - destinationInventory.dispatched_quantity;
+        } else {
+            // If no inventory record exists for the destination, create one
+            destinationInventory = new Inventory({
+                work_order: validatedData.to_work_order_id,
+                product: validatedData.product_id,
+                produced_quantity: 0,
+                packed_quantity: validatedData.quantity_transferred,
+                dispatched_quantity: 0,
+                available_stock: validatedData.quantity_transferred,
+                updated_by: req.user._id,
+            });
+        }
+        await destinationInventory.save();
+
+
+
 
         // Create new BufferTransfer
         const bufferTransfer = new BufferTransfer({
