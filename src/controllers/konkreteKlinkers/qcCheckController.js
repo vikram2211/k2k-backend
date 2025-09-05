@@ -371,6 +371,103 @@ export const addQcCheck_04_09_2025 = async (req, res) => {
 
 
 
+// export const addQcCheck = async (req, res) => {
+//   try {
+//     // 1. Validate request
+//     const validatedData = qcCheckZodSchema.parse(req.body);
+//     if (!req.user?._id) {
+//       return res.status(401).json({
+//         success: false,
+//         message: "Unauthorized: User not authenticated",
+//       });
+//     }
+//     validatedData.created_by = req.user._id;
+//     validatedData.updated_by = req.user._id;
+
+//     // 2. Ensure production_id is provided
+//     if (!validatedData.production_id) {
+//       return res.status(400).json({
+//         success: false,
+//         message: "production_id is required to add QC Check",
+//       });
+//     }
+
+//     // 3. Find the DailyProduction record
+//     const dailyProduction = await DailyProduction.findById(validatedData.production_id);
+//     if (!dailyProduction) {
+//       return res.status(404).json({
+//         success: false,
+//         message: `DailyProduction ${validatedData.production_id} not found`,
+//       });
+//     }
+
+//     // 4. Ensure the product exists in that production
+//     const productIndex = dailyProduction.products.findIndex(
+//       (p) => p.product_id.toString() === validatedData.product_id.toString()
+//     );
+//     if (productIndex === -1) {
+//       return res.status(400).json({
+//         success: false,
+//         message: `Product ${validatedData.product_id} not found in production ${validatedData.production_id}`,
+//       });
+//     }
+//     if (dailyProduction.status === "Pending QC") {
+//       dailyProduction.status = "Pending";
+//       dailyProduction.started_at = null;
+//       dailyProduction.stopped_at = null;
+//     }
+
+//     // 5. Update rejected & recycled qty
+//     // achieved_quantity = total production (good + rejected + recycled)
+//     // When adding rejected/recycled, we need to ensure they don't exceed achieved_quantity
+//     dailyProduction.products[productIndex].rejected_quantity += validatedData.rejected_quantity || 0;
+//     dailyProduction.products[productIndex].recycled_quantity += validatedData.recycled_quantity || 0;
+    
+//     // Ensure rejected + recycled don't exceed achieved_quantity
+//     const totalRejectedRecycled = dailyProduction.products[productIndex].rejected_quantity + 
+//                                  dailyProduction.products[productIndex].recycled_quantity;
+//     if (totalRejectedRecycled > dailyProduction.products[productIndex].achieved_quantity) {
+//       return res.status(400).json({
+//         success: false,
+//         message: `Total rejected (${dailyProduction.products[productIndex].rejected_quantity}) + recycled (${dailyProduction.products[productIndex].recycled_quantity}) quantities cannot exceed achieved quantity (${dailyProduction.products[productIndex].achieved_quantity})`
+//       });
+//     }
+
+//     dailyProduction.updated_by = req.user._id;
+//     await dailyProduction.save();
+
+//     // 6. Save QC check
+//     const qcCheck = new QCCheck(validatedData);
+//     await qcCheck.save();
+
+//     return res.status(201).json({
+//       success: true,
+//       message: "QC Check added successfully",
+//       data: qcCheck,
+//     });
+//   } catch (error) {
+//     console.error("Error adding QC Check:", error);
+//     if (error instanceof z.ZodError) {
+//       return res.status(400).json({
+//         success: false,
+//         errors: error.errors.map((err) => ({
+//           field: err.path.join("."),
+//           message: err.message,
+//         })),
+//       });
+//     }
+//     return res.status(500).json({
+//       success: false,
+//       message: "Internal Server Error",
+//       error: error.message,
+//     });
+//   }
+// };
+
+
+
+
+
 export const addQcCheck = async (req, res) => {
   try {
     // 1. Validate request
@@ -411,21 +508,24 @@ export const addQcCheck = async (req, res) => {
         message: `Product ${validatedData.product_id} not found in production ${validatedData.production_id}`,
       });
     }
+    if (dailyProduction.status === "Pending QC") {
+      dailyProduction.status = "Pending";
+      dailyProduction.started_at = null;
+      dailyProduction.stopped_at = null;
+    }
 
-    // 5. Update rejected & recycled qty
-    // achieved_quantity = total production (good + rejected + recycled)
-    // When adding rejected/recycled, we need to ensure they don't exceed achieved_quantity
+    // 5. Update rejected & recycled qty + adjust achieved qty
     dailyProduction.products[productIndex].rejected_quantity += validatedData.rejected_quantity || 0;
     dailyProduction.products[productIndex].recycled_quantity += validatedData.recycled_quantity || 0;
-    
-    // Ensure rejected + recycled don't exceed achieved_quantity
-    const totalRejectedRecycled = dailyProduction.products[productIndex].rejected_quantity + 
-                                 dailyProduction.products[productIndex].recycled_quantity;
-    if (totalRejectedRecycled > dailyProduction.products[productIndex].achieved_quantity) {
-      return res.status(400).json({
-        success: false,
-        message: `Total rejected (${dailyProduction.products[productIndex].rejected_quantity}) + recycled (${dailyProduction.products[productIndex].recycled_quantity}) quantities cannot exceed achieved quantity (${dailyProduction.products[productIndex].achieved_quantity})`
-      });
+
+    // Calculate total quantity to deduct from achieved_quantity
+    const totalDeduct = (validatedData.rejected_quantity || 0) + (validatedData.recycled_quantity || 0);
+
+    // Deduct the total quantity from achieved_quantity
+    dailyProduction.products[productIndex].achieved_quantity -= totalDeduct;
+
+    if (dailyProduction.products[productIndex].achieved_quantity < 0) {
+      dailyProduction.products[productIndex].achieved_quantity = 0; // safety
     }
 
     dailyProduction.updated_by = req.user._id;
@@ -458,6 +558,9 @@ export const addQcCheck = async (req, res) => {
     });
   }
 };
+
+
+
 
 
 
@@ -990,6 +1093,95 @@ export const updateQcCheck_04_09_2025 = async (req, res) => {
 };
 
 
+// export const updateQcCheck = async (req, res) => {
+//   try {
+//     const { id } = req.params;
+//     if (!mongoose.isValidObjectId(id)) {
+//       return res.status(400).json({ success: false, message: 'Invalid QC check ID' });
+//     }
+//     const validatedData = updateQcCheckZodSchema.parse(req.body);
+//     if (!req.user?._id) {
+//       return res.status(401).json({ success: false, message: 'Unauthorized' });
+//     }
+//     validatedData.updated_by = req.user._id;
+
+//     // Fetch old QC check
+//     const oldQcCheck = await QCCheck.findById(id);
+//     if (!oldQcCheck) {
+//       return res.status(404).json({ success: false, message: 'QC check not found' });
+//     }
+
+//     // Update QCCheck
+//     const qcCheck = await QCCheck.findByIdAndUpdate(
+//       id,
+//       { $set: validatedData },
+//       { new: true, runValidators: true }
+//     ).populate('work_order', 'work_order_number')
+//      .populate('product_id', 'description');
+
+//     // Update related DailyProduction
+//     if (validatedData.rejected_quantity !== undefined || validatedData.recycled_quantity !== undefined) {
+//       const dailyProduction = await DailyProduction.findById(oldQcCheck.production_id);
+//       if (dailyProduction) {
+
+//          // Check if the production status is "Pending QC"
+//          if (dailyProduction.status === "Pending QC") {
+//           dailyProduction.status = "Pending";
+//           dailyProduction.started_at = null;
+//           dailyProduction.stopped_at = null;
+//         }
+
+//         const product = dailyProduction.products.find(
+//           p => p.product_id.toString() === oldQcCheck.product_id.toString()
+//         );
+//         if (product) {
+//           // Rollback old rejected/recycled values
+//           product.rejected_quantity -= (oldQcCheck.rejected_quantity || 0);
+//           product.recycled_quantity -= (oldQcCheck.recycled_quantity || 0);
+
+//           // Apply new rejected/recycled values
+//           product.rejected_quantity += (validatedData.rejected_quantity ?? oldQcCheck.rejected_quantity) || 0;
+//           product.recycled_quantity += (validatedData.recycled_quantity ?? oldQcCheck.recycled_quantity) || 0;
+          
+//           // Ensure rejected + recycled don't exceed achieved_quantity
+//           const totalRejectedRecycled = product.rejected_quantity + product.recycled_quantity;
+//           if (totalRejectedRecycled > product.achieved_quantity) {
+//             return res.status(400).json({
+//               success: false,
+//               message: `Total rejected (${product.rejected_quantity}) + recycled (${product.recycled_quantity}) quantities cannot exceed achieved quantity (${product.achieved_quantity})`
+//             });
+//           }
+
+//           dailyProduction.updated_by = req.user._id;
+//           await dailyProduction.save();
+//         }
+//       }
+//     }
+
+//     return res.status(200).json({
+//       success: true,
+//       message: 'QC check updated successfully',
+//       data: qcCheck
+//     });
+//   } catch (error) {
+//     if (error instanceof z.ZodError) {
+//       return res.status(400).json({
+//         success: false,
+//         errors: error.errors.map(err => ({ field: err.path.join('.'), message: err.message }))
+//       });
+//     }
+//     console.error('Error updating QC Check:', error);
+//     return res.status(500).json({ success: false, message: 'Internal Server Error', error: error.message });
+//   }
+// };
+
+
+
+
+
+
+
+
 export const updateQcCheck = async (req, res) => {
   try {
     const { id } = req.params;
@@ -1020,26 +1212,33 @@ export const updateQcCheck = async (req, res) => {
     if (validatedData.rejected_quantity !== undefined || validatedData.recycled_quantity !== undefined) {
       const dailyProduction = await DailyProduction.findById(oldQcCheck.production_id);
       if (dailyProduction) {
+
+         // Check if the production status is "Pending QC"
+         if (dailyProduction.status === "Pending QC") {
+          dailyProduction.status = "Pending";
+          dailyProduction.started_at = null;
+          dailyProduction.stopped_at = null;
+        }
+
         const product = dailyProduction.products.find(
           p => p.product_id.toString() === oldQcCheck.product_id.toString()
         );
         if (product) {
-          // Rollback old rejected/recycled values
+          // Rollback old values
           product.rejected_quantity -= (oldQcCheck.rejected_quantity || 0);
           product.recycled_quantity -= (oldQcCheck.recycled_quantity || 0);
+          product.achieved_quantity += (oldQcCheck.rejected_quantity || 0) + (oldQcCheck.recycled_quantity || 0);
 
-          // Apply new rejected/recycled values
+          // Apply new values
           product.rejected_quantity += (validatedData.rejected_quantity ?? oldQcCheck.rejected_quantity) || 0;
           product.recycled_quantity += (validatedData.recycled_quantity ?? oldQcCheck.recycled_quantity) || 0;
-          
-          // Ensure rejected + recycled don't exceed achieved_quantity
-          const totalRejectedRecycled = product.rejected_quantity + product.recycled_quantity;
-          if (totalRejectedRecycled > product.achieved_quantity) {
-            return res.status(400).json({
-              success: false,
-              message: `Total rejected (${product.rejected_quantity}) + recycled (${product.recycled_quantity}) quantities cannot exceed achieved quantity (${product.achieved_quantity})`
-            });
-          }
+
+          // Deduct both rejected and recycled quantities from achieved_quantity
+          const totalDeduct = ((validatedData.rejected_quantity ?? oldQcCheck.rejected_quantity) || 0) +
+                              ((validatedData.recycled_quantity ?? oldQcCheck.recycled_quantity) || 0);
+          product.achieved_quantity -= totalDeduct;
+
+          if (product.achieved_quantity < 0) product.achieved_quantity = 0;
 
           dailyProduction.updated_by = req.user._id;
           await dailyProduction.save();
@@ -1063,10 +1262,6 @@ export const updateQcCheck = async (req, res) => {
     return res.status(500).json({ success: false, message: 'Internal Server Error', error: error.message });
   }
 };
-
-
-
-
 
 
 
