@@ -4227,10 +4227,11 @@ const updateInternalWorkOrder = asyncHandler(async (req, res) => {
             }, {});
 
             internalWorkOrder.products = await Promise.all(bodyData.products.map(async (product, productIndex) => {
+                console.log("product",product);
                 if (!product.product) throw new ApiError(400, `Product ID is required for product at index ${productIndex}`);
                 if (!product.system) throw new ApiError(400, `System is required for product at index ${productIndex}`);
                 if (!product.product_system) throw new ApiError(400, `Product system is required for product at index ${productIndex}`);
-                if (!product.po_quantity) throw new ApiError(400, `PO quantity is required for product at index ${productIndex}`);
+                if (!product.planned_quantity) throw new ApiError(400, `PO quantity is required for product at index ${productIndex}`);
                 if (!product.code) throw new ApiError(400, `Code is required for product at index ${productIndex}`);
 
                 validateObjectId(product.product, `product at index ${productIndex}`);
@@ -4243,7 +4244,7 @@ const updateInternalWorkOrder = asyncHandler(async (req, res) => {
                 if (jobOrderPoQuantity === undefined) {
                     throw new ApiError(400, `Product with ID ${product.product} and code ${product.code} at index ${productIndex} not found in job order`);
                 }
-                const parsedPoQuantity = parseInt(product.po_quantity);
+                const parsedPoQuantity = parseInt(product.planned_quantity);
                 if (parsedPoQuantity > jobOrderPoQuantity) {
                     // throw new ApiError(400, `PO quantity (${parsedPoQuantity}) for product at index ${productIndex} exceeds job order PO quantity (${jobOrderPoQuantity})`);
                     throw new ApiError(400, `Quantity exceeds job order PO quantity (${jobOrderPoQuantity})`);
