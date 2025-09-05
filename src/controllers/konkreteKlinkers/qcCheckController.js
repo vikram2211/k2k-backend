@@ -1597,4 +1597,3 @@ export const getProductByJobOrder = async (req, res) => {
     });
   }
 };
-
