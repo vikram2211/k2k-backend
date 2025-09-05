@@ -37,6 +37,7 @@ const dbConnect = async () => {
 
 
     const existingAdmin = await Admin.findOne({ userType: 'Admin' });
+    console.log("existingAdmin",existingAdmin);
     // const existingMerchant = await Merchandiser.findOne({ userType: 'Merchandiser' });
     if (!existingAdmin)  await seedAdminData();
 

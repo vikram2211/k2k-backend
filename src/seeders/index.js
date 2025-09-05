@@ -1,4 +1,4 @@
-import seedAdminData from './admin.seeder.js';
+//import seedAdminData from './admin.seeder.js';
 import connectDB from '../db/index.js';
 import dotenv from 'dotenv';
 // import seedMerchandiserData from './merchandiser.seeder.js';
