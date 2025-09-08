@@ -2079,6 +2079,7 @@ const productionQCCheck = asyncHandler(async (req, res) => {
         console.log("came here in qc");
         const { productionId } = req.params;
         const { rejected_quantity, process_name, remarks } = req.body;
+        console.log("rejected_quantity",rejected_quantity);
         const userId = req.user?._id;
 
         // Validate inputs
@@ -2141,6 +2142,26 @@ const productionQCCheck = asyncHandler(async (req, res) => {
 
         console.log("production after subtraction", production);
 
+
+        if (production.process_sequence.previous) {
+            const previousProduction = await falconProduction.findOne({
+                job_order: production.job_order,
+                semifinished_id: production.semifinished_id,
+                'process_sequence.current.name': production.process_sequence.previous.name,
+            });
+
+            if (previousProduction) {
+                // Deduct rejected quantity from previous stage
+                previousProduction.product.achieved_quantity -= rejected_quantity;
+                // Ensure previous stage's achieved_quantity doesn't go below zero
+                if (previousProduction.product.achieved_quantity < 0) {
+                    previousProduction.product.achieved_quantity = 0;
+                }
+                await previousProduction.save();
+            }
+        }
+
+
         // Create a new QC Check record
         const qcCheck = new falconQCCheck({
             production: productionId,
@@ -2159,7 +2180,9 @@ const productionQCCheck = asyncHandler(async (req, res) => {
 
         // Aggregate rejected and recycled quantities from all QC checks for this production
         const qcChecks = await falconQCCheck.find({ production: productionId });
+        console.log("qcChecks",qcChecks);
         const totalRejected = qcChecks.reduce((sum, check) => sum + check.rejected_quantity, 0);
+        console.log("totalRejected",totalRejected);
         const totalRecycled = qcChecks.reduce((sum, check) => sum + check.recycled_quantity, 0);
 
         // Update production record with aggregated values
