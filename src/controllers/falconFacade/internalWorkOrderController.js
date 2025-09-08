@@ -2087,6 +2087,39 @@ const createInternalWorkOrder = asyncHandler(async (req, res) => {
             'glass fixing / glazing': [] // No further processes
         };
 
+
+
+        // Inside your try block, after validateObjectId and before jobOrderData:
+for (const product of bodyData.products) {
+    // Fetch all existing IWOs for this job_order_id and product
+    const existingIWOs = await falconInternalWorkOrder.aggregate([
+        { $match: { job_order_id: bodyData.job_order_id } },
+        { $unwind: "$products" },
+        { $match: { "products.product": product.product } },
+        { $group: { _id: "$products.product", totalQty: { $sum: "$products.po_quantity" } } }
+    ]);
+
+    // Fetch the original Job Order to get the product's quantity
+    const jobOrder = await falconJobOrder.findById(bodyData.job_order_id);
+    const jobOrderProduct = jobOrder.products.find(p => p.product.equals(product.product));
+    const jobOrderQty = jobOrderProduct.po_quantity;
+
+    // Calculate the total quantity already allocated in IWOs
+    const existingQty = existingIWOs.find(iwo => iwo._id.equals(product.product))?.totalQty || 0;
+
+    // Validate the new quantity
+    if (existingQty + product.po_quantity > jobOrderQty) {
+        throw new ApiError(
+            400,
+            `Cannot allocate ${product.po_quantity} for product ${product.code}. ` +
+            `Only ${jobOrderQty - existingQty} remaining (Job Order Qty: ${jobOrderQty}, Allocated: ${existingQty}).`
+        );
+    }
+}
+
+
+
+
         const jobOrderData = {
             job_order_id: bodyData.job_order_id,
             sales_order_no: bodyData.sales_order_no || undefined,
@@ -2188,6 +2221,7 @@ const createInternalWorkOrder = asyncHandler(async (req, res) => {
                 })
             ),
         };
+        
 
         const internalWorkOrder = await falconInternalWorkOrder.create([jobOrderData], { session });
 
@@ -4155,7 +4189,7 @@ const updateInternalWorkOrder_11_08_2025 = asyncHandler(async (req, res) => {
 
 
 
-const updateInternalWorkOrder = asyncHandler(async (req, res) => {
+const updateInternalWorkOrder_05_09_2025 = asyncHandler(async (req, res) => {
     const session = await mongoose.startSession();
     session.startTransaction();
 
@@ -4453,6 +4487,319 @@ const updateInternalWorkOrder = asyncHandler(async (req, res) => {
         session.endSession();
     }
 });
+
+
+
+const updateInternalWorkOrder = asyncHandler(async (req, res) => {
+    const session = await mongoose.startSession();
+    session.startTransaction();
+    try {
+        const { id } = req.params; // Internal work order ID
+        // Fetch the existing internal work order
+        let internalWorkOrder = await falconInternalWorkOrder.findById(id).session(session);
+        if (!internalWorkOrder) {
+            throw new ApiError(404, 'Internal work order not found');
+        }
+        // Fetch the associated job order to validate po_quantity
+        const jobOrder = await falconJobOrder.findById(internalWorkOrder.job_order_id).session(session);
+        if (!jobOrder) {
+            throw new ApiError(404, 'Associated job order not found');
+        }
+        // Create a map of job order products for quick lookup
+        const jobOrderProductsMap = jobOrder.products.reduce((map, prod) => {
+            map[`${prod.product.toString()}-${prod.code}`] = prod.po_quantity;
+            return map;
+        }, {});
+
+        // Helper function to calculate total allocated quantity (excluding current IWO)
+        async function getTotalAllocatedQty(jobOrderId, productId, excludeIwoId) {
+            const result = await falconInternalWorkOrder.aggregate([
+                { $match: { job_order_id: jobOrderId, _id: { $ne: excludeIwoId } } },
+                { $unwind: "$products" },
+                { $match: { "products.product": productId } },
+                { $group: { _id: "$products.product", totalQty: { $sum: "$products.po_quantity" } } }
+            ]);
+            return result[0]?.totalQty || 0;
+        }
+
+        // Parse the form-data body
+        const bodyData = req.body;
+        console.log("bodyData", bodyData);
+        // Map files to their respective fields
+        const filesMap = {};
+        if (req.files) {
+            req.files.forEach(file => {
+                const fieldName = file.fieldname;
+                filesMap[fieldName] = file;
+            });
+        }
+        // Update fields only if they are provided in the request
+        if (bodyData.sales_order_no !== undefined) {
+            internalWorkOrder.sales_order_no = bodyData.sales_order_no || undefined;
+        }
+        if (bodyData.date) {
+            const parsedDateFrom = bodyData.date.from ? parseDate(bodyData.date.from, 'date.from') : internalWorkOrder.date.from;
+            const parsedDateTo = bodyData.date.to ? parseDate(bodyData.date.to, 'date.to') : internalWorkOrder.date.to;
+            internalWorkOrder.date.from = parsedDateFrom;
+            internalWorkOrder.date.to = parsedDateTo;
+        }
+        if (bodyData.products) {
+            if (typeof bodyData.products === 'string') {
+                try {
+                    bodyData.products = JSON.parse(bodyData.products);
+                } catch (err) {
+                    throw new ApiError(400, 'Invalid products JSON format');
+                }
+            }
+            // Map existing products for comparison
+            const existingProducts = internalWorkOrder.products.reduce((map, prod) => {
+                map[`${prod.product.toString()}-${prod.code}`] = prod;
+                return map;
+            }, {});
+            // Map new products
+            const newProducts = bodyData.products.reduce((map, prod) => {
+                map[`${prod.product}-${prod.code}`] = true;
+                return map;
+            }, {});
+
+            // Validate quantity for each product in the update
+            for (const product of bodyData.products) {
+                const productKey = `${product.product}-${product.code}`;
+                const jobOrderPoQuantity = jobOrderProductsMap[productKey];
+                if (jobOrderPoQuantity === undefined) {
+                    throw new ApiError(400, `Product with ID ${product.product} and code ${product.code} not found in job order`);
+                }
+            
+                // Convert product.product to ObjectId if it's a string
+                const productId =new mongoose.Types.ObjectId(product.product);
+            
+                // Get the total quantity already allocated in all IWOs (including current IWO)
+                const result = await falconInternalWorkOrder.aggregate([
+                    { $match: { job_order_id: internalWorkOrder.job_order_id } },
+                    { $unwind: "$products" },
+                    { $match: { "products.product": productId } },
+                    { $group: { _id: "$products.product", totalQty: { $sum: "$products.po_quantity" } } }
+                ]);
+                const totalAllocatedQty = result[0]?.totalQty || 0;
+            
+                // Get the existing quantity for this product in the current IWO
+                const existingProduct = internalWorkOrder.products.find(p =>
+                    p.product.toString() === product.product.toString() &&
+                    p.code === product.code
+                );
+                const existingQty = existingProduct ? existingProduct.po_quantity : 0;
+            
+                // Calculate the new total quantity: totalAllocatedQty - existingQty + newQty
+                const newQty = parseInt(product.planned_quantity);
+                const totalQtyAfterUpdate = totalAllocatedQty - existingQty + newQty;
+            
+                // Debug logs
+                console.log(`Job Order Qty: ${jobOrderPoQuantity}`);
+                console.log(`Total Allocated Qty (all IWOs): ${totalAllocatedQty}`);
+                console.log(`Existing Qty in this IWO: ${existingQty}`);
+                console.log(`New Qty: ${newQty}`);
+                console.log(`Total Qty After Update: ${totalQtyAfterUpdate}`);
+                console.log(`Is totalQtyAfterUpdate > jobOrderPoQuantity? ${totalQtyAfterUpdate > jobOrderPoQuantity}`);
+            
+                // Check if the new total quantity exceeds the Job Order quantity
+                if (totalQtyAfterUpdate > jobOrderPoQuantity) {
+                    throw new ApiError(
+                        400,
+                        `Cannot update quantity to ${newQty} for product ${product.code}. ` +
+                        `Job Order Qty: ${jobOrderPoQuantity}, Total allocated: ${totalAllocatedQty}, ` +
+                        `Existing in this IWO: ${existingQty}, New total: ${totalQtyAfterUpdate}.`
+                    );
+                }
+            }
+            
+            
+            
+
+            internalWorkOrder.products = await Promise.all(bodyData.products.map(async (product, productIndex) => {
+                console.log("product", product);
+                if (!product.product) throw new ApiError(400, `Product ID is required for product at index ${productIndex}`);
+                if (!product.system) throw new ApiError(400, `System is required for product at index ${productIndex}`);
+                if (!product.product_system) throw new ApiError(400, `Product system is required for product at index ${productIndex}`);
+                if (!product.planned_quantity) throw new ApiError(400, `PO quantity is required for product at index ${productIndex}`);
+                if (!product.code) throw new ApiError(400, `Code is required for product at index ${productIndex}`);
+                validateObjectId(product.product, `product at index ${productIndex}`);
+                validateObjectId(product.system, `system at index ${productIndex}`);
+                validateObjectId(product.product_system, `product_system at index ${productIndex}`);
+                // Validate po_quantity against job order
+                const productKey = `${product.product}-${product.code}`;
+                const jobOrderPoQuantity = jobOrderProductsMap[productKey];
+                if (jobOrderPoQuantity === undefined) {
+                    throw new ApiError(400, `Product with ID ${product.product} and code ${product.code} at index ${productIndex} not found in job order`);
+                }
+                const parsedPoQuantity = parseInt(product.planned_quantity);
+                if (parsedPoQuantity > jobOrderPoQuantity) {
+                    throw new ApiError(400, `Quantity exceeds job order PO quantity (${jobOrderPoQuantity})`);
+                }
+                return {
+                    product: product.product,
+                    system: product.system,
+                    product_system: product.product_system,
+                    code: product.code,
+                    po_quantity: parsedPoQuantity,
+                    semifinished_details: await Promise.all(product.semifinished_details.map(async (sfDetail, sfIndex) => {
+                        if (!sfDetail.semifinished_id) throw new ApiError(400, `Semifinished ID is required for semifinished_details at index ${sfIndex} in product ${productIndex}`);
+                        const sfFileField = `products[${productIndex}][semifinished_details][${sfIndex}][file]`;
+                        const sfFile = filesMap[sfFileField];
+                        let sfFileUrl = sfDetail.file_url !== undefined ? sfDetail.file_url : internalWorkOrder.products[productIndex]?.semifinished_details[sfIndex]?.file_url;
+                        const sfRemoveFileField = `products[${productIndex}][semifinished_details][${sfIndex}][remove_file]`;
+                        const sfRemoveFile = bodyData[sfRemoveFileField] === 'true';
+                        if (sfRemoveFile && sfFileUrl) {
+                            const oldFileKey = sfFileUrl.split('/').slice(3).join('/');
+                            await deleteObject(oldFileKey);
+                            sfFileUrl = undefined;
+                        }
+                        else if (sfFile) {
+                            if (sfFileUrl) {
+                                const oldFileKey = sfFileUrl.split('/').slice(3).join('/');
+                                await deleteObject(oldFileKey);
+                            }
+                            const sfFileName = `internal-work-orders/semifinished/${Date.now()}-${sanitizeFilename(sfFile.originalname)}`;
+                            const sfUploadResult = await putObject(
+                                { data: sfFile.buffer, mimetype: sfFile.mimetype },
+                                sfFileName
+                            );
+                            sfFileUrl = sfUploadResult.url;
+                        }
+                        return {
+                            semifinished_id: sfDetail.semifinished_id,
+                            file_url: sfFileUrl,
+                            remarks: sfDetail.remarks !== undefined ? sfDetail.remarks : internalWorkOrder.products[productIndex]?.semifinished_details[sfIndex]?.remarks,
+                            processes: await Promise.all(sfDetail.processes.map(async (process, processIndex) => {
+                                if (!process.name) throw new ApiError(400, `Process name is required for process at index ${processIndex} in semifinished_details ${sfIndex}, product ${productIndex}`);
+                                const processFileField = `products[${productIndex}][semifinished_details][${sfIndex}][processes][${processIndex}][file]`;
+                                const processFile = filesMap[processFileField];
+                                let processFileUrl = process.file_url !== undefined ? process.file_url : internalWorkOrder.products[productIndex]?.semifinished_details[sfIndex]?.processes[processIndex]?.file_url;
+                                const processRemoveFileField = `products[${productIndex}][semifinished_details][${sfIndex}][processes][${processIndex}][remove_file]`;
+                                const processRemoveFile = bodyData[processRemoveFileField] === 'true';
+                                if (processRemoveFile && processFileUrl) {
+                                    const oldFileKey = processFileUrl.split('/').slice(3).join('/');
+                                    await deleteObject(oldFileKey);
+                                    processFileUrl = undefined;
+                                }
+                                else if (processFile) {
+                                    if (processFileUrl) {
+                                        const oldFileKey = processFileUrl.split('/').slice(3).join('/');
+                                        await deleteObject(oldFileKey);
+                                    }
+                                    const processFileName = `internal-work-orders/processes/${Date.now()}-${sanitizeFilename(processFile.originalname)}`;
+                                    const processUploadResult = await putObject(
+                                        { data: processFile.buffer, mimetype: processFile.mimetype },
+                                        processFileName
+                                    );
+                                    processFileUrl = processUploadResult.url;
+                                }
+                                return {
+                                    name: process.name,
+                                    file_url: processFileUrl,
+                                    remarks: process.remarks !== undefined ? process.remarks : internalWorkOrder.products[productIndex]?.semifinished_details[sfIndex]?.processes[processIndex]?.remarks,
+                                };
+                            })),
+                        };
+                    })),
+                };
+            }));
+            // Identify products to remove
+            const productsToRemove = [];
+            for (const key in existingProducts) {
+                if (!newProducts[key]) {
+                    const existingProd = existingProducts[key];
+                    productsToRemove.push({
+                        product_id: existingProd.product.toString(),
+                        code: existingProd.code
+                    });
+                }
+            }
+            // Delete production records for removed products
+            if (productsToRemove.length > 0) {
+                console.log('Removing production for:', productsToRemove); // Debug log
+                await falconProduction.deleteMany({
+                    internal_work_order: id,
+                    'product.product_id': { $in: productsToRemove.map(p => p.product_id) },
+                    'product.code': { $in: productsToRemove.map(p => p.code) }
+                }).session(session);
+            }
+        }
+        // Save the updated internal work order
+        await internalWorkOrder.save({ session });
+        // Handle production records
+        const jobOrderId = internalWorkOrder.job_order_id;
+        const dateFrom = internalWorkOrder.date.from;
+        // Fetch existing production records for this internal work order
+        const existingProductions = await falconProduction.find({ internal_work_order: id }).session(session);
+        // Map existing production records by product and process
+        const existingProdMap = {};
+        existingProductions.forEach(prod => {
+            const key = `${prod.product.product_id.toString()}-${prod.product.code}-${prod.process_name}`;
+            existingProdMap[key] = prod;
+        });
+        // Generate and update production records for remaining products
+        const productionDocs = [];
+        for (const product of internalWorkOrder.products) {
+            for (const sfDetail of product.semifinished_details) {
+                for (const process of sfDetail.processes) {
+                    const index = sfDetail.processes.indexOf(process);
+                    const key = `${product.product.toString()}-${product.code}-${process.name.toLowerCase()}`;
+                    const existingProd = existingProdMap[key];
+                    const productionData = {
+                        job_order: jobOrderId,
+                        internal_work_order: id,
+                        semifinished_id: sfDetail.semifinished_id,
+                        product: {
+                            product_id: product.product,
+                            code: product.code,
+                            width: product.width,
+                            height: product.height,
+                            po_quantity: product.po_quantity,
+                            achieved_quantity: existingProd?.product?.achieved_quantity || 0,
+                            rejected_quantity: existingProd?.product?.rejected_quantity || 0,
+                            recycled_quantity: existingProd?.product?.recycled_quantity || 0,
+                        },
+                        process_name: process.name.toLowerCase(),
+                        process_sequence: {
+                            current: { name: process.name.toLowerCase(), index },
+                            previous: index > 0 ? { name: sfDetail.processes[index - 1].name.toLowerCase(), index: index - 1 } : null,
+                            next: index < sfDetail.processes.length - 1 ? { name: sfDetail.processes[index + 1].name.toLowerCase(), index: index + 1 } : null,
+                        },
+                        available_quantity: index === 0 ? product.po_quantity : (existingProd?.available_quantity || 0),
+                        status: index === 0 ? 'Pending' : (existingProd?.status || 'Pending'),
+                        date: dateFrom,
+                        created_by: req.user._id,
+                        updated_by: req.user._id,
+                    };
+                    if (existingProd) {
+                        console.log('Updating existing production:', existingProd._id, key);
+                        if (existingProd instanceof mongoose.Model) {
+                            Object.assign(existingProd, productionData);
+                            await existingProd.save({ session });
+                        } else {
+                            console.error('existingProd is not a Mongoose document:', existingProd);
+                        }
+                    } else {
+                        productionDocs.push(productionData);
+                    }
+                }
+            }
+        }
+        // Insert new production records
+        if (productionDocs.length > 0) {
+            await falconProduction.insertMany(productionDocs, { session });
+        }
+        await session.commitTransaction();
+        return res.status(200).json(new ApiResponse(200, internalWorkOrder, 'Internal work order and production records updated successfully'));
+    } catch (error) {
+        await session.abortTransaction();
+        console.error('Error in updateInternalWorkOrder:', error);
+        throw error;
+    } finally {
+        session.endSession();
+    }
+});
+
 
 
 
