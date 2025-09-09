@@ -2143,13 +2143,36 @@ const productionQCCheck = asyncHandler(async (req, res) => {
         console.log("production after subtraction", production);
 
 
-        if (production.process_sequence.previous) {
-            const previousProduction = await falconProduction.findOne({
-                job_order: production.job_order,
-                semifinished_id: production.semifinished_id,
-                'process_sequence.current.name': production.process_sequence.previous.name,
-            });
+        // if (production.process_sequence.previous) {
+        //     const previousProduction = await falconProduction.findOne({
+        //         job_order: production.job_order,
+        //         semifinished_id: production.semifinished_id,
+        //         'process_sequence.current.name': production.process_sequence.previous.name,
+        //     });
 
+        //     if (previousProduction) {
+        //         // Deduct rejected quantity from previous stage
+        //         previousProduction.product.achieved_quantity -= rejected_quantity;
+        //         // Ensure previous stage's achieved_quantity doesn't go below zero
+        //         if (previousProduction.product.achieved_quantity < 0) {
+        //             previousProduction.product.achieved_quantity = 0;
+        //         }
+        //         await previousProduction.save();
+        //     }
+        // }
+
+
+        // Create a new QC Check record
+       
+       
+       
+        let currentProduction = production;
+        while (currentProduction.process_sequence.previous) {
+            const previousProduction = await falconProduction.findOne({
+                job_order: currentProduction.job_order,
+                semifinished_id: currentProduction.semifinished_id,
+                'process_sequence.current.name': currentProduction.process_sequence.previous.name,
+            });
             if (previousProduction) {
                 // Deduct rejected quantity from previous stage
                 previousProduction.product.achieved_quantity -= rejected_quantity;
@@ -2158,11 +2181,20 @@ const productionQCCheck = asyncHandler(async (req, res) => {
                     previousProduction.product.achieved_quantity = 0;
                 }
                 await previousProduction.save();
+                currentProduction = previousProduction; // Move to the next previous process
+            } else {
+                break; // No more previous productions found
             }
         }
-
-
-        // Create a new QC Check record
+        
+       
+       
+       
+       
+       
+       
+       
+       
         const qcCheck = new falconQCCheck({
             production: productionId,
             job_order: production.job_order,
@@ -2878,11 +2910,35 @@ const getProductionsWithInviteQC = asyncHandler(async (req, res) => {
 });
 
 
+const getPreviousProcessesRelatedToSemiFinishedId = asyncHandler(async (req, res) => {
+    try {
+        const { semifinished_id } = req.query;
+        console.log("semifinished_id",semifinished_id);
+        // Query your database to find all previous processes for this semifinished_id
+        const productions = await falconProduction.find({
+          semifinished_id,
+        }).sort({ 'process_sequence.current.index': 1 }); // Sort by process sequence index
+      
+        // Extract the process names (excluding the current process)
+        const previousProcesses = productions
+          .filter(p => p.process_sequence.current.name !== req.query.current_process)
+          .map(p => p.process_sequence.current.name);
+        
+      
+        res.json({ previousProcesses });
+    } catch (error) {
+        console.log('Error:', error);
+        return res.status(500).json({
+            success: false,
+            message: `Error fetching invited QC production records: ${error.message}`,
+        });
+    }
+});
 
 
 
 export {
-    getProductionsByProcess, startProduction, productionQCCheck, getProductionById, getProductionProcesses,updateInvieQc, getProductionsWithInviteQC
+    getProductionsByProcess, startProduction, productionQCCheck, getProductionById, getProductionProcesses,updateInvieQc, getProductionsWithInviteQC,getPreviousProcessesRelatedToSemiFinishedId
 }
 
 // {
