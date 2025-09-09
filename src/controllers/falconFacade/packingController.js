@@ -535,6 +535,153 @@ const createPackingBundle = asyncHandler(async (req, res) => {
     return sendResponse(res, new ApiResponse(201, formattedPackings, 'Packings created successfully'));
 });
 
+
+
+const createPackingBundle_09_09_2025 = asyncHandler(async (req, res) => {
+    let bodyData = req.body;
+    const userId = req.user?._id?.toString();
+
+    // Validate userId
+    if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
+        throw new ApiError(400, 'Invalid or missing user ID in request');
+    }
+
+    // Parse the data field if it exists and is a string
+    if (bodyData.data && typeof bodyData.data === 'string') {
+        try {
+            bodyData = JSON.parse(bodyData.data);
+        } catch (error) {
+            throw new ApiError(400, 'Invalid JSON format in data field');
+        }
+    }
+
+    const packingItems = Array.isArray(bodyData) ? bodyData : [bodyData];
+    const createdPackings = [];
+
+    // Step 1: Check for duplicate QR codes
+    const qrCodeIds = packingItems.map(item => item.qrCodeId).filter(qr => qr);
+    if (qrCodeIds.length > 0) {
+        const existingPackings = await falconPacking.find({
+            qr_id: { $in: qrCodeIds }
+        }).select('qr_id').lean();
+
+        const existingQrIds = existingPackings.map(packing => packing.qr_id);
+        const duplicateQrIds = qrCodeIds.filter(qrId => existingQrIds.includes(qrId));
+
+        if (duplicateQrIds.length > 0) {
+            throw new ApiError(400, `Duplicate QR code IDs found: ${duplicateQrIds.join(', ')}`);
+        }
+    }
+
+    // Step 2: Ensure temp directory exists
+    const tempDir = path.join(__dirname, '../../public/temp');
+    if (!fs.existsSync(tempDir)) {
+        fs.mkdirSync(tempDir, { recursive: true });
+        console.log('Created temp directory:', tempDir);
+    }
+
+    // Step 3: Handle file uploads
+    const uploadedFiles = [];
+    if (req.files && req.files.length > 0) {
+        for (const file of req.files) {
+            try {
+                const sanitizedFilename = sanitizeFilename(file.originalname);
+                const s3Key = `falcon-packing/${Date.now()}-${sanitizedFilename}`;
+                const { url } = await putObject(
+                    { data: file.buffer, mimetype: file.mimetype },
+                    s3Key
+                );
+
+                uploadedFiles.push({
+                    file_name: file.originalname,
+                    file_url: url,
+                    uploaded_at: new Date(),
+                });
+            } catch (error) {
+                throw new ApiError(500, `File upload failed: ${error.message}`);
+            }
+        }
+    }
+
+    // Step 4: Process each packing item
+    for (const item of packingItems) {
+        const packingData = {
+            work_order: item.work_order || null,
+            job_order_id: item.job_order_id || null,
+            product: item.product,
+            semi_finished_id: item.semi_finished_id,
+            semi_finished_quantity: item.semi_finished_quantity,
+            rejected_quantity: item.rejected_quantity || 0,
+            files: uploadedFiles.length > 0 ? uploadedFiles : undefined,
+            packed_by: userId,
+            qr_id: item.qrCodeId || null, // Store qr_id if provided
+        };
+
+        const { error, value } = packingSchema.validate(packingData, { abortEarly: false });
+        if (error) {
+            throw new ApiError(400, 'Validation failed for packing creation', error.details);
+        }
+
+        // Check achieved_quantity from the last production process
+        const lastProduction = await mongoose.model('falconProduction').findOne({
+            semifinished_id: value.semi_finished_id,
+        }).sort({ 'process_sequence.current.index': -1, createdAt: -1 });
+
+        if (!lastProduction || lastProduction.product.achieved_quantity <= 0) {
+            throw new ApiError(400, `Cannot create bundle for semi_finished_id ${value.semi_finished_id} as achieved quantity is zero.`);
+        }
+
+        // Calculate total packed quantity for this semi_finished_id
+        const totalPacked = await falconPacking.aggregate([
+            { $match: { semi_finished_id: value.semi_finished_id } },
+            { $group: { _id: null, totalPacked: { $sum: "$semi_finished_quantity" } } }
+        ]).then(result => result[0]?.totalPacked || 0);
+
+        const remainingQuantity = lastProduction.product.achieved_quantity - totalPacked;
+        if (value.semi_finished_quantity > remainingQuantity) {
+            throw new ApiError(400, `Cannot pack ${value.semi_finished_quantity} units for semi_finished_id ${value.semi_finished_id}. Only ${remainingQuantity} units remain available.`);
+        }
+
+        // Check references
+        const [product, jobOrder] = await Promise.all([
+            mongoose.model('falconProduct').findById(value.product),
+            value.job_order_id
+                ? mongoose.model('falconJobOrder').findById(value.job_order_id)
+                : Promise.resolve(null),
+        ]);
+
+        if (!product) throw new ApiError(400, `Product not found with ID: ${value.product}`);
+        if (value.job_order_id && !jobOrder)
+            throw new ApiError(400, `Job order not found with ID: ${value.job_order_id}`);
+
+        const packing = await falconPacking.create(value);
+        createdPackings.push(packing);
+    }
+
+    const populatedPackings = await falconPacking
+        .find({ _id: { $in: createdPackings.map(p => p._id) } })
+        .populate({
+            path: 'product',
+            select: 'name',
+            match: { is_deleted: false },
+        })
+        .populate({
+            path: 'job_order_id',
+            select: 'job_order_id',
+            match: { isDeleted: false },
+        })
+        .populate({
+            path: 'packed_by',
+            select: 'username email',
+            match: { isDeleted: false },
+        })
+        .lean();
+
+    const formattedPackings = populatedPackings.map((packing) => formatDateToIST(packing));
+
+    return sendResponse(res, new ApiResponse(201, formattedPackings, 'Packings created successfully'));
+});
+
 // Update Falcon Packing with QR ----- API TO SAVE PACKING QR DETAILS
 
 
@@ -2013,7 +2160,7 @@ const getWorkOrderDetails_08_09_2025 = asyncHandler(async (req, res) => {
 });
 
 
-const getWorkOrderDetails = asyncHandler(async (req, res) => {
+const getWorkOrderDetails_09_09_2025 = asyncHandler(async (req, res) => {
     try {
         const { workOrderId, jobOrderId } = req.params;
         if (!mongoose.Types.ObjectId.isValid(workOrderId) || !mongoose.Types.ObjectId.isValid(jobOrderId)) {
@@ -2202,6 +2349,214 @@ const getWorkOrderDetails = asyncHandler(async (req, res) => {
         });
     }
 });
+
+
+const getWorkOrderDetails = asyncHandler(async (req, res) => {
+    try {
+        const { workOrderId, jobOrderId } = req.params;
+        if (!mongoose.Types.ObjectId.isValid(workOrderId) || !mongoose.Types.ObjectId.isValid(jobOrderId)) {
+            return res.status(400).json({
+                statusCode: 400,
+                success: false,
+                message: 'Invalid work order ID or job order ID format'
+            });
+        }
+
+        const jobOrderDetails = await falconJobOrder.aggregate([
+            {
+                $match: {
+                    _id: new mongoose.Types.ObjectId(jobOrderId),
+                    work_order_number: new mongoose.Types.ObjectId(workOrderId)
+                }
+            },
+            {
+                $lookup: {
+                    from: 'falconinternalworkorders',
+                    let: { job_order_id: '$_id' },
+                    pipeline: [
+                        {
+                            $match: {
+                                $expr: { $eq: ['$job_order_id', '$$job_order_id'] }
+                            }
+                        },
+                        { $unwind: '$products' },
+                        { $unwind: '$products.semifinished_details' },
+                        {
+                            $project: {
+                                _id: 0,
+                                product_id: '$products.product',
+                                semifinished_id: '$products.semifinished_details.semifinished_id',
+                                code: '$products.code'
+                            }
+                        }
+                    ],
+                    as: 'internalWorkOrderDetails'
+                }
+            },
+            {
+                $lookup: {
+                    from: 'falconproductions',
+                    let: { job_order_id: '$_id' },
+                    pipeline: [
+                        {
+                            $match: {
+                                $expr: { $eq: ['$job_order', '$$job_order_id'] }
+                            }
+                        },
+                        { $unwind: '$product' },
+                        {
+                            $sort: {
+                                'process_sequence.current.index': -1,
+                                createdAt: -1
+                            }
+                        },
+                        {
+                            $group: {
+                                _id: {
+                                    semifinished_id: '$semifinished_id',
+                                    product_id: '$product.product_id'
+                                },
+                                achieved_quantity: { $first: '$product.achieved_quantity' }
+                            }
+                        },
+                        {
+                            $project: {
+                                _id: 0,
+                                semifinished_id: '$_id.semifinished_id',
+                                product_id: '$_id.product_id',
+                                achieved_quantity: 1
+                            }
+                        }
+                    ],
+                    as: 'lastProcessAchievedQuantities'
+                }
+            },
+            {
+                $addFields: {
+                    products: {
+                        $map: {
+                            input: '$products',
+                            as: 'p',
+                            in: {
+                                $mergeObjects: [
+                                    '$$p',
+                                    {
+                                        semifinished_ids: {
+                                            $filter: {
+                                                input: {
+                                                    $map: {
+                                                        input: {
+                                                            $filter: {
+                                                                input: '$internalWorkOrderDetails',
+                                                                as: 'iwo',
+                                                                cond: {
+                                                                    $and: [
+                                                                        { $eq: ['$$iwo.product_id', '$$p.product'] },
+                                                                        { $eq: ['$$iwo.code', '$$p.code'] }
+                                                                    ]
+                                                                }
+                                                            }
+                                                        },
+                                                        as: 'iwo',
+                                                        in: {
+                                                            $mergeObjects: [
+                                                                { id: '$$iwo.semifinished_id' },
+                                                                {
+                                                                    achieved_quantity: {
+                                                                        $let: {
+                                                                            vars: {
+                                                                                lastProcess: {
+                                                                                    $arrayElemAt: [
+                                                                                        {
+                                                                                            $filter: {
+                                                                                                input: '$lastProcessAchievedQuantities',
+                                                                                                as: 'lpaq',
+                                                                                                cond: {
+                                                                                                    $and: [
+                                                                                                        { $eq: ['$$lpaq.semifinished_id', '$$iwo.semifinished_id'] },
+                                                                                                        { $eq: ['$$lpaq.product_id', '$$p.product'] }
+                                                                                                    ]
+                                                                                                }
+                                                                                            }
+                                                                                        },
+                                                                                        0
+                                                                                    ]
+                                                                                }
+                                                                            },
+                                                                            in: {
+                                                                                $ifNull: ['$$lastProcess.achieved_quantity', 0]
+                                                                            }
+                                                                        }
+                                                                    }
+                                                                }
+                                                            ]
+                                                        }
+                                                    }
+                                                },
+                                                as: 'sf',
+                                                cond: { $gt: ['$$sf.achieved_quantity', 0] }
+                                            }
+                                        }
+                                    }
+                                ]
+                            }
+                        }
+                    }
+                }
+            },
+            {
+                $addFields: {
+                    products: {
+                        $filter: {
+                            input: '$products',
+                            as: 'product',
+                            cond: { $gt: [{ $size: '$$product.semifinished_ids' }, 0] } // Exclude products with no valid semi-finished IDs
+                        }
+                    }
+                }
+            },
+            {
+                $project: {
+                    _id: 1,
+                    job_order_id: 1,
+                    work_order_number: 1,
+                    date: 1,
+                    prod_requset_date: 1,
+                    prod_requirement_date: 1,
+                    products: 1,
+                    files: 1,
+                    created_by: 1,
+                    updated_by: 1,
+                    createdAt: 1,
+                    updatedAt: 1
+                }
+            }
+        ]);
+
+        if (!jobOrderDetails.length) {
+            return res.status(404).json({
+                statusCode: 404,
+                success: false,
+                message: 'Job order not found'
+            });
+        }
+
+        res.status(200).json({
+            statusCode: 200,
+            success: true,
+            message: 'Job order details fetched successfully',
+            data: jobOrderDetails[0]
+        });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({
+            statusCode: 500,
+            success: false,
+            message: 'Internal server error'
+        });
+    }
+});
+
 
 
 
