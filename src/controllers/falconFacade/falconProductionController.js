@@ -3070,7 +3070,7 @@ const getProductionsWithInviteQC = asyncHandler(async (req, res) => {
 });
 
 
-const getPreviousProcessesRelatedToSemiFinishedId = asyncHandler(async (req, res) => {
+const getPreviousProcessesRelatedToSemiFinishedId_09_09_2025 = asyncHandler(async (req, res) => {
     try {
         const { semifinished_id } = req.query;
         console.log("semifinished_id",semifinished_id);
@@ -3095,6 +3095,43 @@ const getPreviousProcessesRelatedToSemiFinishedId = asyncHandler(async (req, res
     }
 });
 
+const getPreviousProcessesRelatedToSemiFinishedId = asyncHandler(async (req, res) => {
+    try {
+        const { semifinished_id, current_process } = req.query;
+        console.log("semifinished_id:", semifinished_id);
+        console.log("current_process:", current_process);
+
+        // Query your database to find all productions for this semifinished_id
+        const productions = await falconProduction.find({
+            semifinished_id,
+        }).sort({ 'process_sequence.current.index': 1 }); // Sort by process sequence index
+
+        // Find the index of the current process
+        const currentProcessIndex = productions.findIndex(
+            p => p.process_sequence.current.name === current_process
+        );
+
+        if (currentProcessIndex === -1) {
+            return res.status(400).json({
+                success: false,
+                message: 'Current process not found in the sequence',
+            });
+        }
+
+        // Extract only the previous processes (those before the current process)
+        const previousProcesses = productions
+            .slice(0, currentProcessIndex) // Get all processes before the current one
+            .map(p => p.process_sequence.current.name);
+
+        res.json({ previousProcesses });
+    } catch (error) {
+        console.log('Error:', error);
+        return res.status(500).json({
+            success: false,
+            message: `Error fetching previous processes: ${error.message}`,
+        });
+    }
+});
 
 
 export {
