@@ -384,7 +384,8 @@ const getFalconWorkOrders = asyncHandler(async (req, res) => {
             select: 'name address',
             match: { isDeleted: false },
         })
-        .lean();
+        .lean()
+        .sort({ createdA: -1 });
 
     if (!workOrders?.length) {
         return sendResponse(
