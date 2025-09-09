@@ -2074,7 +2074,7 @@ const productionQCCheck1 = asyncHandler(async (req, res) => {
     }
 });
 
-const productionQCCheck = asyncHandler(async (req, res) => {
+const productionQCCheck_09_09_2025 = asyncHandler(async (req, res) => {
     try {
         console.log("came here in qc");
         const { productionId } = req.params;
@@ -2257,6 +2257,166 @@ const productionQCCheck = asyncHandler(async (req, res) => {
         });
     }
 });
+
+
+
+
+const productionQCCheck = asyncHandler(async (req, res) => {
+    try {
+        console.log("came here in qc");
+        const { productionId } = req.params;
+        const { rejected_quantity, process_name, remarks } = req.body;
+        console.log("rejected_quantity", rejected_quantity);
+        const userId = req.user?._id;
+
+        // Validate inputs
+        if (!productionId) {
+            return res.status(400).json({
+                success: false,
+                message: 'Production ID is required',
+            });
+        }
+        if (!userId) {
+            return res.status(401).json({
+                success: false,
+                message: 'User not authenticated',
+            });
+        }
+        if (typeof rejected_quantity !== 'number' || rejected_quantity < 0) {
+            return res.status(400).json({
+                success: false,
+                message: 'Rejected quantity must be a non-negative number',
+            });
+        }
+
+        // Allow process_name to be optional; use production's process_name for first process
+        const effectiveProcessName = process_name || req.body.process_name_from_production || req.body.process;
+        if (!effectiveProcessName || typeof effectiveProcessName !== 'string') {
+            return res.status(400).json({
+                success: false,
+                message: 'Process name is required and must be a string',
+            });
+        }
+
+        // Find the current production record
+        const currentProduction = await falconProduction.findById(productionId);
+        if (!currentProduction) {
+            return res.status(404).json({
+                success: false,
+                message: 'Production record not found',
+            });
+        }
+
+        // Validate rejected_quantity against achieved_quantity
+        if (rejected_quantity > currentProduction.product.achieved_quantity) {
+            return res.status(400).json({
+                success: false,
+                message: `Rejected quantity (${rejected_quantity}) cannot exceed achieved quantity (${currentProduction.product.achieved_quantity})`,
+            });
+        }
+
+        // Subtract rejected_quantity from current production and update its rejected_quantity
+        currentProduction.product.achieved_quantity -= rejected_quantity;
+        currentProduction.product.rejected_quantity += rejected_quantity; // Only for current production
+        if (currentProduction.product.achieved_quantity < 0) {
+            currentProduction.product.achieved_quantity = 0;
+        }
+
+        // Fetch all productions for this semifinished_id, sorted by process sequence
+        const allProductions = await falconProduction.find({
+            job_order: currentProduction.job_order,
+            semifinished_id: currentProduction.semifinished_id,
+        }).sort({ 'process_sequence.current.index': 1 });
+
+        // Find the index of the selected process
+        const selectedProcessIndex = allProductions.findIndex(
+            p => p.process_sequence.current.name === effectiveProcessName
+        );
+
+        if (selectedProcessIndex === -1) {
+            return res.status(400).json({
+                success: false,
+                message: 'Selected process not found in sequence',
+            });
+        }
+
+        // Deduct rejected quantity from the selected process and all subsequent processes
+        // (but do NOT update their rejected_quantity)
+        for (let i = selectedProcessIndex; i < allProductions.length; i++) {
+            const productionToUpdate = allProductions[i];
+            // Skip updating rejected_quantity for non-current productions
+            if (productionToUpdate._id.toString() !== currentProduction._id.toString()) {
+                productionToUpdate.product.achieved_quantity -= rejected_quantity;
+                if (productionToUpdate.product.achieved_quantity < 0) {
+                    productionToUpdate.product.achieved_quantity = 0;
+                }
+                await productionToUpdate.save();
+            }
+        }
+
+        // Create a new QC Check record
+        const qcCheck = new falconQCCheck({
+            production: productionId,
+            job_order: currentProduction.job_order,
+            product_id: currentProduction.product.product_id,
+            semifinished_id: currentProduction.semifinished_id,
+            rejected_quantity,
+            recycled_quantity: 0,
+            process_name: effectiveProcessName,
+            remarks,
+            checked_by: userId,
+            updated_by: userId,
+        });
+        await qcCheck.save();
+
+        // Aggregate rejected and recycled quantities from all QC checks for this production
+        const qcChecks = await falconQCCheck.find({ production: productionId });
+        console.log("qcChecks", qcChecks);
+        const totalRejected = qcChecks.reduce((sum, check) => sum + check.rejected_quantity, 0);
+        console.log("totalRejected", totalRejected);
+        const totalRecycled = qcChecks.reduce((sum, check) => sum + check.recycled_quantity, 0);
+
+        // Update current production record with aggregated values
+        currentProduction.product.rejected_quantity = totalRejected;
+        currentProduction.product.recycled_quantity = totalRecycled;
+        currentProduction.qc_checked_by = userId;
+        currentProduction.updated_by = userId;
+        currentProduction.status = rejected_quantity > 0 ? 'Pending QC' : currentProduction.status;
+        await currentProduction.save();
+
+        return res.status(200).json({
+            success: true,
+            message: 'QC check completed successfully',
+            data: {
+                qc_check_id: qcCheck._id,
+                production_id: currentProduction._id,
+                job_order: currentProduction.job_order,
+                semifinished_id: currentProduction.semifinished_id,
+                product: {
+                    product_id: currentProduction.product.product_id,
+                    po_quantity: currentProduction.product.po_quantity,
+                    achieved_quantity: currentProduction.product.achieved_quantity,
+                    rejected_quantity: currentProduction.product.rejected_quantity,
+                    recycled_quantity: currentProduction.product.recycled_quantity,
+                },
+                process_name: effectiveProcessName,
+                remarks,
+                checked_by: userId,
+                status: currentProduction.status,
+                created_at: qcCheck.createdAt.toISOString(),
+                updated_at: qcCheck.updatedAt.toISOString(),
+            },
+        });
+    } catch (error) {
+        console.error('Error in production QC check:', error);
+        return res.status(500).json({
+            success: false,
+            message: 'Error performing QC check: ' + error.message,
+        });
+    }
+});
+
+
 
 
 
