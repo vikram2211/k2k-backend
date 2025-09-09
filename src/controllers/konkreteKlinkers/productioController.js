@@ -4472,7 +4472,7 @@ export const handleDailyProductionActions = async (req, res) => {
         if (!activeProductions.has(productionKey)) {
           const intervalId = setInterval(
             () => simulateProductionCounts(job_order, product_id, prodId),
-            10000
+            1000
           );
           activeProductions.set(productionKey, intervalId);
         }
