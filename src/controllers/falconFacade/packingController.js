@@ -2561,7 +2561,7 @@ const getWorkOrderDetails_09_09_2025_4PM = asyncHandler(async (req, res) => {
 
 
 
-const getWorkOrderDetails = asyncHandler(async (req, res) => {
+const getWorkOrderDetails_10_09_2025 = asyncHandler(async (req, res) => {
     try {
         const { workOrderId, jobOrderId } = req.params;
         if (!mongoose.Types.ObjectId.isValid(workOrderId) || !mongoose.Types.ObjectId.isValid(jobOrderId)) {
@@ -2763,6 +2763,186 @@ const getWorkOrderDetails = asyncHandler(async (req, res) => {
         });
     }
 });
+
+
+
+const getWorkOrderDetails = asyncHandler(async (req, res) => {
+    try {
+        const { workOrderId, jobOrderId } = req.params;
+        if (!mongoose.Types.ObjectId.isValid(workOrderId) || !mongoose.Types.ObjectId.isValid(jobOrderId)) {
+            return res.status(400).json({
+                statusCode: 400,
+                success: false,
+                message: 'Invalid work order ID or job order ID format'
+            });
+        }
+
+        const jobOrderDetails = await falconJobOrder.aggregate([
+            {
+              $match: {
+                _id: new mongoose.Types.ObjectId(jobOrderId),
+                work_order_number: new mongoose.Types.ObjectId(workOrderId)
+              }
+            },
+            {
+              $lookup: {
+                from: 'falconinternalworkorders',
+                let: { job_order_id: '$_id' },
+                pipeline: [
+                  {
+                    $match: {
+                      $expr: { $eq: ['$job_order_id', '$$job_order_id'] }
+                    }
+                  },
+                  { $unwind: '$products' },
+                  { $unwind: '$products.semifinished_details' },
+                  {
+                    $project: {
+                      _id: 0,
+                      product_id: '$products.product',
+                      quantity: '$products.po_quantity',
+                      semifinished_id: '$products.semifinished_details.semifinished_id',
+                      code: '$products.code'
+                    }
+                  }
+                ],
+                as: 'internalWorkOrderDetails'
+              }
+            },
+            {
+              $lookup: {
+                from: 'falconproductions',
+                let: { job_order_id: '$_id' },
+                pipeline: [
+                  {
+                    $match: {
+                      $expr: { $eq: ['$job_order', '$$job_order_id'] }
+                    }
+                  },
+                  { $unwind: '$product' },
+                  {
+                    $sort: {
+                      'process_sequence.current.index': -1,
+                      createdAt: -1
+                    }
+                  },
+                  {
+                    $group: {
+                      _id: {
+                        semifinished_id: '$semifinished_id',
+                        product_id: '$product.product_id'
+                      },
+                      achieved_quantity: { $first: '$product.achieved_quantity' }
+                    }
+                  },
+                  {
+                    $project: {
+                      _id: 0,
+                      semifinished_id: '$_id.semifinished_id',
+                      product_id: '$_id.product_id',
+                      achieved_quantity: 1
+                    }
+                  }
+                ],
+                as: 'lastProcessAchievedQuantities'
+              }
+            },
+            {
+              $lookup: {
+                from: 'falconpackings',
+                let: { job_order_id: '$_id' },
+                pipeline: [
+                  {
+                    $match: {
+                      $expr: { $eq: ['$job_order_id', '$$job_order_id'] },
+                      delivery_stage: 'Packed'
+                    }
+                  },
+                  {
+                    $group: {
+                      _id: '$semi_finished_id',
+                      total_packed: { $sum: '$semi_finished_quantity' }
+                    }
+                  },
+                  {
+                    $project: {
+                      _id: 0,
+                      semifinished_id: '$_id',
+                      total_packed: 1
+                    }
+                  }
+                ],
+                as: 'packedQuantities'
+              }
+            }
+          ]);
+          
+
+          if (!jobOrderDetails.length) {
+            return res.status(404).json({
+              statusCode: 404,
+              success: false,
+              message: 'Job order not found'
+            });
+          }
+          
+          // Process the results in memory
+          const processedJobOrder = jobOrderDetails[0];
+          
+          // Add semifinished_ids with max_pack_qty
+          processedJobOrder.products = processedJobOrder.products.map(product => {
+            const productKey = product.product.toString();
+            const productCode = product.code;
+          
+            // Filter internal work order details for this product
+            const iwoDetails = processedJobOrder.internalWorkOrderDetails.filter(
+              iwo => iwo.product_id.toString() === productKey && iwo.code === productCode
+            );
+          
+            // Add semifinished_ids with max_pack_qty
+            product.semifinished_ids = iwoDetails.map(iwo => {
+              const achievedQty = processedJobOrder.lastProcessAchievedQuantities.find(
+                lpaq => lpaq.semifinished_id === iwo.semifinished_id && lpaq.product_id.toString() === productKey
+              )?.achieved_quantity || 0;
+          
+              const packedQty = processedJobOrder.packedQuantities.find(
+                pq => pq.semifinished_id === iwo.semifinished_id
+              )?.total_packed || 0;
+          
+              return {
+                id: iwo.semifinished_id,
+                achieved_quantity: achievedQty,
+                po_quantity: iwo.quantity,
+                max_pack_qty: achievedQty - packedQty
+              };
+            }).filter(sf => sf.achieved_quantity > 0);;
+          
+            return product;
+          });
+          
+          // Filter products with valid semifinished_ids
+          processedJobOrder.products = processedJobOrder.products.filter(
+            product => product.semifinished_ids && product.semifinished_ids.length > 0
+          );
+          
+          res.status(200).json({
+            statusCode: 200,
+            success: true,
+            message: 'Job order details fetched successfully',
+            data: processedJobOrder
+          });
+          
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({
+            statusCode: 500,
+            success: false,
+            message: 'Internal server error'
+        });
+    }
+});
+
+
 
 
 
