@@ -4879,17 +4879,21 @@ const updateInternalWorkOrder = asyncHandler(async (req, res) => {
             const result = await falconInternalWorkOrder.aggregate([
                 { $match: { job_order_id: jobOrderId, _id: { $ne: excludeIwoId } } },
                 { $unwind: "$products" },
-                { $match: {
-                    "products.product": productId,
-                    "products.code": code
-                }},
-                { $group: {
-                    _id: {
-                        product: "$products.product",
-                        code: "$products.code"
-                    },
-                    totalQty: { $sum: "$products.po_quantity" }
-                }}
+                {
+                    $match: {
+                        "products.product": productId,
+                        "products.code": code
+                    }
+                },
+                {
+                    $group: {
+                        _id: {
+                            product: "$products.product",
+                            code: "$products.code"
+                        },
+                        totalQty: { $sum: "$products.po_quantity" }
+                    }
+                }
             ]);
             return result[0]?.totalQty || 0;
         }
@@ -4942,6 +4946,31 @@ const updateInternalWorkOrder = asyncHandler(async (req, res) => {
                 // Convert product.product to ObjectId if it's a string
                 const productId = new mongoose.Types.ObjectId(product.product);
                 // Get the total quantity already allocated in all IWOs (excluding current IWO)
+
+
+
+                // const allocatedQty = await getTotalAllocatedQty(
+                //     internalWorkOrder.job_order_id,
+                //     productId,
+                //     product.code,
+                //     id
+                // );
+                // // Get the existing quantity for this product in the current IWO
+                // const existingProduct = internalWorkOrder.products.find(p =>
+                //     p.product.toString() === product.product.toString() &&
+                //     p.code === product.code
+                // );
+                // const existingQty = existingProduct ? existingProduct.po_quantity : 0;
+                // // Calculate the new total quantity: allocatedQty + newQty
+                // const newQty = parseInt(product.planned_quantity);
+                // // const totalQtyAfterUpdate = allocatedQty + newQty;
+                // const totalQtyAfterUpdate = allocatedQty + (newQty - existingQty);
+
+
+
+
+
+                // Get the total quantity already allocated in all IWOs (excluding current IWO)
                 const allocatedQty = await getTotalAllocatedQty(
                     internalWorkOrder.job_order_id,
                     productId,
@@ -4954,9 +4983,11 @@ const updateInternalWorkOrder = asyncHandler(async (req, res) => {
                     p.code === product.code
                 );
                 const existingQty = existingProduct ? existingProduct.po_quantity : 0;
-                // Calculate the new total quantity: allocatedQty + newQty
+                // Calculate the new total quantity: allocatedQty + (newQty - existingQty)
                 const newQty = parseInt(product.planned_quantity);
-                const totalQtyAfterUpdate = allocatedQty + newQty;
+                const totalQtyAfterUpdate = allocatedQty + (newQty - existingQty);
+
+
                 // Debug logs
                 console.log(`Job Order Qty: ${jobOrderPoQuantity}`);
                 console.log(`Total Allocated Qty (excluding current IWO): ${allocatedQty}`);
@@ -5127,7 +5158,7 @@ const updateInternalWorkOrder = asyncHandler(async (req, res) => {
                         status: index === 0 ? 'Pending' : (existingProd?.status || 'Pending'),
                         date: dateFrom,
                         created_by: req.user._id,
-                        updated_by: req.user._Id,
+                        updated_by: req.user._id,
                     };
                     if (existingProd) {
                         console.log('Updating existing production:', existingProd._id, key);
