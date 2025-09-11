@@ -568,6 +568,7 @@ const createIronJobOrder = asyncHandler(async (req, res) => {
     throw new ApiError(400, 'Validation failed for job order creation', error.details);
   }
 
+  
   // 5. Generate job order number
   const counter = await ironCounter.findOneAndUpdate(
     { _id: 'job_order' },
@@ -645,6 +646,106 @@ const createIronJobOrder = asyncHandler(async (req, res) => {
       }
     }
   }
+
+
+
+
+
+
+
+  // NEW STEP: Validate planned quantity against Work Order's remaining quantity
+// for (const product of value.products) {
+//   const { shape, planned_quantity } = product;
+
+//   // Fetch all existing Job Orders for this Work Order and Shape
+//   const existingJobOrders = await ironJobOrder.find({
+//     work_order: value.work_order,
+//     'products.shape': shape,
+//   });
+
+//   // Sum the planned quantities of all existing Job Orders for this shape
+//   let allocatedQuantity = 0;
+//   existingJobOrders.forEach((jo) => {
+//     jo.products.forEach((p) => {
+//       if (p.shape.toString() === shape.toString()) {
+//         allocatedQuantity += p.planned_quantity;
+//       }
+//     });
+//   });
+
+//   // Find the Work Order's quantity for this shape
+//   const workOrderProduct = workOrder.products.find(
+//     (p) => p.shapeId.toString() === shape.toString()
+//   );
+
+//   if (!workOrderProduct) {
+//     throw new ApiError(404, `Shape not found in Work Order for ID: ${shape}`);
+//   }
+
+//   // Calculate remaining allowable quantity
+//   const remainingQuantity = workOrderProduct.quantity - allocatedQuantity;
+
+//   // Check if the new planned quantity exceeds the remaining allowable quantity
+//   if (planned_quantity > remainingQuantity) {
+//     throw new ApiError(
+//       400,
+//       `Planned quantity (${planned_quantity}) exceeds remaining allowable quantity (${remainingQuantity}) for shape ${shape}`
+//     );
+//   }
+// }
+
+
+
+
+
+// Inside createIronJobOrder, after validating workOrder and shapes
+for (const product of value.products) {
+  const { shape, dia, planned_quantity } = product;
+
+  // Fetch all existing Job Orders for this Work Order, Shape, and Diameter
+  const existingJobOrders = await ironJobOrder.find({
+    work_order: value.work_order,
+    'products.shape': shape,
+    'products.dia': dia,
+  });
+
+  // Sum the planned quantities of all existing Job Orders for this shape and diameter
+  let allocatedQuantity = 0;
+  existingJobOrders.forEach((jo) => {
+    jo.products.forEach((p) => {
+      if (p.shape.toString() === shape.toString() && p.dia === dia) {
+        allocatedQuantity += p.planned_quantity;
+      }
+    });
+  });
+
+  // Find the Work Order's quantity for this shape and diameter
+  const workOrderProduct = workOrder.products.find(
+    (p) => p.shapeId.toString() === shape.toString() && p.diameter === dia
+  );
+
+  if (!workOrderProduct) {
+    throw new ApiError(404, `Shape and diameter not found in Work Order for ID: ${shape} and diameter: ${dia}`);
+  }
+
+  // Calculate remaining allowable quantity
+  const remainingQuantity = workOrderProduct.quantity - allocatedQuantity;
+
+  // Check if the new planned quantity exceeds the remaining allowable quantity
+  if (planned_quantity > remainingQuantity) {
+    throw new ApiError(
+      400,
+      `Planned quantity (${planned_quantity}) exceeds remaining allowable quantity (${remainingQuantity}) for shape ${shape} and diameter ${dia}`
+    );
+  }
+}
+
+
+
+
+
+
+
 
   // 10. Save to MongoDB
   const jobOrder = await ironJobOrder.create(jobOrderData);
@@ -764,7 +865,7 @@ const getAllIronJobOrders = asyncHandler(async (req, res) => {
       ],
     })
     .lean();
-  console.log("jobOrders", jobOrders);
+  // console.log("jobOrders", jobOrders);
 
   // 2. Filter out job orders with missing project or client (due to isDeleted: true)
   const filteredJobOrders = jobOrders.filter(
@@ -1128,7 +1229,7 @@ const updateIronJobOrder_28_07_2025 = asyncHandler(async (req, res) => {
 });
 
 
-const updateIronJobOrder = asyncHandler(async (req, res) => {
+const updateIronJobOrder_10_09_2025 = asyncHandler(async (req, res) => {
   const productSchema = Joi.object({
     _id: Joi.string().optional(), // include _id to identify existing products
     shape: Joi.string()
@@ -1315,6 +1416,917 @@ const updateIronJobOrder = asyncHandler(async (req, res) => {
     .status(200)
     .json(new ApiResponse(200, formatDateToIST(updatedJobOrder), 'Job order updated successfully'));
 });
+
+const updateIronJobOrder_11_09_2025_12_AM = asyncHandler(async (req, res) => {
+  const productSchema = Joi.object({
+    _id: Joi.string().optional(),
+    shape: Joi.string()
+      .optional()
+      .custom((value, helpers) => {
+        if (value && !mongoose.Types.ObjectId.isValid(value)) {
+          return helpers.error('any.invalid', { message: `Shape ID (${value}) is not a valid ObjectId` });
+        }
+        return value;
+      }),
+    planned_quantity: Joi.number().min(0).optional(),
+    schedule_date: Joi.date().optional(),
+    dia: Joi.number().min(0).optional(),
+    selected_machines: Joi.array()
+      .items(
+        Joi.string().custom((value, helpers) => {
+          if (!mongoose.Types.ObjectId.isValid(value)) {
+            return helpers.error('any.invalid', { message: `Machine ID (${value}) is not a valid ObjectId` });
+          }
+          return value;
+        })
+      )
+      .optional(),
+  });
+
+  const jobOrderSchema = Joi.object({
+    work_order: Joi.string().optional(),
+    sales_order_number: Joi.string().optional().allow(''),
+    date_range: Joi.object({
+      from: Joi.date().optional(),
+      to: Joi.date().optional(),
+    }).optional(),
+    products: Joi.array().items(productSchema).optional(),
+  });
+
+  const bodyData = req.body;
+  const userId = req.user?._id?.toString();
+  const jobOrderId = req.params.id;
+
+  if (!mongoose.Types.ObjectId.isValid(jobOrderId)) {
+    throw new ApiError(400, `Invalid job order ID: ${jobOrderId}`);
+  }
+
+  if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
+    throw new ApiError(401, 'Invalid or missing user ID in request');
+  }
+
+  if (typeof bodyData.products === 'string') {
+    try {
+      bodyData.products = JSON.parse(bodyData.products);
+    } catch {
+      throw new ApiError(400, 'Invalid products JSON format');
+    }
+  }
+
+  const { error, value } = jobOrderSchema.validate(bodyData, { abortEarly: false });
+  if (error) throw new ApiError(400, 'Validation failed for job order update', error.details);
+
+  // Fetch existing Job Order
+  const existingJobOrder = await ironJobOrder.findById(jobOrderId);
+  if (!existingJobOrder) throw new ApiError(404, `Job order not found with ID: ${jobOrderId}`);
+
+  // Validate work_order if updated
+  if (value.work_order) {
+    const workOrder = await mongoose.model('ironWorkOrder').findById(value.work_order);
+    if (!workOrder) throw new ApiError(404, `Work order not found with ID: ${value.work_order}`);
+  }
+
+  // NEW: Validate planned quantity for updated products
+  // if (value.products) {
+  //   // Fetch all Job Orders for this Work Order (excluding the current one)
+  //   const otherJobOrders = await ironJobOrder.find({
+  //     work_order: existingJobOrder.work_order,
+  //     _id: { $ne: jobOrderId },
+  //   });
+
+  //   // For each product being updated
+  //   for (const product of value.products) {
+  //     const { _id, shape, planned_quantity } = product;
+
+  //     // Skip if planned_quantity is not being updated
+  //     if (planned_quantity === undefined) continue;
+
+  //     // Find the existing product in the Job Order (if updating an existing product)
+  //     const existingProduct = existingJobOrder.products.find((p) => p._id?.toString() === _id);
+
+  //     // Fetch the Work Order's quantity for this shape
+  //     const workOrder = await mongoose.model('ironWorkOrder').findById(existingJobOrder.work_order);
+  //     const workOrderProduct = workOrder.products.find((p) => p.shapeId.toString() === shape.toString());
+
+  //     if (!workOrderProduct) {
+  //       throw new ApiError(404, `Shape not found in Work Order for ID: ${shape}`);
+  //     }
+
+  //     // Calculate the total allocated quantity for this shape (excluding the current Job Order)
+  //     let allocatedQuantity = 0;
+  //     otherJobOrders.forEach((jo) => {
+  //       jo.products.forEach((p) => {
+  //         if (p.shape.toString() === shape.toString()) {
+  //           allocatedQuantity += p.planned_quantity;
+  //         }
+  //       });
+  //     });
+
+  //     // If updating an existing product, subtract its current planned_quantity from allocatedQuantity
+  //     if (existingProduct) {
+  //       allocatedQuantity -= existingProduct.planned_quantity;
+  //     }
+
+  //     // Calculate remaining allowable quantity
+  //     const remainingQuantity = workOrderProduct.quantity - allocatedQuantity;
+
+  //     // Check if the new planned quantity exceeds the remaining allowable quantity
+  //     if (planned_quantity > remainingQuantity) {
+  //       throw new ApiError(
+  //         400,
+  //         `Planned quantity (${planned_quantity}) exceeds remaining allowable quantity (${remainingQuantity}) for shape ${shape}`
+  //       );
+  //     }
+  //   }
+  // }
+
+
+
+
+
+
+
+
+  // Inside updateIronJobOrder, after fetching existingJobOrder
+if (value.products) {
+  // Fetch all Job Orders for this Work Order (excluding the current one)
+  const otherJobOrders = await ironJobOrder.find({
+    work_order: existingJobOrder.work_order,
+    _id: { $ne: jobOrderId },
+  });
+
+  // For each product being updated
+  for (const product of value.products) {
+    const { _id, shape, dia, planned_quantity } = product;
+
+    // Skip if planned_quantity is not being updated
+    if (planned_quantity === undefined) continue;
+
+    // Find the existing product in the Job Order (if updating an existing product)
+    const existingProduct = existingJobOrder.products.find((p) => p._id?.toString() === _id);
+
+    // Fetch the Work Order's quantity for this shape and diameter
+    const workOrder = await mongoose.model('ironWorkOrder').findById(existingJobOrder.work_order);
+    const workOrderProduct = workOrder.products.find(
+      (p) => p.shapeId.toString() === shape.toString() && p.diameter === dia
+    );
+
+    if (!workOrderProduct) {
+      throw new ApiError(404, `Shape and diameter not found in Work Order for ID: ${shape} and diameter: ${dia}`);
+    }
+
+    // Calculate the total allocated quantity for this shape and diameter (excluding the current Job Order)
+    let allocatedQuantity = 0;
+    otherJobOrders.forEach((jo) => {
+      jo.products.forEach((p) => {
+        if (p.shape.toString() === shape.toString() && p.dia === dia) {
+          allocatedQuantity += p.planned_quantity;
+        }
+      });
+    });
+
+    // If updating an existing product, subtract its current planned_quantity from allocatedQuantity
+    if (existingProduct) {
+      allocatedQuantity -= existingProduct.planned_quantity;
+    }
+
+    // Calculate remaining allowable quantity
+    const remainingQuantity = workOrderProduct.quantity - allocatedQuantity;
+
+    // Check if the new planned quantity exceeds the remaining allowable quantity
+    if (planned_quantity > remainingQuantity) {
+      throw new ApiError(
+        400,
+        `Planned quantity (${planned_quantity}) exceeds remaining allowable quantity (${remainingQuantity}) for shape ${shape} and diameter ${dia}`
+      );
+    }
+  }
+}
+
+
+
+
+
+
+
+
+
+
+  // Prepare updated products
+  let updatedProducts = existingJobOrder.products;
+  if (value.products) {
+    updatedProducts = await Promise.all(
+      value.products.map(async (product) => {
+        let existingProduct = null;
+        if (product._id) {
+          existingProduct = existingJobOrder.products.find(
+            (p) => p._id.toString() === product._id
+          );
+        }
+        if (existingProduct) {
+          return {
+            ...existingProduct.toObject(),
+            shape: product.shape || existingProduct.shape,
+            planned_quantity: product.planned_quantity ?? existingProduct.planned_quantity,
+            schedule_date: product.schedule_date ? new Date(product.schedule_date) : existingProduct.schedule_date,
+            dia: product.dia ?? existingProduct.dia,
+            selected_machines: product.selected_machines || existingProduct.selected_machines,
+            qr_code_id: existingProduct.qr_code_id,
+            qr_code_url: existingProduct.qr_code_url,
+          };
+        } else {
+          const qrCodeId = `${existingJobOrder.job_order_number}-${uuidv4()}`;
+          const qrContent = `joborder/${existingJobOrder.job_order_number}/product/${qrCodeId}`;
+          let qrCodeBuffer;
+          try {
+            qrCodeBuffer = await QRCode.toBuffer(qrContent, {
+              type: 'png',
+              errorCorrectionLevel: 'H',
+              margin: 1,
+              width: 200,
+            });
+          } catch (error) {
+            throw new ApiError(500, `Failed to generate QR code for new product: ${error.message}`);
+          }
+          const fileName = `qr-codes/${qrCodeId}-${Date.now()}.png`;
+          let qrCodeUrl;
+          try {
+            const { url } = await putObject(
+              { data: qrCodeBuffer, mimetype: 'image/png' },
+              fileName
+            );
+            qrCodeUrl = url;
+          } catch (error) {
+            throw new ApiError(500, `Failed to upload QR code: ${error.message}`);
+          }
+          return {
+            shape: product.shape,
+            planned_quantity: product.planned_quantity,
+            schedule_date: new Date(product.schedule_date),
+            dia: product.dia,
+            selected_machines: product.selected_machines || [],
+            qr_code_id: qrCodeId,
+            qr_code_url: qrCodeUrl,
+            achieved_quantity: 0,
+            rejected_quantity: 0,
+          };
+        }
+      })
+    );
+  }
+
+  // Prepare update object
+  const updateData = {
+    ...(value.work_order && { work_order: value.work_order }),
+    ...(value.sales_order_number !== undefined && { sales_order_number: value.sales_order_number }),
+    ...(value.date_range && {
+      date_range: {
+        from: value.date_range.from ? new Date(value.date_range.from) : existingJobOrder.date_range.from,
+        to: value.date_range.to ? new Date(value.date_range.to) : existingJobOrder.date_range.to,
+      },
+    }),
+    products: updatedProducts,
+    updated_by: userId,
+    updatedAt: new Date(),
+  };
+
+  // Update in DB
+  const updatedJobOrder = await ironJobOrder
+    .findByIdAndUpdate(jobOrderId, { $set: updateData }, { new: true })
+    .populate('work_order', '_id po_quantity')
+    .populate('products.shape', 'name uom')
+    .populate('products.selected_machines', 'name')
+    .populate('created_by', 'username email')
+    .populate('updated_by', 'username email')
+    .lean();
+
+  if (!updatedJobOrder) throw new ApiError(404, 'Failed to retrieve updated job order');
+
+  const formatDateToIST = (data) => {
+    const convertToIST = (date) =>
+      date ? new Date(date).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }) : null;
+    return {
+      ...data,
+      date_range: {
+        from: convertToIST(data.date_range.from),
+        to: convertToIST(data.date_range.to),
+      },
+      createdAt: convertToIST(data.createdAt),
+      updatedAt: convertToIST(data.updatedAt),
+      products: data.products.map((p) => ({
+        ...p,
+        schedule_date: convertToIST(p.schedule_date),
+      })),
+    };
+  };
+
+  return res
+    .status(200)
+    .json(new ApiResponse(200, formatDateToIST(updatedJobOrder), 'Job order updated successfully'));
+});
+
+
+
+
+
+const updateIronJobOrder_11_09_2025_10_AM = asyncHandler(async (req, res) => {
+  // 1. Validation schema (unchanged)
+  const productSchema = Joi.object({
+    _id: Joi.string().optional(),
+    shape: Joi.string()
+      .optional()
+      .custom((value, helpers) => {
+        if (value && !mongoose.Types.ObjectId.isValid(value)) {
+          return helpers.error('any.invalid', { message: `Shape ID (${value}) is not a valid ObjectId` });
+        }
+        return value;
+      }),
+    planned_quantity: Joi.number().min(0).optional(),
+    schedule_date: Joi.date().optional(),
+    dia: Joi.number().min(0).optional(),
+    selected_machines: Joi.array()
+      .items(
+        Joi.string().custom((value, helpers) => {
+          if (!mongoose.Types.ObjectId.isValid(value)) {
+            return helpers.error('any.invalid', { message: `Machine ID (${value}) is not a valid ObjectId` });
+          }
+          return value;
+        })
+      )
+      .optional(),
+  });
+
+  const jobOrderSchema = Joi.object({
+    work_order: Joi.string().optional(),
+    sales_order_number: Joi.string().optional().allow(''),
+    date_range: Joi.object({
+      from: Joi.date().optional(),
+      to: Joi.date().optional(),
+    }).optional(),
+    products: Joi.array().items(productSchema).optional(),
+  });
+
+  // 2. Parse and validate request (unchanged)
+  const bodyData = req.body;
+  const userId = req.user?._id?.toString();
+  const jobOrderId = req.params.id;
+
+  if (!mongoose.Types.ObjectId.isValid(jobOrderId)) {
+    throw new ApiError(400, `Invalid job order ID: ${jobOrderId}`);
+  }
+
+  if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
+    throw new ApiError(401, 'Invalid or missing user ID in request');
+  }
+
+  if (typeof bodyData.products === 'string') {
+    try {
+      bodyData.products = JSON.parse(bodyData.products);
+    } catch {
+      throw new ApiError(400, 'Invalid products JSON format');
+    }
+  }
+
+  const { error, value } = jobOrderSchema.validate(bodyData, { abortEarly: false });
+  if (error) throw new ApiError(400, 'Validation failed for job order update', error.details);
+
+  // 3. Fetch existing Job Order
+  const existingJobOrder = await ironJobOrder.findById(jobOrderId);
+  if (!existingJobOrder) throw new ApiError(404, `Job order not found with ID: ${jobOrderId}`);
+
+  // 4. Validate work_order if updated (unchanged)
+  if (value.work_order) {
+    const workOrder = await mongoose.model('ironWorkOrder').findById(value.work_order);
+    if (!workOrder) throw new ApiError(404, `Work order not found with ID: ${value.work_order}`);
+  }
+
+  // 5. Validate planned quantity for updated products (updated for shape + diameter)
+  if (value.products) {
+    const otherJobOrders = await ironJobOrder.find({
+      work_order: existingJobOrder.work_order,
+      _id: { $ne: jobOrderId },
+    });
+
+    for (const product of value.products) {
+      const { _id, shape, dia, planned_quantity } = product;
+      if (planned_quantity === undefined) continue;
+
+      const existingProduct = existingJobOrder.products.find((p) => p._id?.toString() === _id);
+      const workOrder = await mongoose.model('ironWorkOrder').findById(existingJobOrder.work_order);
+      const workOrderProduct = workOrder.products.find(
+        (p) => p.shapeId.toString() === shape.toString() && p.diameter === dia
+      );
+
+      if (!workOrderProduct) {
+        throw new ApiError(404, `Shape and diameter not found in Work Order for ID: ${shape} and diameter: ${dia}`);
+      }
+
+      let allocatedQuantity = 0;
+      otherJobOrders.forEach((jo) => {
+        jo.products.forEach((p) => {
+          if (p.shape.toString() === shape.toString() && p.dia === dia) {
+            allocatedQuantity += p.planned_quantity;
+          }
+        });
+      });
+
+      if (existingProduct) {
+        allocatedQuantity -= existingProduct.planned_quantity;
+      }
+
+      const remainingQuantity = workOrderProduct.quantity - allocatedQuantity;
+      if (planned_quantity > remainingQuantity) {
+        throw new ApiError(
+          400,
+          `Planned quantity (${planned_quantity}) exceeds remaining allowable quantity (${remainingQuantity}) for shape ${shape} and diameter ${dia}`
+        );
+      }
+    }
+  }
+
+  // 6. Prepare updated products and generate QR codes for new products
+  let updatedProducts = existingJobOrder.products;
+  console.log("updatedProducts11", updatedProducts);
+
+  if (value.products) {
+    updatedProducts = await Promise.all(
+      value.products.map(async (product) => {
+        let existingProduct = null;
+        if (product._id) {
+          existingProduct = existingJobOrder.products.find(
+            (p) => p._id.toString() === product._id
+          );
+        }
+        if (existingProduct) {
+          return {
+            ...existingProduct.toObject(),
+            shape: product.shape || existingProduct.shape,
+            planned_quantity: product.planned_quantity ?? existingProduct.planned_quantity,
+            schedule_date: product.schedule_date ? new Date(product.schedule_date) : existingProduct.schedule_date,
+            dia: product.dia ?? existingProduct.dia,
+            selected_machines: product.selected_machines || existingProduct.selected_machines,
+            qr_code_id: existingProduct.qr_code_id,
+            qr_code_url: existingProduct.qr_code_url,
+          };
+        } else {
+          const qrCodeId = `${existingJobOrder.job_order_number}-${uuidv4()}`;
+          const qrContent = `joborder/${existingJobOrder.job_order_number}/product/${qrCodeId}`;
+          let qrCodeBuffer;
+          try {
+            qrCodeBuffer = await QRCode.toBuffer(qrContent, {
+              type: 'png',
+              errorCorrectionLevel: 'H',
+              margin: 1,
+              width: 200,
+            });
+          } catch (error) {
+            throw new ApiError(500, `Failed to generate QR code for new product: ${error.message}`);
+          }
+          const fileName = `qr-codes/${qrCodeId}-${Date.now()}.png`;
+          let qrCodeUrl;
+          try {
+            const { url } = await putObject(
+              { data: qrCodeBuffer, mimetype: 'image/png' },
+              fileName
+            );
+            qrCodeUrl = url;
+          } catch (error) {
+            throw new ApiError(500, `Failed to upload QR code: ${error.message}`);
+          }
+          return {
+            shape: product.shape,
+            planned_quantity: product.planned_quantity,
+            schedule_date: new Date(product.schedule_date),
+            dia: product.dia,
+            selected_machines: product.selected_machines || [],
+            qr_code_id: qrCodeId,
+            qr_code_url: qrCodeUrl,
+            achieved_quantity: 0,
+            rejected_quantity: 0,
+          };
+        }
+      })
+    );
+  }
+
+  console.log("updatedProducts22", updatedProducts);
+
+  // 7. Update production records for updated products
+  if (value.products) {
+    console.log("jobOrderId", jobOrderId);
+    // Find all production records for this Job Order
+    const productionRecords = await ironDailyProduction.find({ job_order: jobOrderId });
+
+    // For each production record, update the products array to match the updated Job Order products
+    for (const record of productionRecords) {
+      console.log("record", record);
+      const updatedProductsForRecord = record.products.map((prod) => {
+        // Find the corresponding product in the updated Job Order products
+        const updatedProduct = updatedProducts.find(
+          (p) =>
+            p.shape.toString() === prod.shape_id.toString() &&
+            p.dia === prod.dia &&
+            new Date(p.schedule_date).toISOString() === new Date(prod.schedule_date).toISOString()
+        );
+        if (updatedProduct) {
+          return {
+            ...prod.toObject(),
+            object_id: updatedProduct._id, // Update the object_id to the new product _id
+            shape_id: updatedProduct.shape,
+            planned_quantity: updatedProduct.planned_quantity,
+            machines: updatedProduct.selected_machines || prod.machines,
+          };
+        }
+        return prod;
+      });
+
+      // Update the production record
+      await ironDailyProduction.findByIdAndUpdate(
+        record._id,
+        { products: updatedProductsForRecord },
+        { new: true }
+      );
+    }
+  }
+
+  // 8. Prepare update object
+  const updateData = {
+    ...(value.work_order && { work_order: value.work_order }),
+    ...(value.sales_order_number !== undefined && { sales_order_number: value.sales_order_number }),
+    ...(value.date_range && {
+      date_range: {
+        from: value.date_range.from ? new Date(value.date_range.from) : existingJobOrder.date_range.from,
+        to: value.date_range.to ? new Date(value.date_range.to) : existingJobOrder.date_range.to,
+      },
+    }),
+    products: updatedProducts,
+    updated_by: userId,
+    updatedAt: new Date(),
+  };
+
+  // 9. Update in DB
+  const updatedJobOrder = await ironJobOrder
+    .findByIdAndUpdate(jobOrderId, { $set: updateData }, { new: true })
+    .populate('work_order', '_id po_quantity')
+    .populate('products.shape', 'name uom')
+    .populate('products.selected_machines', 'name')
+    .populate('created_by', 'username email')
+    .populate('updated_by', 'username email')
+    .lean();
+
+  if (!updatedJobOrder) throw new ApiError(404, 'Failed to retrieve updated job order');
+
+  // 10. Convert timestamps to IST
+  const formatDateToIST = (data) => {
+    const convertToIST = (date) =>
+      date ? new Date(date).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }) : null;
+    return {
+      ...data,
+      date_range: {
+        from: convertToIST(data.date_range.from),
+        to: convertToIST(data.date_range.to),
+      },
+      createdAt: convertToIST(data.createdAt),
+      updatedAt: convertToIST(data.updatedAt),
+      products: data.products.map((p) => ({
+        ...p,
+        schedule_date: convertToIST(p.schedule_date),
+      })),
+    };
+  };
+
+  return res
+    .status(200)
+    .json(new ApiResponse(200, formatDateToIST(updatedJobOrder), 'Job order updated successfully'));
+});
+
+
+
+const updateIronJobOrder = asyncHandler(async (req, res) => {
+  // --- Validation Schemas ---
+  const productSchema = Joi.object({
+    _id: Joi.string().optional(),
+    shape: Joi.string()
+      .optional()
+      .custom((value, helpers) => {
+        if (value && !mongoose.Types.ObjectId.isValid(value)) {
+          return helpers.error('any.invalid', { message: `Shape ID (${value}) is not a valid ObjectId` });
+        }
+        return value;
+      }),
+    planned_quantity: Joi.number().min(0).optional(),
+    schedule_date: Joi.date().optional(),
+    dia: Joi.number().min(0).optional(),
+    selected_machines: Joi.array()
+      .items(
+        Joi.string().custom((value, helpers) => {
+          if (!mongoose.Types.ObjectId.isValid(value)) {
+            return helpers.error('any.invalid', { message: `Machine ID (${value}) is not a valid ObjectId` });
+          }
+          return value;
+        })
+      )
+      .optional(),
+  });
+
+  const jobOrderSchema = Joi.object({
+    work_order: Joi.string().optional(),
+    sales_order_number: Joi.string().optional().allow(''),
+    date_range: Joi.object({
+      from: Joi.date().optional(),
+      to: Joi.date().optional(),
+    }).optional(),
+    products: Joi.array().items(productSchema).optional(),
+  });
+
+  // --- Parse and Validate Request ---
+  const bodyData = req.body;
+  const userId = req.user?._id?.toString();
+  const jobOrderId = req.params.id;
+
+  if (!mongoose.Types.ObjectId.isValid(jobOrderId)) {
+    throw new ApiError(400, `Invalid job order ID: ${jobOrderId}`);
+  }
+  if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
+    throw new ApiError(401, 'Invalid or missing user ID in request');
+  }
+  if (typeof bodyData.products === 'string') {
+    try {
+      bodyData.products = JSON.parse(bodyData.products);
+    } catch {
+      throw new ApiError(400, 'Invalid products JSON format');
+    }
+  }
+
+  const { error, value } = jobOrderSchema.validate(bodyData, { abortEarly: false });
+  if (error) throw new ApiError(400, 'Validation failed for job order update', error.details);
+
+  // --- Fetch Existing Job Order ---
+  const existingJobOrder = await ironJobOrder.findById(jobOrderId);
+  if (!existingJobOrder) throw new ApiError(404, `Job order not found with ID: ${jobOrderId}`);
+
+  // --- Validate Work Order if Updated ---
+  if (value.work_order) {
+    const workOrder = await mongoose.model('ironWorkOrder').findById(value.work_order);
+    if (!workOrder) throw new ApiError(404, `Work order not found with ID: ${value.work_order}`);
+  }
+
+  // --- Validate Planned Quantity for Updated Products ---
+  if (value.products) {
+    const otherJobOrders = await ironJobOrder.find({
+      work_order: existingJobOrder.work_order,
+      _id: { $ne: jobOrderId },
+    });
+    for (const product of value.products) {
+      const { _id, shape, dia, planned_quantity } = product;
+      if (planned_quantity === undefined) continue;
+
+      const existingProduct = existingJobOrder.products.find((p) => p._id?.toString() === _id);
+      const workOrder = await mongoose.model('ironWorkOrder').findById(existingJobOrder.work_order);
+      const workOrderProduct = workOrder.products.find(
+        (p) => p.shapeId.toString() === shape.toString() && p.diameter === dia
+      );
+      if (!workOrderProduct) {
+        throw new ApiError(404, `Shape and diameter not found in Work Order for ID: ${shape} and diameter: ${dia}`);
+      }
+
+      let allocatedQuantity = 0;
+      otherJobOrders.forEach((jo) => {
+        jo.products.forEach((p) => {
+          if (p.shape.toString() === shape.toString() && p.dia === dia) {
+            allocatedQuantity += p.planned_quantity;
+          }
+        });
+      });
+
+      if (existingProduct) {
+        allocatedQuantity -= existingProduct.planned_quantity;
+      }
+
+      const remainingQuantity = workOrderProduct.quantity - allocatedQuantity;
+      if (planned_quantity > remainingQuantity) {
+        throw new ApiError(
+          400,
+          `Planned quantity (${planned_quantity}) exceeds remaining allowable quantity (${remainingQuantity}) for shape ${shape} and diameter ${dia}`
+        );
+      }
+    }
+  }
+
+  // --- Prepare Updated Products ---
+  let updatedProducts = existingJobOrder.products;
+  if (value.products) {
+    updatedProducts = await Promise.all(
+      value.products.map(async (product) => {
+        let existingProduct = null;
+        if (product._id) {
+          existingProduct = existingJobOrder.products.find(
+            (p) => p._id.toString() === product._id
+          );
+        }
+        if (existingProduct) {
+          return {
+            ...existingProduct.toObject(),
+            shape: product.shape || existingProduct.shape,
+            planned_quantity: product.planned_quantity ?? existingProduct.planned_quantity,
+            schedule_date: product.schedule_date ? new Date(product.schedule_date) : existingProduct.schedule_date,
+            dia: product.dia ?? existingProduct.dia,
+            selected_machines: product.selected_machines || existingProduct.selected_machines,
+            qr_code_id: existingProduct.qr_code_id,
+            qr_code_url: existingProduct.qr_code_url,
+          };
+        } else {
+          const qrCodeId = `${existingJobOrder.job_order_number}-${uuidv4()}`;
+          const qrContent = `joborder/${existingJobOrder.job_order_number}/product/${qrCodeId}`;
+          let qrCodeBuffer;
+          try {
+            qrCodeBuffer = await QRCode.toBuffer(qrContent, {
+              type: 'png',
+              errorCorrectionLevel: 'H',
+              margin: 1,
+              width: 200,
+            });
+          } catch (error) {
+            throw new ApiError(500, `Failed to generate QR code for new product: ${error.message}`);
+          }
+          const fileName = `qr-codes/${qrCodeId}-${Date.now()}.png`;
+          let qrCodeUrl;
+          try {
+            const { url } = await putObject(
+              { data: qrCodeBuffer, mimetype: 'image/png' },
+              fileName
+            );
+            qrCodeUrl = url;
+          } catch (error) {
+            throw new ApiError(500, `Failed to upload QR code: ${error.message}`);
+          }
+          return {
+            shape: product.shape,
+            planned_quantity: product.planned_quantity,
+            schedule_date: new Date(product.schedule_date),
+            dia: product.dia,
+            selected_machines: product.selected_machines || [],
+            qr_code_id: qrCodeId,
+            qr_code_url: qrCodeUrl,
+            achieved_quantity: 0,
+            rejected_quantity: 0,
+          };
+        }
+      })
+    );
+  }
+
+  // --- Prepare Update Object ---
+  const updateData = {
+    ...(value.work_order && { work_order: value.work_order }),
+    ...(value.sales_order_number !== undefined && { sales_order_number: value.sales_order_number }),
+    ...(value.date_range && {
+      date_range: {
+        from: value.date_range.from ? new Date(value.date_range.from) : existingJobOrder.date_range.from,
+        to: value.date_range.to ? new Date(value.date_range.to) : existingJobOrder.date_range.to,
+      },
+    }),
+    products: updatedProducts,
+    updated_by: userId,
+    updatedAt: new Date(),
+  };
+
+  // --- Start MongoDB Transaction ---
+  const session = await mongoose.startSession();
+  session.startTransaction();
+  try {
+    // --- Update Job Order ---
+    const updatedJobOrder = await ironJobOrder
+      .findByIdAndUpdate(jobOrderId, { $set: updateData }, { new: true, session })
+      .populate('work_order', '_id po_quantity')
+      .populate('products.shape', 'name uom')
+      .populate('products.selected_machines', 'name')
+      .populate('created_by', 'username email')
+      .populate('updated_by', 'username email')
+      .lean();
+
+    if (!updatedJobOrder) throw new ApiError(404, 'Failed to retrieve updated job order');
+
+    // --- Sync Production Records ---
+    const existingProductions = await ironDailyProduction.find({ job_order: jobOrderId }).session(session);
+    const updatedProductIds = updatedJobOrder.products.map((p) => p._id.toString());
+
+    // A. Update or create production records for updated products
+    for (const product of updatedJobOrder.products) {
+      // Find the production record that contains this product's object_id
+      let matchingProduction = null;
+      let productIndex = -1;
+
+      for (const prodRecord of existingProductions) {
+        productIndex = prodRecord.products.findIndex(
+          (prod) => prod.object_id.toString() === product._id.toString()
+        );
+        if (productIndex !== -1) {
+          matchingProduction = prodRecord;
+          break;
+        }
+      }
+
+      if (matchingProduction) {
+        // Update the existing production record's product subdocument
+        matchingProduction.products[productIndex] = {
+          ...matchingProduction.products[productIndex],
+          shape_id: product.shape,
+          planned_quantity: product.planned_quantity,
+          machines: product.selected_machines || matchingProduction.products[productIndex].machines,
+          // Preserve existing fields unless explicitly updated
+          achieved_quantity: matchingProduction.products[productIndex].achieved_quantity,
+          rejected_quantity: matchingProduction.products[productIndex].rejected_quantity,
+          recycled_quantity: matchingProduction.products[productIndex].recycled_quantity,
+        };
+        await matchingProduction.save({ session });
+      } else {
+        // Check if the product existed in the original job order
+        const isExistingProduct = existingJobOrder.products.some(
+          (p) => p._id.toString() === product._id.toString()
+        );
+
+        // Only create a new production record if explicitly requested (e.g., new product)
+        if (!isExistingProduct) {
+          const newProduction = new ironDailyProduction({
+            work_order: updatedJobOrder.work_order,
+            job_order: jobOrderId,
+            products: [
+              {
+                object_id: product._id,
+                shape_id: product.shape,
+                planned_quantity: product.planned_quantity,
+                achieved_quantity: 0,
+                rejected_quantity: 0,
+                recycled_quantity: 0,
+                machines: product.selected_machines || [],
+              },
+            ],
+            date: new Date(product.schedule_date),
+            submitted_by: userId,
+            created_by: userId,
+            updated_by: userId,
+            status: 'Pending',
+          });
+          await newProduction.save({ session });
+        }
+        // Note: If the product exists but has no production record, we skip creating one
+        // unless a business rule requires automatic creation.
+      }
+    }
+
+    // B. Cancel production records for removed products
+    const removedProductIds = existingJobOrder.products
+      .filter((p) => !updatedProductIds.includes(p._id.toString()))
+      .map((p) => p._id.toString());
+
+    if (removedProductIds.length > 0) {
+      await ironDailyProduction.updateMany(
+        { job_order: jobOrderId, 'products.object_id': { $in: removedProductIds } },
+        { $set: { status: 'Canceled' } },
+        { session }
+      );
+    }
+
+    // --- Commit Transaction ---
+    await session.commitTransaction();
+
+    // --- Format Response ---
+    const formatDateToIST = (data) => {
+      const convertToIST = (date) =>
+        date ? new Date(date).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }) : null;
+      return {
+        ...data,
+        date_range: {
+          from: convertToIST(data.date_range.from),
+          to: convertToIST(data.date_range.to),
+        },
+        createdAt: convertToIST(data.createdAt),
+        updatedAt: convertToIST(data.updatedAt),
+        products: data.products.map((p) => ({
+          ...p,
+          schedule_date: convertToIST(p.schedule_date),
+        })),
+      };
+    };
+
+    return res
+      .status(200)
+      .json(new ApiResponse(200, formatDateToIST(updatedJobOrder), 'Job order updated successfully'));
+  } catch (error) {
+    await session.abortTransaction();
+    throw error;
+  } finally {
+    session.endSession();
+  }
+});
+
+
+
+
+
+
+
 
 
 const getProductDetailsByQrCode = asyncHandler(async (req, res) => {
@@ -1879,7 +2891,7 @@ const workOrderData = asyncHandler(async (req, res) => {
 
     // 6. Map work order products with job order data and shape name
     const enrichedProducts = workOrder.products.map((workProduct) => {
-      console.log("workProduct", workProduct);
+      // console.log("workProduct", workProduct);
       const matchingJobProducts = jobOrders.flatMap((jobOrder) =>
         jobOrder.products.filter((jobProduct) => jobProduct.shape.toString() === workProduct.shapeId.toString())
       );

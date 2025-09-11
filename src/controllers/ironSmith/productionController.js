@@ -546,6 +546,8 @@ const manageIronProductionActions1 = asyncHandler(async (req, res) => {
 const manageIronProductionActions = asyncHandler(async (req, res) => {
   try {
     const { action, job_order, shape_id, object_id } = req.body;
+    console.log("shape_id",shape_id);
+    console.log("object_id",object_id);
 
     if (!['start', 'pause', 'resume', 'stop'].includes(action)) {
       return res.status(400).json(

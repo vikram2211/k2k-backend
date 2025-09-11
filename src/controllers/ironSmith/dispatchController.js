@@ -423,7 +423,7 @@ const updateDispatch = asyncHandler(async (req, res, next) => {
 });
 
 
-const getAllDispatches = asyncHandler(async (req, res, next) => {
+const getAllDispatches_11_09_2025 = asyncHandler(async (req, res, next) => {
     try {
         // Fetch all dispatch records and populate related fields
         const dispatches = await ironDispatch
@@ -459,7 +459,7 @@ const getAllDispatches = asyncHandler(async (req, res, next) => {
             const shapeData = Object.values(shapeQuantities).map((item) => {
                 const shape = shapes.find(s => s._id.toString() === item.shape_id.toString());
                 return {
-                    shape_name: shape ? shape.description : 'Unknown Shape',
+                    shape_name: shape ? shape.description : 'N/A',
                     total_dispatched_qty: item.total_quantity,
                 };
             });
@@ -467,9 +467,9 @@ const getAllDispatches = asyncHandler(async (req, res, next) => {
             return {
                 _id: dispatch._id,
                 work_order_id: dispatch.work_order?._id,
-                work_order_number: dispatch.work_order?.workOrderNumber || 'Unknown Work Order',
+                work_order_number: dispatch.work_order?.workOrderNumber || 'N/A',
                 shape_data: shapeData, // Array of { shape_name, total_dispatched_qty }
-                created_by: dispatch.created_by?.username || 'Unknown User',
+                created_by: dispatch.created_by?.username || 'N/A',
                 timestamp: dispatch.createdAt,
                 status: dispatch.status,
             };
@@ -481,6 +481,82 @@ const getAllDispatches = asyncHandler(async (req, res, next) => {
         return next(new ApiError(500, `Failed to fetch dispatch records: ${error.message}`));
     }
 });
+
+
+
+
+
+
+const getAllDispatches = asyncHandler(async (req, res, next) => {
+  try {
+      // Fetch all dispatch records and populate related fields
+      const dispatches = await ironDispatch
+          .find()
+          .populate({
+              path: 'work_order',
+              select: 'workOrderNumber clientId projectId',
+              populate: [
+                  { path: 'clientId', model: 'ironClient', select: 'name' },
+                  { path: 'projectId', model: 'ironProject', select: 'name' },
+              ],
+          })
+          .populate('created_by', 'username')
+          .lean();
+
+      if (!dispatches || dispatches.length === 0) {
+          return res.status(200).json(new ApiResponse(200, [], 'No dispatch records found'));
+      }
+
+      // Process each dispatch to aggregate shape-wise data
+      const result = await Promise.all(dispatches.map(async (dispatch) => {
+          // Aggregate total dispatched quantity per shape
+          const shapeQuantities = dispatch.products.reduce((acc, product) => {
+              const shapeId = product.shape_id.toString();
+              if (!acc[shapeId]) {
+                  acc[shapeId] = {
+                      shape_id: product.shape_id,
+                      total_quantity: 0,
+                  };
+              }
+              acc[shapeId].total_quantity += product.dispatch_quantity;
+              return acc;
+          }, {});
+
+          // Fetch shape names for each shape_id
+          const shapeIds = Object.keys(shapeQuantities);
+          const shapes = await ironShape.find({ _id: { $in: shapeIds }, isDeleted: false }).select('description');
+
+          // Map shape names to quantities
+          const shapeData = Object.values(shapeQuantities).map((item) => {
+              const shape = shapes.find(s => s._id.toString() === item.shape_id.toString());
+              return {
+                  shape_name: shape ? shape.description : 'N/A',
+                  total_dispatched_qty: item.total_quantity,
+              };
+          });
+
+          return {
+              _id: dispatch._id,
+              work_order_id: dispatch.work_order?._id || 'N/A',
+              work_order_number: dispatch.work_order?.workOrderNumber || 'N/A',
+              client_name: dispatch.work_order?.clientId?.name || 'Unknown Client',
+              project_name: dispatch.work_order?.projectId?.name || 'Unknown Project',
+              shape_data: shapeData,
+              created_by: dispatch.created_by?.username || 'N/A',
+              timestamp: dispatch.createdAt,
+              status: dispatch.status,
+          };
+      }));
+
+      return res.status(200).json(new ApiResponse(200, result, 'Dispatch records retrieved successfully'));
+  } catch (error) {
+      console.error('Error fetching dispatches:', error);
+      return next(new ApiError(500, `Failed to fetch dispatch records: ${error.message}`));
+  }
+});
+
+
+
 
 const getDispatchById = asyncHandler(async (req, res, next) => {
     const { id } = req.params;

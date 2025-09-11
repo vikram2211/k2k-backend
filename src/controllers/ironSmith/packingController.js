@@ -580,7 +580,7 @@ const getAllPackingDetails2 = async (req, res) => {
     });
   }
 };
-const getAllPackingDetails = async (req, res) => {
+const getAllPackingDetails_11_09_2025 = async (req, res) => {
   try {
     const packingDetails = await iornPacking.aggregate([
       {
@@ -667,7 +667,107 @@ const getAllPackingDetails = async (req, res) => {
   }
 };
 
-const getPackingDetailsById = async (req, res) => {
+
+
+const getAllPackingDetails = async (req, res) => {
+  try {
+    const packingDetails = await iornPacking.aggregate([
+      // Filter for records with delivery_stage: "Packed"
+      {
+        $match: {
+          delivery_stage: 'Packed',
+        },
+      },
+      {
+        $lookup: {
+          from: 'ironworkorders',
+          localField: 'work_order',
+          foreignField: '_id',
+          as: 'workOrderDetails',
+        },
+      },
+      {
+        $unwind: {
+          path: '$workOrderDetails',
+          preserveNullAndEmptyArrays: true,
+        },
+      },
+      {
+        $lookup: {
+          from: 'ironshapes',
+          localField: 'shape_id',
+          foreignField: '_id',
+          as: 'shapeDetails',
+        },
+      },
+      {
+        $unwind: {
+          path: '$shapeDetails',
+          preserveNullAndEmptyArrays: true, // Handle cases where shape_id might not exist
+        },
+      },
+      {
+        $lookup: {
+          from: 'users',
+          localField: 'packed_by',
+          foreignField: '_id',
+          as: 'userDetails',
+        },
+      },
+      {
+        $unwind: {
+          path: '$userDetails',
+          preserveNullAndEmptyArrays: true,
+        },
+      },
+      {
+        $group: {
+          _id: {
+            shape_id: '$shape_id',
+            work_order: '$work_order',
+          },
+          wo_id: { $first: '$workOrderDetails._id' },
+          wo: { $first: '$workOrderDetails.workOrderNumber' },
+          shape: { $first: '$shapeDetails.shape_code' },
+          shape_id: { $first: '$shapeDetails._id' },
+          time: { $first: '$createdAt' },
+          created_by: { $first: '$userDetails.username' },
+          status: { $first: '$delivery_stage' },
+          qr_code: { $push: '$qr_code' },
+        },
+      },
+      {
+        $project: {
+          _id: 0,
+          wo_id: 1,
+          wo: 1,
+          shape: 1,
+          shape_id: 1,
+          time: 1,
+          created_by: 1,
+          status: 1,
+          qr_code: 1,
+        },
+      },
+    ]);
+
+    res.status(200).json({
+      success: true,
+      message: packingDetails.length ? 'Packed records retrieved successfully' : 'No packed records found',
+      data: packingDetails,
+    });
+  } catch (error) {
+    console.error('Error retrieving packed records:', error);
+    res.status(error.statusCode || 500).json({
+      success: false,
+      message: error.message || 'Internal server error',
+    });
+  }
+};
+
+
+
+const getPackingDetailsById_11_09_2025 = async (req, res) => {
   try {
     const { wo_id, shape_id } = req.query;
 
@@ -685,6 +785,7 @@ const getPackingDetailsById = async (req, res) => {
         $match: {
           work_order: new mongoose.Types.ObjectId(wo_id),
           shape_id: new mongoose.Types.ObjectId(shape_id),
+          delivery_stage:"Packed"
         },
       },
       {
@@ -738,6 +839,163 @@ const getPackingDetailsById = async (req, res) => {
           time: '$createdAt',
           created_by: '$userDetails.username',
           qr_code: '$qr_code',
+        },
+      },
+    ]);
+
+    if (!packingDetails.length) {
+      return res.status(200).json({
+        success: true,
+        message: 'No packing records found for the given IDs',
+        data: [],
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: 'Packing details retrieved successfully',
+      data: packingDetails,
+    });
+  } catch (error) {
+    console.error('Error retrieving packing details:', error);
+    res.status(error.statusCode || 500).json({
+      success: false,
+      message: error.message || 'Internal server error',
+    });
+  }
+};
+
+
+const getPackingDetailsById = async (req, res) => {
+  try {
+    const { wo_id, shape_id } = req.query;
+
+    // Validate input parameters
+    if (!wo_id || !shape_id) {
+      return res.status(400).json({
+        success: false,
+        message: 'work_order ID and shape ID are required',
+      });
+    }
+
+    // Aggregation pipeline
+    const packingDetails = await iornPacking.aggregate([
+      {
+        $match: {
+          work_order: new mongoose.Types.ObjectId(wo_id),
+          shape_id: new mongoose.Types.ObjectId(shape_id),
+          delivery_stage: "Packed"
+        },
+      },
+      {
+        $lookup: {
+          from: 'ironworkorders',
+          localField: 'work_order',
+          foreignField: '_id',
+          as: 'workOrderDetails',
+          pipeline: [
+            {
+              $lookup: {
+                from: 'ironclients',
+                localField: 'clientId',
+                foreignField: '_id',
+                as: 'clientDetails',
+              },
+            },
+            {
+              $unwind: {
+                path: '$clientDetails',
+                preserveNullAndEmptyArrays: true,
+              },
+            },
+            {
+              $lookup: {
+                from: 'ironprojects',
+                localField: 'projectId',
+                foreignField: '_id',
+                as: 'projectDetails',
+              },
+            },
+            {
+              $unwind: {
+                path: '$projectDetails',
+                preserveNullAndEmptyArrays: true,
+              },
+            },
+            {
+              $lookup: {
+                from: 'ironjoborders',
+                localField: '_id',
+                foreignField: 'work_order',
+                as: 'jobOrderDetails',
+              },
+            },
+            {
+              $unwind: {
+                path: '$jobOrderDetails',
+                preserveNullAndEmptyArrays: true,
+              },
+            },
+            {
+              $project: {
+                workOrderNumber: 1,
+                client_name: '$clientDetails.name',
+                project_name: '$projectDetails.name',
+                job_order_number: '$jobOrderDetails.job_order_number',
+              },
+            },
+          ],
+        },
+      },
+      {
+        $unwind: {
+          path: '$workOrderDetails',
+          preserveNullAndEmptyArrays: true,
+        },
+      },
+      {
+        $lookup: {
+          from: 'ironshapes',
+          localField: 'shape_id',
+          foreignField: '_id',
+          as: 'shapeDetails',
+        },
+      },
+      {
+        $unwind: {
+          path: '$shapeDetails',
+          preserveNullAndEmptyArrays: true,
+        },
+      },
+      {
+        $lookup: {
+          from: 'users',
+          localField: 'packed_by',
+          foreignField: '_id',
+          as: 'userDetails',
+        },
+      },
+      {
+        $unwind: {
+          path: '$userDetails',
+          preserveNullAndEmptyArrays: true,
+        },
+      },
+      {
+        $project: {
+          wo_id: '$work_order',
+          wo: '$workOrderDetails.workOrderNumber',
+          client_name: '$workOrderDetails.client_name',
+          project_name: '$workOrderDetails.project_name',
+          job_order_number: '$workOrderDetails.job_order_number',
+          shape: '$shapeDetails.shape_code',
+          shape_id: '$shapeDetails._id',
+          status: '$delivery_stage',
+          time: '$createdAt',
+          created_by: '$userDetails.username',
+          qr_code: '$qr_code',
+          qr_code_url: '$qr_code_url',
+          product_quantity: '$product_quantity',
         },
       },
     ]);
