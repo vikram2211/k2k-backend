@@ -2002,7 +2002,7 @@ const updateIronJobOrder_11_09_2025_10_AM = asyncHandler(async (req, res) => {
 
 
 
-const updateIronJobOrder = asyncHandler(async (req, res) => {
+const updateIronJobOrder_11_09_2025_2_PM = asyncHandler(async (req, res) => {
   // --- Validation Schemas ---
   const productSchema = Joi.object({
     _id: Joi.string().optional(),
@@ -2323,7 +2323,338 @@ const updateIronJobOrder = asyncHandler(async (req, res) => {
 
 
 
+const updateIronJobOrder = asyncHandler(async (req, res) => {
+  const productSchema = Joi.object({
+    _id: Joi.string().optional(), // include _id to identify existing products
+    shape: Joi.string()
+      .optional()
+      .custom((value, helpers) => {
+        if (value && !mongoose.Types.ObjectId.isValid(value)) {
+          return helpers.error('any.invalid', { message: `Shape ID (${value}) is not a valid ObjectId` });
+        }
+        return value;
+      }),
+    planned_quantity: Joi.number().min(0).optional(),
+    schedule_date: Joi.date().optional(),
+    dia: Joi.number().min(0).optional(),
+    selected_machines: Joi.array().items(
+      Joi.string().custom((value, helpers) => {
+        if (!mongoose.Types.ObjectId.isValid(value)) {
+          return helpers.error('any.invalid', { message: `Machine ID (${value}) is not a valid ObjectId` });
+        }
+        return value;
+      })
+    ).optional(),
+  });
 
+  const jobOrderSchema = Joi.object({
+    work_order: Joi.string().optional(),
+    sales_order_number: Joi.string().optional().allow(''),
+    date_range: Joi.object({
+      from: Joi.date().optional(),
+      to: Joi.date().optional(),
+    }).optional(),
+    products: Joi.array().items(productSchema).optional(),
+  });
+
+  const bodyData = req.body;
+  const userId = req.user?._id?.toString();
+  const jobOrderId = req.params.id;
+
+  if (!mongoose.Types.ObjectId.isValid(jobOrderId)) {
+    throw new ApiError(400, `Invalid job order ID: ${jobOrderId}`);
+  }
+  if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
+    throw new ApiError(401, 'Invalid or missing user ID in request');
+  }
+
+  if (typeof bodyData.products === 'string') {
+    try {
+      bodyData.products = JSON.parse(bodyData.products);
+    } catch {
+      throw new ApiError(400, 'Invalid products JSON format');
+    }
+  }
+
+  const { error, value } = jobOrderSchema.validate(bodyData, { abortEarly: false });
+  if (error) throw new ApiError(400, 'Validation failed for job order update', error.details);
+
+  // Fetch existing Job Order
+  const existingJobOrder = await ironJobOrder.findById(jobOrderId);
+  console.log("existingJobOrder",existingJobOrder);
+  if (!existingJobOrder) throw new ApiError(404, `Job order not found with ID: ${jobOrderId}`);
+
+  // Validate work_order if updated
+  if (value.work_order) {
+    const workOrder = await mongoose.model('ironWorkOrder').findById(value.work_order);
+    if (!workOrder) throw new ApiError(404, `Work order not found with ID: ${value.work_order}`);
+  }
+
+  let updatedProducts = existingJobOrder.products;
+  console.log("updatedProducts111",updatedProducts);
+  let productUpdates = []; // Track product changes for production updates
+
+  if (value.products) {
+    updatedProducts = await Promise.all(
+      value.products.map(async (product, index) => {
+        let existingProduct = null;
+
+        // Find if product exists in DB (match by _id)
+        if (product._id) {
+          existingProduct = existingJobOrder.products.find(
+            (p) => p._id.toString() === product._id
+          );
+        }
+
+        if (existingProduct) {
+          // Track what changed for production updates
+          const productUpdate = {
+            object_id: existingProduct._id,
+            oldData: {
+              planned_quantity: existingProduct.planned_quantity,
+              schedule_date: existingProduct.schedule_date,
+              selected_machines: existingProduct.selected_machines,
+              shape: existingProduct.shape
+            },
+            newData: {
+              planned_quantity: product.planned_quantity ?? existingProduct.planned_quantity,
+              schedule_date: product.schedule_date ? new Date(product.schedule_date) : existingProduct.schedule_date,
+              selected_machines: product.selected_machines || existingProduct.selected_machines,
+              shape: product.shape || existingProduct.shape
+            },
+            isExisting: true
+          };
+          
+          productUpdates.push(productUpdate);
+
+          // ✅ Merge existing QR code fields
+          return {
+            ...existingProduct.toObject(),
+            shape: product.shape || existingProduct.shape,
+            planned_quantity: product.planned_quantity ?? existingProduct.planned_quantity,
+            schedule_date: product.schedule_date ? new Date(product.schedule_date) : existingProduct.schedule_date,
+            dia: product.dia ?? existingProduct.dia,
+            selected_machines: product.selected_machines || existingProduct.selected_machines,
+            qr_code_id: existingProduct.qr_code_id,
+            qr_code_url: existingProduct.qr_code_url,
+          };
+        } else {
+          // ✅ New product → generate QR code
+          const qrCodeId = `${existingJobOrder.job_order_number}-${uuidv4()}`;
+          const qrContent = `joborder/${existingJobOrder.job_order_number}/product/${qrCodeId}`;
+
+          let qrCodeBuffer;
+          try {
+            qrCodeBuffer = await QRCode.toBuffer(qrContent, {
+              type: 'png',
+              errorCorrectionLevel: 'H',
+              margin: 1,
+              width: 200,
+            });
+          } catch (error) {
+            throw new ApiError(500, `Failed to generate QR code for new product: ${error.message}`);
+          }
+
+          const fileName = `qr-codes/${qrCodeId}-${Date.now()}.png`;
+          let qrCodeUrl;
+          try {
+            const { url } = await putObject(
+              { data: qrCodeBuffer, mimetype: 'image/png' },
+              fileName
+            );
+            qrCodeUrl = url;
+          } catch (error) {
+            throw new ApiError(500, `Failed to upload QR code: ${error.message}`);
+          }
+
+          const newProduct = {
+            shape: product.shape,
+            planned_quantity: product.planned_quantity,
+            schedule_date: new Date(product.schedule_date),
+            dia: product.dia,
+            selected_machines: product.selected_machines || [],
+            qr_code_id: qrCodeId,
+            qr_code_url: qrCodeUrl,
+            achieved_quantity: 0,
+            rejected_quantity: 0,
+          };
+
+          // Track new product for production updates
+          productUpdates.push({
+            newData: newProduct,
+            isExisting: false,
+            isNew: true
+          });
+
+          return newProduct;
+        }
+      })
+    );
+  }
+console.log("productUpdates",productUpdates);
+console.log("updatedProducts222",updatedProducts);
+
+  // Prepare update object
+  const updateData = {
+    ...(value.work_order && { work_order: value.work_order }),
+    ...(value.sales_order_number !== undefined && { sales_order_number: value.sales_order_number }),
+    ...(value.date_range && {
+      date_range: {
+        from: value.date_range.from ? new Date(value.date_range.from) : existingJobOrder.date_range.from,
+        to: value.date_range.to ? new Date(value.date_range.to) : existingJobOrder.date_range.to,
+      },
+    }),
+    products: updatedProducts,
+    updated_by: userId,
+    updatedAt: new Date(),
+  };
+
+  // Update in DB
+  const updatedJobOrder = await ironJobOrder
+    .findByIdAndUpdate(jobOrderId, { $set: updateData }, { new: true })
+    .populate('work_order', '_id po_quantity')
+    .populate('products.shape', 'name uom')
+    .populate('products.selected_machines', 'name')
+    .populate('created_by', 'username email')
+    .populate('updated_by', 'username email')
+    .lean();
+
+  if (!updatedJobOrder) throw new ApiError(404, 'Failed to retrieve updated job order');
+
+  // =============================================
+  // UPDATE/CREATE PRODUCTION RECORDS
+  // =============================================
+  
+  try {
+    for (const productUpdate of productUpdates) {
+      console.log("productUpdate",productUpdate);
+      if (productUpdate.isNew) {
+        console.log("inside111");
+        // Create new production record for new product
+        const newProductData = productUpdate.newData;
+        
+        // Get the actual _id from the saved job order
+        const savedProduct = updatedJobOrder.products.find(p => 
+          p.qr_code_id === newProductData.qr_code_id
+        );
+        
+        if (savedProduct) {
+          const schemaProduct = {
+            object_id: savedProduct._id,
+            shape_id: newProductData.shape,
+            planned_quantity: newProductData.planned_quantity,
+            achieved_quantity: 0,
+            rejected_quantity: 0,
+            recycled_quantity: 0,
+            machines: newProductData.selected_machines || [],
+          };
+
+          const newProduction = new ironDailyProduction({
+            work_order: updateData.work_order || existingJobOrder.work_order,
+            job_order: jobOrderId,
+            products: [schemaProduct],
+            date: new Date(newProductData.schedule_date),
+            submitted_by: userId,
+            created_by: userId,
+            updated_by: userId,
+            status: 'Pending',
+          });
+
+          await newProduction.save();
+        }
+      } else if (productUpdate.isExisting) {
+        console.log("inside2222");
+        // Update existing production record
+        const { object_id, oldData, newData } = productUpdate;
+        console.log("object_id",object_id);
+        console.log("oldData",oldData);
+        console.log("newData",newData);
+        
+        // Find the production record for this product
+        const productionRecord = await ironDailyProduction.findOne({
+          job_order: jobOrderId,
+          'products.object_id': object_id
+        });
+        console.log("productionRecord",productionRecord);
+
+        if (productionRecord) {
+          // Find the specific product in the production record
+          const productIndex = productionRecord.products.findIndex(
+            p => p.object_id.toString() === object_id.toString()
+          );
+          console.log("productIndex",productIndex);
+
+
+          if (productIndex !== -1) {
+            const updateFields = {};
+            
+            // Update planned quantity if changed
+            if (newData.planned_quantity !== oldData.planned_quantity) {
+              updateFields[`products.${productIndex}.planned_quantity`] = newData.planned_quantity;
+            }
+            
+            // Update machines if changed
+            if (JSON.stringify(newData.selected_machines) !== JSON.stringify(oldData.selected_machines)) {
+              updateFields[`products.${productIndex}.machines`] = newData.selected_machines;
+            }
+
+            // Update shape if changed
+            if (newData.shape.toString() !== oldData.shape.toString()) {
+              updateFields[`products.${productIndex}.shape_id`] = newData.shape;
+            }
+
+            // Update production date if schedule_date changed
+            if (newData.schedule_date.getTime() !== oldData.schedule_date.getTime()) {
+              updateFields['date'] = newData.schedule_date;
+            }
+
+            // Update updated_by and timestamp
+            updateFields['updated_by'] = userId;
+            updateFields['updatedAt'] = new Date();
+
+            // Apply updates if there are any
+            if (Object.keys(updateFields).length > 0) {
+              await ironDailyProduction.updateOne(
+                { 
+                  _id: productionRecord._id,
+                  'products.object_id': object_id
+                },
+                { $set: updateFields }
+              );
+            }
+          }
+        }
+      }
+    }
+  } catch (error) {
+    console.error('Error updating production records:', error);
+    // You might want to log this error but not fail the entire operation
+    // since the job order update was successful
+  }
+
+  const formatDateToIST = (data) => {
+    const convertToIST = (date) =>
+      date ? new Date(date).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }) : null;
+
+    return {
+      ...data,
+      date_range: {
+        from: convertToIST(data.date_range.from),
+        to: convertToIST(data.date_range.to),
+      },
+      createdAt: convertToIST(data.createdAt),
+      updatedAt: convertToIST(data.updatedAt),
+      products: data.products.map((p) => ({
+        ...p,
+        schedule_date: convertToIST(p.schedule_date),
+      })),
+    };
+  };
+
+  return res
+    .status(200)
+    .json(new ApiResponse(200, formatDateToIST(updatedJobOrder), 'Job order updated successfully'));
+});
 
 
 
