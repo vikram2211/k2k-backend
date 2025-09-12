@@ -781,6 +781,8 @@ const getDispatchById = asyncHandler(async (req, res, next) => {
     let clientName = 'N/A';
     let clientAddress = 'N/A';
     let projectName = 'N/A';
+    let projectAddress = 'N/A';
+
 
     if (dispatch.packing_ids && dispatch.packing_ids.length > 0) {
         const packing = dispatch.packing_ids[0];
@@ -790,7 +792,7 @@ const getDispatchById = asyncHandler(async (req, res, next) => {
 
             const workOrder = await falconWorkOrder.findOne({ _id: jobOrder.work_order_number })
                 .populate('client_id', 'name address')
-                .populate('project_id', 'name')
+                .populate('project_id', 'name address')
                 .lean();
 
             if (workOrder) {
@@ -798,6 +800,7 @@ const getDispatchById = asyncHandler(async (req, res, next) => {
                 clientName = workOrder.client_id?.name || 'N/A';
                 clientAddress = workOrder.client_id?.address || 'N/A';
                 projectName = workOrder.project_id?.name || 'N/A';
+                projectAddress = workOrder.project_id?.address || 'N/A';
             }
         }
     }
@@ -809,10 +812,12 @@ const getDispatchById = asyncHandler(async (req, res, next) => {
             clientName: clientName,
             clientAddress: clientAddress,
             projectName: projectName,
+            projectAddress: projectAddress,
             invoiceOrOrder: dispatch.invoice_or_sto || 'N/A',
             vehicleNumber: dispatch.vehicle_number || 'N/A',
             gatePass: dispatch.gate_pass_no != null ? dispatch.gate_pass_no : 'N/A',
             dcNo: dispatch.dc_no != null ? dispatch.dc_no : 'N/A',
+            contactPerson: dispatch.contact_person_detail || 'N/A',
         },
         productDetails: dispatch.products.map((product) => ({
             id: dispatch._id,
@@ -830,7 +835,6 @@ const getDispatchById = asyncHandler(async (req, res, next) => {
             hardwareIncluded: product.hardware_included || 'N/A',
             invoiceOrOrder: dispatch.invoice_or_sto || 'N/A',
             vehicleNumber: dispatch.vehicle_number || 'N/A',
-            contactPerson: dispatch.contact_person_detail || 'N/A',
             gatePass: dispatch.gate_pass_no != null ? dispatch.gate_pass_no : 'N/A',
             dcNo: dispatch.dc_no != null ? dispatch.dc_no : 'N/A',
             invoiceFile: dispatch.invoice_file || [],
