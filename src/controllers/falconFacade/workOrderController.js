@@ -18,6 +18,10 @@ import { falconQCCheck } from '../../models/falconFacade/falconQcCheck.model.js'
 import { falconSystem } from '../../models/falconFacade/helpers/falconSystem.model.js';
 import { falconProductSystem } from '../../models/falconFacade/helpers/falconProductSystem.model.js';
 import { falconProduct } from '../../models/falconFacade/helpers/falconProduct.model.js';
+import { falconPacking } from '../../models/falconFacade/falconPacking.model.js';
+import { falocnDispatch } from '../../models/falconFacade/falconDispatch.model.js';
+// import { falconQCCheck } from '../../models/falconFacade/falconQcCheck.model.js';falocnDispatch
+// const { formatDateToIST, formatDateOnly } = require('../../utils/formatDate.js');
 
 
 
@@ -729,7 +733,7 @@ if (req.files && req.files.length > 0) {
 
 
 
-const getFalconWorkOrderById = asyncHandler(async (req, res) => {
+const getFalconWorkOrderById_12_09_2025 = asyncHandler(async (req, res) => {
     const { id } = req.params;
     console.log("id", id);
 
@@ -938,6 +942,1154 @@ const getFalconWorkOrderById = asyncHandler(async (req, res) => {
         new ApiResponse(200, formattedWorkOrder, `Work order data for ID ${id} found.`)
     );
 });
+
+
+const getFalconWorkOrderById_12_09_2025_01_PM = asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+        throw new ApiError(400, `Invalid work order ID: ${id}`);
+    }
+
+    // Fetch work order (without products)
+    const workOrder = await falconWorkOrder.findById(id)
+        .select('work_order_number client_id project_id files date remarks createdAt updatedAt')
+        .populate({ path: 'client_id', select: 'name address', match: { isDeleted: false } })
+        .populate({ path: 'project_id', select: 'name address', match: { isDeleted: false } })
+        .lean();
+
+    if (!workOrder) {
+        throw new ApiError(404, `Work order with ID ${id} not found`);
+    }
+
+    // Fetch all job orders linked to this work order
+    const jobOrders = await falconJobOrder.find({ work_order_number: id }).lean();
+    const allJobOrderProducts = jobOrders.flatMap(jo => jo.products);
+
+    // Fetch internal work orders for these job orders
+    const internalWorkOrders = await falconInternalWorkOrder.find({
+        job_order_id: { $in: jobOrders.map(j => j._id) }
+    }).lean();
+
+    // Rest of your logic for internal details, semi-finished details, etc.
+    const systemIds = new Set();
+    const productSystemIds = new Set();
+    internalWorkOrders.forEach(iwo => {
+        iwo.products.forEach(prod => {
+            systemIds.add(prod.system?.toString());
+            productSystemIds.add(prod.product_system?.toString());
+        });
+    });
+
+    const systemDocs = await falconSystem.find({ _id: { $in: Array.from(systemIds) } }).select('name').lean();
+    const productSystemDocs = await falconProductSystem.find({ _id: { $in: Array.from(productSystemIds) } }).select('name').lean();
+    const systemNameMap = {};
+    systemDocs.forEach(sys => systemNameMap[sys._id.toString()] = sys.name);
+    const productSystemNameMap = {};
+    productSystemDocs.forEach(psys => productSystemNameMap[psys._id.toString()] = psys.name);
+
+    const allProductIds = internalWorkOrders.flatMap(iwo => iwo.products.map(p => p.product));
+    const productNamesMap = {};
+    const productDocs = await falconProduct.find({ _id: { $in: allProductIds } }).select('name').lean();
+    productDocs.forEach(prod => productNamesMap[prod._id.toString()] = prod.name);
+
+    // Add product names to the products array
+    const productsWithNames = allJobOrderProducts.map(product => ({
+        ...product,
+        product_name: productNamesMap[product.product.toString()] || 'Unknown Product'
+    }));
+
+    // Rest of your logic for internal details and semi-finished details
+    const internalDetails = [];
+    const jobOrderSemiDetails = [];
+
+    for (const iwo of internalWorkOrders) {
+        const relatedJobOrder = jobOrders.find(j => j._id.toString() === iwo.job_order_id.toString());
+        for (const productObj of iwo.products) {
+            const relatedJobProduct = relatedJobOrder?.products?.find(p => p.product.toString() === productObj.product.toString());
+            const relatedSemiIds = productObj.semifinished_details.map(s => s.semifinished_id);
+            let latestAchievedQty = 0;
+
+            for (const semiId of relatedSemiIds) {
+                const latestProduction = await falconProduction.findOne({
+                    job_order: relatedJobOrder._id,
+                    semifinished_id: semiId
+                }).sort({ createdAt: -1 }).select('product.achieved_quantity').lean();
+                if (latestProduction?.product?.achieved_quantity) {
+                    latestAchievedQty += latestProduction.product.achieved_quantity;
+                }
+            }
+
+            const qcs = await falconQCCheck.find({
+                job_order: relatedJobOrder._id,
+                semifinished_id: { $in: relatedSemiIds }
+            }).lean();
+            const totalRejected = qcs.reduce((sum, qc) => sum + (qc?.rejected_quantity || 0), 0);
+
+            internalDetails.push({
+                product_name: productNamesMap[productObj.product.toString()],
+                sales_order_no: iwo.sales_order_no,
+                system: systemNameMap[productObj.system?.toString()] || '',
+                product_system: productSystemNameMap[productObj.product_system?.toString()] || '',
+                uom: relatedJobProduct?.uom || '',
+                color_code: relatedJobProduct?.color_code || '',
+                code: relatedJobProduct?.code || '',
+                width: relatedJobProduct?.width || '',
+                height: relatedJobProduct?.height || '',
+                po_quantity: relatedJobProduct?.po_quantity || '',
+                range_date: {
+                    from_date: iwo.date?.from,
+                    to_date: iwo.date?.to,
+                },
+                achieved_quantity: latestAchievedQty,
+                rejected_quantity: totalRejected
+            });
+
+            // Build semi-finished details (unchanged)
+            const semiFinishedArray = [];
+            for (const semi of productObj.semifinished_details) {
+                const relatedProductions = await falconProduction.find({
+                    job_order: relatedJobOrder._id,
+                    semifinished_id: semi.semifinished_id
+                }).sort({ createdAt: -1 }).lean();
+
+                const steps = (semi.processes || []).map(proc => {
+                    const matchedProd = relatedProductions.find(p =>
+                        p.process_name?.toLowerCase().trim() === proc.name?.toLowerCase().trim()
+                    );
+                    return {
+                        step_name: proc.name || '',
+                        file_url: proc.file_url || '',
+                        remarks: proc.remarks || '',
+                        po_quantity: matchedProd?.product?.po_quantity || 0,
+                        planned_quantity: matchedProd?.product?.planned_quantity || 0,
+                        achieved_quantity: matchedProd?.product?.achieved_quantity || 0,
+                        rejected_quantity: matchedProd?.product?.rejected_quantity || 0
+                    };
+                });
+
+                semiFinishedArray.push({
+                    semifinished_id: semi.semifinished_id,
+                    file_url: semi.file_url || '',
+                    remarks: semi.remarks || '',
+                    packing_details: semi.packing_details || '',
+                    dispatch_details: semi.dispatch_details || '',
+                    steps
+                });
+            }
+
+            jobOrderSemiDetails.push({
+                job_order_id: relatedJobOrder?.job_order_id,
+                sales_order_no: iwo.sales_order_no,
+                product_name: productNamesMap[productObj.product.toString()],
+                system: systemNameMap[productObj.system?.toString()] || '',
+                product_system: productSystemNameMap[productObj.product_system?.toString()] || '',
+                uom: relatedJobProduct?.uom || '',
+                color_code: relatedJobProduct?.color_code || '',
+                code: relatedJobProduct?.code || '',
+                width: relatedJobProduct?.width || '',
+                height: relatedJobProduct?.height || '',
+                po_quantity: relatedJobProduct?.po_quantity || '',
+                range_date: {
+                    from_date: iwo.date?.from,
+                    to_date: iwo.date?.to,
+                },
+                achieved_quantity: latestAchievedQty,
+                rejected_quantity: totalRejected,
+                semi_finished_details: semiFinishedArray
+            });
+        }
+    }
+
+    // Format the work order and replace products with job order products (with names)
+    const formattedWorkOrder = formatDateToIST(workOrder);
+    formattedWorkOrder.products = productsWithNames;
+    formattedWorkOrder.internal_work_order_details = internalDetails;
+    formattedWorkOrder.job_order_semi_details = jobOrderSemiDetails;
+
+    return res.status(200).json(
+        new ApiResponse(200, formattedWorkOrder, `Work order data for ID ${id} found.`)
+    );
+});
+
+
+const getFalconWorkOrderById_12_09_2025_2_30_PM = asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+        throw new ApiError(400, `Invalid work order ID: ${id}`);
+    }
+
+    // Fetch work order (without products)
+    const workOrder = await falconWorkOrder.findById(id)
+        .select('work_order_number client_id project_id files date remarks createdAt updatedAt')
+        .populate({ path: 'client_id', select: 'name address', match: { isDeleted: false } })
+        .populate({ path: 'project_id', select: 'name address', match: { isDeleted: false } })
+        .lean();
+
+    if (!workOrder) {
+        throw new ApiError(404, `Work order with ID ${id} not found`);
+    }
+
+    // Fetch all job orders linked to this work order
+    const jobOrders = await falconJobOrder.find({ work_order_number: id }).lean();
+    const allJobOrderProducts = jobOrders.flatMap(jo => jo.products);
+
+    // Fetch internal work orders for these job orders
+    const internalWorkOrders = await falconInternalWorkOrder.find({
+        job_order_id: { $in: jobOrders.map(j => j._id) }
+    }).lean();
+
+    // Rest of your logic for internal details, semi-finished details, etc.
+    const systemIds = new Set();
+    const productSystemIds = new Set();
+    internalWorkOrders.forEach(iwo => {
+        iwo.products.forEach(prod => {
+            systemIds.add(prod.system?.toString());
+            productSystemIds.add(prod.product_system?.toString());
+        });
+    });
+
+    const systemDocs = await falconSystem.find({ _id: { $in: Array.from(systemIds) } }).select('name').lean();
+    const productSystemDocs = await falconProductSystem.find({ _id: { $in: Array.from(productSystemIds) } }).select('name').lean();
+    const systemNameMap = {};
+    systemDocs.forEach(sys => systemNameMap[sys._id.toString()] = sys.name);
+    const productSystemNameMap = {};
+    productSystemDocs.forEach(psys => productSystemNameMap[psys._id.toString()] = psys.name);
+
+    const allProductIds = internalWorkOrders.flatMap(iwo => iwo.products.map(p => p.product));
+    const productNamesMap = {};
+    const productDocs = await falconProduct.find({ _id: { $in: allProductIds } }).select('name').lean();
+    productDocs.forEach(prod => productNamesMap[prod._id.toString()] = prod.name);
+
+    // Add product names to the products array
+    const productsWithNames = allJobOrderProducts.map(product => ({
+        ...product,
+        product_name: productNamesMap[product.product.toString()] || 'Unknown Product'
+    }));
+
+    // Rest of your logic for internal details and semi-finished details
+    const internalDetails = [];
+    const jobOrderSemiDetails = [];
+
+    for (const iwo of internalWorkOrders) {
+        const relatedJobOrder = jobOrders.find(j => j._id.toString() === iwo.job_order_id.toString());
+        for (const productObj of iwo.products) {
+            const relatedJobProduct = relatedJobOrder?.products?.find(p => p.product.toString() === productObj.product.toString());
+            const relatedSemiIds = productObj.semifinished_details.map(s => s.semifinished_id);
+            let latestAchievedQty = 0;
+
+            for (const semiId of relatedSemiIds) {
+                const latestProduction = await falconProduction.findOne({
+                    job_order: relatedJobOrder._id,
+                    semifinished_id: semiId
+                }).sort({ createdAt: -1 }).select('product.achieved_quantity').lean();
+                if (latestProduction?.product?.achieved_quantity) {
+                    latestAchievedQty += latestProduction.product.achieved_quantity;
+                }
+            }
+
+            const qcs = await falconQCCheck.find({
+                job_order: relatedJobOrder._id,
+                semifinished_id: { $in: relatedSemiIds }
+            }).lean();
+            const totalRejected = qcs.reduce((sum, qc) => sum + (qc?.rejected_quantity || 0), 0);
+
+            internalDetails.push({
+                product_name: productNamesMap[productObj.product.toString()],
+                sales_order_no: iwo.sales_order_no,
+                system: systemNameMap[productObj.system?.toString()] || '',
+                product_system: productSystemNameMap[productObj.product_system?.toString()] || '',
+                uom: relatedJobProduct?.uom || '',
+                color_code: relatedJobProduct?.color_code || '',
+                code: relatedJobProduct?.code || '',
+                width: relatedJobProduct?.width || '',
+                height: relatedJobProduct?.height || '',
+                po_quantity: relatedJobProduct?.po_quantity || '',
+                range_date: {
+                    from_date: iwo.date?.from,
+                    to_date: iwo.date?.to,
+                },
+                achieved_quantity: latestAchievedQty,
+                rejected_quantity: totalRejected
+            });
+
+            // Build semi-finished details (unchanged)
+            const semiFinishedArray = [];
+            for (const semi of productObj.semifinished_details) {
+                const relatedProductions = await falconProduction.find({
+                    job_order: relatedJobOrder._id,
+                    semifinished_id: semi.semifinished_id
+                }).sort({ createdAt: -1 }).lean();
+
+                const steps = (semi.processes || []).map(proc => {
+                    const matchedProd = relatedProductions.find(p =>
+                        p.process_name?.toLowerCase().trim() === proc.name?.toLowerCase().trim()
+                    );
+                    return {
+                        step_name: proc.name || '',
+                        file_url: proc.file_url || '',
+                        remarks: proc.remarks || '',
+                        po_quantity: matchedProd?.product?.po_quantity || 0,
+                        planned_quantity: matchedProd?.product?.planned_quantity || 0,
+                        achieved_quantity: matchedProd?.product?.achieved_quantity || 0,
+                        rejected_quantity: matchedProd?.product?.rejected_quantity || 0
+                    };
+                });
+
+                semiFinishedArray.push({
+                    semifinished_id: semi.semifinished_id,
+                    file_url: semi.file_url || '',
+                    remarks: semi.remarks || '',
+                    packing_details: semi.packing_details || '',
+                    dispatch_details: semi.dispatch_details || '',
+                    steps
+                });
+            }
+
+            jobOrderSemiDetails.push({
+                job_order_id: relatedJobOrder?.job_order_id,
+                sales_order_no: iwo.sales_order_no,
+                product_name: productNamesMap[productObj.product.toString()],
+                system: systemNameMap[productObj.system?.toString()] || '',
+                product_system: productSystemNameMap[productObj.product_system?.toString()] || '',
+                uom: relatedJobProduct?.uom || '',
+                color_code: relatedJobProduct?.color_code || '',
+                code: relatedJobProduct?.code || '',
+                width: relatedJobProduct?.width || '',
+                height: relatedJobProduct?.height || '',
+                po_quantity: relatedJobProduct?.po_quantity || '',
+                range_date: {
+                    from_date: iwo.date?.from,
+                    to_date: iwo.date?.to,
+                },
+                achieved_quantity: latestAchievedQty,
+                rejected_quantity: totalRejected,
+                semi_finished_details: semiFinishedArray
+            });
+        }
+    }
+
+    // Fetch packing details for all job orders
+    const packingDetails = [];
+    for (const jobOrder of jobOrders) {
+        const packingDocs = await falconPacking.find({
+            job_order_id: jobOrder._id,
+            delivery_stage: "Packed"
+        })
+        .populate('product', 'name uom')
+        .populate('packed_by', 'username')
+        .lean();
+
+        const productMap = {};
+        for (const doc of packingDocs) {
+            const productId = doc.product?._id?.toString();
+            const productName = doc.product?.name || 'N/A';
+            const uom = doc.product?.uom || 'nos';
+            const sfId = doc.semi_finished_id;
+            if (!productMap[productId]) {
+                productMap[productId] = { productId, productName, uom, semiFinishedProducts: {} };
+            }
+            if (!productMap[productId].semiFinishedProducts[sfId]) {
+                productMap[productId].semiFinishedProducts[sfId] = { sfId, quantity: 0, qrCodes: [] };
+            }
+            productMap[productId].semiFinishedProducts[sfId].quantity += doc.semi_finished_quantity || 0;
+            productMap[productId].semiFinishedProducts[sfId].qrCodes.push({
+                code: doc.qr_id,
+                url: doc.qr_code,
+            });
+        }
+
+        if (Object.keys(productMap).length > 0) {
+            packingDetails.push({
+                workOrderId: workOrder.work_order_number,
+                jobOrder: jobOrder.job_order_id,
+                status: "Packed",
+                createdBy: jobOrder.created_by?.username || 'N/A',
+                timestamp: jobOrder.createdAt,
+                products: Object.values(productMap).map((prod) => ({
+                    ...prod,
+                    semiFinishedProducts: Object.values(prod.semiFinishedProducts),
+                })),
+            });
+        }
+    }
+
+    // Fetch dispatch details for all job orders
+    const dispatchDetails = [];
+    for (const jobOrder of jobOrders) {
+        const dispatchDocs = await falocnDispatch.find({ job_order: jobOrder._id })
+            .populate('products.product_id', 'name')
+            .lean();
+
+        const dispatchProducts = dispatchDocs.map((dispatch) => {
+            const products = dispatch.products.map((product) => {
+                const jobOrderProduct = jobOrder.products.find(
+                    (p) => p.product.toString() === product.product_id.toString()
+                );
+                return {
+                    productName: product.product_name || 'N/A',
+                    productId: product.product_id.toString(),
+                    dispatchQty: product.dispatch_quantity || 0,
+                    uom: jobOrderProduct?.uom || 'nos',
+                };
+            });
+
+            return {
+                dispatchId: dispatch._id.toString(),
+                jobOrder: jobOrder.job_order_id,
+                workOrderId: workOrder.work_order_number,
+                status: dispatch.status || 'Approved',
+                timestamp: dispatch.date,
+                vehicleNumber: dispatch.vehicle_number,
+                createdBy: dispatch.created_by?.toString() || 'N/A',
+                products,
+            };
+        });
+
+        dispatchDetails.push(...dispatchProducts);
+    }
+
+    // Format the work order and include all details
+    const formattedWorkOrder = formatDateToIST(workOrder);
+    formattedWorkOrder.products = productsWithNames;
+    formattedWorkOrder.internal_work_order_details = internalDetails;
+    formattedWorkOrder.jobOrderDetailsWithSemiFinished = jobOrderSemiDetails; // Renamed field
+    formattedWorkOrder.packing_details = packingDetails; // Add packing details
+    formattedWorkOrder.dispatch_details = dispatchDetails; // Add dispatch details
+
+    return res.status(200).json(
+        new ApiResponse(200, formattedWorkOrder, `Work order data for ID ${id} found.`)
+    );
+});
+
+
+
+const getFalconWorkOrderById_12_09_2025_3_PM = asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+        throw new ApiError(400, `Invalid work order ID: ${id}`);
+    }
+
+    // Fetch work order (without products)
+    const workOrder = await falconWorkOrder.findById(id)
+        .select('work_order_number client_id project_id files date remarks createdAt updatedAt')
+        .populate({ path: 'client_id', select: 'name address', match: { isDeleted: false } })
+        .populate({ path: 'project_id', select: 'name address', match: { isDeleted: false } })
+        .lean();
+
+    if (!workOrder) {
+        throw new ApiError(404, `Work order with ID ${id} not found`);
+    }
+
+    // Fetch all job orders linked to this work order
+    const jobOrders = await falconJobOrder.find({ work_order_number: id })
+        .populate({
+            path: 'products.product',
+            select: 'name',
+            match: { isDeleted: false },
+        })
+        .lean();
+
+    // Fetch internal work orders for these job orders
+    const internalWorkOrders = await falconInternalWorkOrder.find({
+        job_order_id: { $in: jobOrders.map(j => j._id) }
+    }).lean();
+
+    // Fetch system and product system names
+    const systemIds = new Set();
+    const productSystemIds = new Set();
+    internalWorkOrders.forEach(iwo => {
+        iwo.products.forEach(prod => {
+            systemIds.add(prod.system?.toString());
+            productSystemIds.add(prod.product_system?.toString());
+        });
+    });
+
+    const systemDocs = await falconSystem.find({ _id: { $in: Array.from(systemIds) } }).select('name').lean();
+    const productSystemDocs = await falconProductSystem.find({ _id: { $in: Array.from(productSystemIds) } }).select('name').lean();
+    const systemNameMap = Object.fromEntries(systemDocs.map(sys => [sys._id.toString(), sys.name]));
+    const productSystemNameMap = Object.fromEntries(productSystemDocs.map(psys => [psys._id.toString(), psys.name]));
+
+    // Fetch product names
+    const allProductIds = internalWorkOrders.flatMap(iwo => iwo.products.map(p => p.product));
+    const productDocs = await falconProduct.find({ _id: { $in: allProductIds } }).select('name').lean();
+    const productNamesMap = Object.fromEntries(productDocs.map(prod => [prod._id.toString(), prod.name]));
+
+    // Add product names to the products array (from job orders)
+    const allJobOrderProducts = jobOrders.flatMap(jo => jo.products);
+    const productsWithNames = allJobOrderProducts.map(product => ({
+        ...product,
+        product_name: productNamesMap[product.product.toString()] || 'Unknown Product'
+    }));
+
+    // Original logic for internal_work_order_details and job_order_semi_details
+    const internalDetails = [];
+    const jobOrderSemiDetails = [];
+
+    for (const iwo of internalWorkOrders) {
+        const relatedJobOrder = jobOrders.find(j => j._id.toString() === iwo.job_order_id.toString());
+        for (const productObj of iwo.products) {
+            const relatedJobProduct = relatedJobOrder?.products?.find(p => p.product.toString() === productObj.product.toString());
+            const relatedSemiIds = productObj.semifinished_details.map(s => s.semifinished_id);
+            let latestAchievedQty = 0;
+
+            for (const semiId of relatedSemiIds) {
+                const latestProduction = await falconProduction.findOne({
+                    job_order: relatedJobOrder._id,
+                    semifinished_id: semiId
+                }).sort({ createdAt: -1 }).select('product.achieved_quantity').lean();
+                if (latestProduction?.product?.achieved_quantity) {
+                    latestAchievedQty += latestProduction.product.achieved_quantity;
+                }
+            }
+
+            const qcs = await falconQCCheck.find({
+                job_order: relatedJobOrder._id,
+                semifinished_id: { $in: relatedSemiIds }
+            }).lean();
+            const totalRejected = qcs.reduce((sum, qc) => sum + (qc?.rejected_quantity || 0), 0);
+
+            internalDetails.push({
+                product_name: productNamesMap[productObj.product.toString()],
+                sales_order_no: iwo.sales_order_no,
+                system: systemNameMap[productObj.system?.toString()] || '',
+                product_system: productSystemNameMap[productObj.product_system?.toString()] || '',
+                uom: relatedJobProduct?.uom || '',
+                color_code: relatedJobProduct?.color_code || '',
+                code: relatedJobProduct?.code || '',
+                width: relatedJobProduct?.width || '',
+                height: relatedJobProduct?.height || '',
+                po_quantity: relatedJobProduct?.po_quantity || '',
+                range_date: {
+                    from_date: iwo.date?.from,
+                    to_date: iwo.date?.to,
+                },
+                achieved_quantity: latestAchievedQty,
+                rejected_quantity: totalRejected
+            });
+
+            const semiFinishedArray = [];
+            for (const semi of productObj.semifinished_details) {
+                const relatedProductions = await falconProduction.find({
+                    job_order: relatedJobOrder._id,
+                    semifinished_id: semi.semifinished_id
+                }).sort({ createdAt: -1 }).lean();
+
+                const steps = (semi.processes || []).map(proc => {
+                    const matchedProd = relatedProductions.find(p =>
+                        p.process_name?.toLowerCase().trim() === proc.name?.toLowerCase().trim()
+                    );
+                    return {
+                        step_name: proc.name || '',
+                        file_url: proc.file_url || '',
+                        remarks: proc.remarks || '',
+                        po_quantity: matchedProd?.product?.po_quantity || 0,
+                        planned_quantity: matchedProd?.product?.planned_quantity || 0,
+                        achieved_quantity: matchedProd?.product?.achieved_quantity || 0,
+                        rejected_quantity: matchedProd?.product?.rejected_quantity || 0
+                    };
+                });
+
+                semiFinishedArray.push({
+                    semifinished_id: semi.semifinished_id,
+                    file_url: semi.file_url || '',
+                    remarks: semi.remarks || '',
+                    packing_details: semi.packing_details || '',
+                    dispatch_details: semi.dispatch_details || '',
+                    steps
+                });
+            }
+
+            jobOrderSemiDetails.push({
+                job_order_id: relatedJobOrder?.job_order_id,
+                sales_order_no: iwo.sales_order_no,
+                product_name: productNamesMap[productObj.product.toString()],
+                system: systemNameMap[productObj.system?.toString()] || '',
+                product_system: productSystemNameMap[productObj.product_system?.toString()] || '',
+                uom: relatedJobProduct?.uom || '',
+                color_code: relatedJobProduct?.color_code || '',
+                code: relatedJobProduct?.code || '',
+                width: relatedJobProduct?.width || '',
+                height: relatedJobProduct?.height || '',
+                po_quantity: relatedJobProduct?.po_quantity || '',
+                range_date: {
+                    from_date: iwo.date?.from,
+                    to_date: iwo.date?.to,
+                },
+                achieved_quantity: latestAchievedQty,
+                rejected_quantity: totalRejected,
+                semi_finished_details: semiFinishedArray
+            });
+        }
+    }
+
+    // New logic for jobOrderDetailsWithSemiFinished
+    const jobOrderDetailsWithSemiFinished = await Promise.all(
+        internalWorkOrders.flatMap(async iwo => {
+            const relatedJobOrder = jobOrders.find(j => j._id.toString() === iwo.job_order_id.toString());
+            return Promise.all(
+                iwo.products.map(async prod => {
+                    const productId = prod.product?.toString();
+                    const relatedJobProduct = relatedJobOrder?.products?.find(p => p.product?._id.toString() === productId);
+                    let achievedQty = 0;
+                    const semiFinishedDetails = [];
+                    let semiResults = [];
+
+                    if (prod.semifinished_details?.length > 0) {
+                        for (const semi of prod.semifinished_details) {
+                            const lastProcess = semi.processes?.[semi.processes.length - 1];
+                            let semiAchieved = 0;
+                            let isComplete = false;
+
+                            if (lastProcess) {
+                                const productionDoc = await falconProduction.findOne({
+                                    job_order: iwo.job_order_id,
+                                    'product.product_id': productId,
+                                    semifinished_id: semi.semifinished_id,
+                                    process_name: { $regex: `^${lastProcess.name}$`, $options: 'i' },
+                                }).lean();
+                                if (productionDoc) {
+                                    semiAchieved = productionDoc.product.achieved_quantity || 0;
+                                    isComplete = semiAchieved >= prod.po_quantity;
+                                }
+                            }
+                            semiResults.push({ achievedQty: semiAchieved, isComplete });
+
+                            // Fetch packing and dispatch for semi-finished
+                            const packingDocs = await falconPacking.find({
+                                job_order_id: iwo.job_order_id,
+                                product: prod.product,
+                                semi_finished_id: semi.semifinished_id,
+                            }).lean();
+                            const packed_qty = packingDocs.reduce((sum, doc) => sum + (doc.semi_finished_quantity || 0), 0);
+                            const packingIds = packingDocs.map(doc => doc._id);
+
+                            const dispatchDocs = await falocnDispatch.find({
+                                job_order: iwo.job_order_id,
+                                packing_ids: { $in: packingIds },
+                            }).lean();
+                            let dispatch_qty = 0;
+                            dispatchDocs.forEach(dispatch => {
+                                dispatch.products.forEach(product => {
+                                    if (
+                                        product.product_id?.toString() === prod.product?.toString() &&
+                                        product.semi_finished_id === semi.semifinished_id
+                                    ) {
+                                        dispatch_qty += product.dispatch_quantity || 0;
+                                    }
+                                });
+                            });
+
+                            semiFinishedDetails.push({
+                                semifinished_id: semi.semifinished_id,
+                                file_url: semi.file_url || '',
+                                remarks: semi.remarks || '',
+                                packed_qty,
+                                dispatch_qty,
+                                processes: await Promise.all(
+                                    semi.processes.map(async proc => {
+                                        const production = await falconProduction.findOne({
+                                            job_order: iwo.job_order_id,
+                                            'product.product_id': prod.product,
+                                            semifinished_id: semi.semifinished_id,
+                                            process_name: { $regex: `^${proc.name}$`, $options: 'i' },
+                                        }).lean();
+                                        return {
+                                            name: proc.name,
+                                            file_url: proc.file_url || '',
+                                            remarks: proc.remarks || '',
+                                            achievedQty: production?.product?.achieved_quantity || 0,
+                                        };
+                                    })
+                                ),
+                            });
+                        }
+                        const allComplete = semiResults.every(s => s.isComplete);
+                        if (allComplete) {
+                            achievedQty += prod.po_quantity;
+                        }
+                    }
+
+                    // Fetch QC rejected quantity
+                    const qcDocs = await falconQCCheck.find({
+                        job_order: iwo.job_order_id,
+                        product_id: prod.product,
+                    }).lean();
+                    const rejectedQty = qcDocs.reduce((sum, doc) => sum + (doc.rejected_quantity || 0), 0);
+
+                    return {
+                        job_order_id: relatedJobOrder?.job_order_id || 'N/A',
+                        product_id: prod.product?.toString(),
+                        sales_order_no: iwo.sales_order_no || 'N/A',
+                        job_order_db_id: iwo.job_order_id,
+                        date: iwo.date,
+                        system: prod.system,
+                        system_name: systemNameMap[prod.system?.toString()] || 'N/A',
+                        product_system: prod.product_system,
+                        product_system_name: productSystemNameMap[prod.product_system?.toString()] || 'N/A',
+                        po_quantity: prod.po_quantity,
+                        achievedQty,
+                        rejectedQty,
+                        semiFinishedDetails,
+                    };
+                })
+            );
+        }).flat()
+    );
+
+    // New logic for packing_details
+    const rawPackingDocs = await falconPacking
+        .find({ work_order: id, delivery_stage: 'Packed' })
+        .populate('product', 'name uom')
+        .populate('packed_by', 'username')
+        .lean();
+
+    const productMap = {};
+    for (const doc of rawPackingDocs) {
+        const productId = doc.product?._id?.toString();
+        const productName = doc.product?.name || 'N/A';
+        const uom = doc.product?.uom || 'nos';
+        const sfId = doc.semi_finished_id;
+
+        if (!productMap[productId]) {
+            productMap[productId] = { productId, productName, uom, semiFinishedProducts: {} };
+        }
+        if (!productMap[productId].semiFinishedProducts[sfId]) {
+            productMap[productId].semiFinishedProducts[sfId] = { sfId, quantity: 0, qrCodes: [] };
+        }
+        productMap[productId].semiFinishedProducts[sfId].quantity += doc.semi_finished_quantity || 0;
+        productMap[productId].semiFinishedProducts[sfId].qrCodes.push({
+            code: doc.qr_id || 'N/A',
+            url: doc.qr_code || '',
+        });
+    }
+
+    const packing_details = Object.keys(productMap).length > 0 ? [{
+        workOrderId: workOrder.work_order_number,
+        jobOrder: jobOrders.map(jo => jo.job_order_id).join(', ') || 'N/A',
+        status: 'Packed',
+        createdBy: workOrder.created_by?.username || 'N/A',
+        timestamp: workOrder.createdAt,
+        products: Object.values(productMap).map(prod => ({
+            ...prod,
+            semiFinishedProducts: Object.values(prod.semiFinishedProducts),
+        })),
+    }] : [];
+
+    // New logic for dispatch_details
+    const rawDispatchDocs = await falocnDispatch
+        .find({ job_order: { $in: jobOrders.map(jo => jo._id) } })
+        .populate('products.product_id', 'name')
+        .lean();
+
+    const dispatch_details = rawDispatchDocs.map(dispatch => {
+        const relatedJobOrder = jobOrders.find(jo => jo._id.toString() === dispatch.job_order.toString());
+        const products = dispatch.products.map(product => {
+            const jobOrderProduct = relatedJobOrder?.products.find(
+                p => p.product._id.toString() === product.product_id.toString()
+            );
+            return {
+                productName: product.product_id?.name || 'N/A',
+                productId: product.product_id._id.toString(),
+                dispatchQty: product.dispatch_quantity || 0,
+                uom: jobOrderProduct?.uom || 'nos',
+            };
+        });
+
+        return {
+            dispatchId: dispatch._id.toString(),
+            jobOrder: relatedJobOrder?.job_order_id || 'N/A',
+            workOrderId: workOrder.work_order_number,
+            status: dispatch.status || 'Approved',
+            timestamp: dispatch.date,
+            vehicleNumber: dispatch.vehicle_number || 'N/A',
+            createdBy: dispatch.created_by?.toString() || 'N/A',
+            products,
+        };
+    });
+
+    // Format the work order and retain original structure
+    const formattedWorkOrder = formatDateToIST(workOrder);
+    formattedWorkOrder.products = productsWithNames;
+    formattedWorkOrder.internal_work_order_details = internalDetails;
+    formattedWorkOrder.job_order_semi_details = jobOrderSemiDetails;
+    formattedWorkOrder.jobOrderDetailsWithSemiFinished = jobOrderDetailsWithSemiFinished;
+    formattedWorkOrder.packing_details = packing_details;
+    formattedWorkOrder.dispatch_details = dispatch_details;
+
+    return res.status(200).json(
+        new ApiResponse(200, formattedWorkOrder, `Work order data for ID ${id} found.`)
+    );
+});
+
+
+
+
+
+
+
+const getFalconWorkOrderById = asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+        throw new ApiError(400, `Invalid work order ID: ${id}`);
+    }
+
+    // Fetch work order (without products)
+    const workOrder = await falconWorkOrder.findById(id)
+        .select('work_order_number client_id project_id files date remarks createdAt updatedAt')
+        .populate({ path: 'client_id', select: 'name address', match: { isDeleted: false } })
+        .populate({ path: 'project_id', select: 'name address', match: { isDeleted: false } })
+        .lean();
+
+    if (!workOrder) {
+        throw new ApiError(404, `Work order with ID ${id} not found`);
+    }
+
+    // Fetch all job orders linked to this work order
+    const jobOrders = await falconJobOrder.find({ work_order_number: id })
+        .populate({
+            path: 'products.product',
+            select: 'name',
+            match: { isDeleted: false },
+        })
+        .lean();
+
+    // Fetch internal work orders for these job orders
+    const internalWorkOrders = await falconInternalWorkOrder.find({
+        job_order_id: { $in: jobOrders.map(j => j._id) }
+    }).lean();
+
+    // Fetch system and product system names
+    const systemIds = new Set();
+    const productSystemIds = new Set();
+    internalWorkOrders.forEach(iwo => {
+        iwo.products.forEach(prod => {
+            systemIds.add(prod.system?.toString());
+            productSystemIds.add(prod.product_system?.toString());
+        });
+    });
+
+    const systemDocs = await falconSystem.find({ _id: { $in: Array.from(systemIds) } }).select('name').lean();
+    const productSystemDocs = await falconProductSystem.find({ _id: { $in: Array.from(productSystemIds) } }).select('name').lean();
+    const systemNameMap = Object.fromEntries(systemDocs.map(sys => [sys._id.toString(), sys.name]));
+    const productSystemNameMap = Object.fromEntries(productSystemDocs.map(psys => [psys._id.toString(), psys.name]));
+
+    // Fetch product names
+    const allProductIds = internalWorkOrders.flatMap(iwo => iwo.products.map(p => p.product));
+    const productDocs = await falconProduct.find({ _id: { $in: allProductIds } }).select('name').lean();
+    console.log("productDocs",productDocs);
+    const productNamesMap = Object.fromEntries(productDocs.map(prod => [prod._id.toString(), prod.name]));
+    console.log("productNamesMap",productNamesMap);
+
+    // Add product names to the products array (from job orders)
+    const allJobOrderProducts = jobOrders.flatMap(jo => jo.products);
+    const productsWithNames = allJobOrderProducts.map(product => ({
+        ...product,
+        product_name: productNamesMap[product.product.toString()] || 'Unknown Product'
+    }));
+
+    // Original logic for internal_work_order_details and job_order_semi_details
+    const internalDetails = [];
+    const jobOrderSemiDetails = [];
+
+    for (const iwo of internalWorkOrders) {
+        const relatedJobOrder = jobOrders.find(j => j._id.toString() === iwo.job_order_id.toString());
+        for (const productObj of iwo.products) {
+            const relatedJobProduct = relatedJobOrder?.products?.find(p => p.product.toString() === productObj.product.toString());
+            const relatedSemiIds = productObj.semifinished_details.map(s => s.semifinished_id);
+            let latestAchievedQty = 0;
+
+            for (const semiId of relatedSemiIds) {
+                const latestProduction = await falconProduction.findOne({
+                    job_order: relatedJobOrder._id,
+                    semifinished_id: semiId
+                }).sort({ createdAt: -1 }).select('product.achieved_quantity').lean();
+                if (latestProduction?.product?.achieved_quantity) {
+                    latestAchievedQty += latestProduction.product.achieved_quantity;
+                }
+            }
+
+            const qcs = await falconQCCheck.find({
+                job_order: relatedJobOrder._id,
+                semifinished_id: { $in: relatedSemiIds }
+            }).lean();
+            const totalRejected = qcs.reduce((sum, qc) => sum + (qc?.rejected_quantity || 0), 0);
+
+            internalDetails.push({
+                product_name: productNamesMap[productObj.product.toString()],
+                sales_order_no: iwo.sales_order_no,
+                system: systemNameMap[productObj.system?.toString()] || '',
+                product_system: productSystemNameMap[productObj.product_system?.toString()] || '',
+                uom: relatedJobProduct?.uom || '',
+                color_code: relatedJobProduct?.color_code || '',
+                code: relatedJobProduct?.code || '',
+                width: relatedJobProduct?.width || '',
+                height: relatedJobProduct?.width || '',
+                po_quantity: relatedJobProduct?.po_quantity || '',
+                range_date: {
+                    from_date: iwo.date?.from,
+                    to_date: iwo.date?.to,
+                },
+                achieved_quantity: latestAchievedQty,
+                rejected_quantity: totalRejected
+            });
+
+            const semiFinishedArray = [];
+            for (const semi of productObj.semifinished_details) {
+                const relatedProductions = await falconProduction.find({
+                    job_order: relatedJobOrder._id,
+                    semifinished_id: semi.semifinished_id
+                }).sort({ createdAt: -1 }).lean();
+
+                const steps = (semi.processes || []).map(proc => {
+                    const matchedProd = relatedProductions.find(p =>
+                        p.process_name?.toLowerCase().trim() === proc.name?.toLowerCase().trim()
+                    );
+                    return {
+                        step_name: proc.name || '',
+                        file_url: proc.file_url || '',
+                        remarks: proc.remarks || '',
+                        po_quantity: matchedProd?.product?.po_quantity || 0,
+                        planned_quantity: matchedProd?.product?.planned_quantity || 0,
+                        achieved_quantity: matchedProd?.product?.achieved_quantity || 0,
+                        rejected_quantity: matchedProd?.product?.rejected_quantity || 0
+                    };
+                });
+
+                semiFinishedArray.push({
+                    semifinished_id: semi.semifinished_id,
+                    file_url: semi.file_url || '',
+                    remarks: semi.remarks || '',
+                    packing_details: semi.packing_details || '',
+                    dispatch_details: semi.dispatch_details || '',
+                    steps
+                });
+            }
+
+            jobOrderSemiDetails.push({
+                job_order_id: relatedJobOrder?.job_order_id,
+                sales_order_no: iwo.sales_order_no,
+                product_name: productNamesMap[productObj.product.toString()],
+                system: systemNameMap[productObj.system?.toString()] || '',
+                product_system: productSystemNameMap[productObj.product_system?.toString()] || '',
+                uom: relatedJobProduct?.uom || '',
+                color_code: relatedJobProduct?.color_code || '',
+                code: relatedJobProduct?.code || '',
+                width: relatedJobProduct?.width || '',
+                height: relatedJobProduct?.height || '',
+                po_quantity: relatedJobProduct?.po_quantity || '',
+                range_date: {
+                    from_date: iwo.date?.from,
+                    to_date: iwo.date?.to,
+                },
+                achieved_quantity: latestAchievedQty,
+                rejected_quantity: totalRejected,
+                semi_finished_details: semiFinishedArray
+            });
+        }
+    }
+
+    // Updated logic for jobOrderDetailsWithSemiFinished (flat array)
+    const jobOrderDetailsWithSemiFinished = [];
+    for (const iwo of internalWorkOrders) {
+        const relatedJobOrder = jobOrders.find(j => j._id.toString() === iwo.job_order_id.toString());
+        for (const prod of iwo.products) {
+            const productId = prod.product?.toString();
+            const relatedJobProduct = relatedJobOrder?.products?.find(p => p.product?._id.toString() === productId);
+            let achievedQty = 0;
+            const semiFinishedDetails = [];
+            let semiResults = [];
+
+            if (prod.semifinished_details?.length > 0) {
+                for (const semi of prod.semifinished_details) {
+                    const lastProcess = semi.processes?.[semi.processes.length - 1];
+                    let semiAchieved = 0;
+                    let isComplete = false;
+
+                    if (lastProcess) {
+                        const productionDoc = await falconProduction.findOne({
+                            job_order: iwo.job_order_id,
+                            'product.product_id': productId,
+                            semifinished_id: semi.semifinished_id,
+                            process_name: { $regex: `^${lastProcess.name}$`, $options: 'i' },
+                        }).lean();
+                        if (productionDoc) {
+                            semiAchieved = productionDoc.product.achieved_quantity || 0;
+                            isComplete = semiAchieved >= prod.po_quantity;
+                        }
+                    }
+                    semiResults.push({ achievedQty: semiAchieved, isComplete });
+
+                    // Fetch packing and dispatch for semi-finished
+                    const packingDocs = await falconPacking.find({
+                        job_order_id: iwo.job_order_id,
+                        product: prod.product,
+                        semi_finished_id: semi.semifinished_id,
+                    }).lean();
+                    const packed_qty = packingDocs.reduce((sum, doc) => sum + (doc.semi_finished_quantity || 0), 0);
+                    const packingIds = packingDocs.map(doc => doc._id);
+
+                    const dispatchDocs = await falocnDispatch.find({
+                        job_order: iwo.job_order_id,
+                        packing_ids: { $in: packingIds },
+                    }).lean();
+                    let dispatch_qty = 0;
+                    dispatchDocs.forEach(dispatch => {
+                        dispatch.products.forEach(product => {
+                            if (
+                                product.product_id?.toString() === prod.product?.toString() &&
+                                product.semi_finished_id === semi.semifinished_id
+                            ) {
+                                dispatch_qty += product.dispatch_quantity || 0;
+                            }
+                        });
+                    });
+
+                    semiFinishedDetails.push({
+                        semifinished_id: semi.semifinished_id,
+                        file_url: semi.file_url || '',
+                        remarks: semi.remarks || '',
+                        packed_qty,
+                        dispatch_qty,
+                        processes: semi.processes.map(async proc => {
+                            const processProduction = await falconProduction.findOne({
+                                job_order: iwo.job_order_id,
+                                'product.product_id': prod.product,
+                                semifinished_id: semi.semifinished_id,
+                                process_name: { $regex: `^${proc.name}$`, $options: 'i' },
+                            }).lean();
+                            return {
+                                name: proc.name,
+                                file_url: proc.file_url || '',
+                                remarks: proc.remarks || '',
+                                achievedQty: processProduction?.product?.achieved_quantity || 0,
+                            };
+                        }),
+                    });
+
+                    // Resolve promises for processes
+                    semiFinishedDetails[semiFinishedDetails.length - 1].processes = await Promise.all(
+                        semiFinishedDetails[semiFinishedDetails.length - 1].processes
+                    );
+                }
+                const allComplete = semiResults.every(s => s.isComplete);
+                if (allComplete) {
+                    achievedQty += prod.po_quantity;
+                }
+            }
+
+            // Fetch QC rejected quantity
+            const qcDocs = await falconQCCheck.find({
+                job_order: iwo.job_order_id,
+                product_id: prod.product,
+            }).lean();
+            const rejectedQty = qcDocs.reduce((sum, doc) => sum + (doc.rejected_quantity || 0), 0);
+
+            jobOrderDetailsWithSemiFinished.push({
+                job_order_id: relatedJobOrder?.job_order_id || 'N/A',
+                product_id: prod.product?.toString(),
+                sales_order_no: iwo.sales_order_no || 'N/A',
+                job_order_db_id: iwo.job_order_id.toString(),
+                date: iwo.date || {},
+                system: prod.system,
+                system_name: systemNameMap[prod.system?.toString()] || 'N/A',
+                product_system: prod.product_system,
+                product_system_name: productSystemNameMap[prod.product_system?.toString()] || 'N/A',
+                po_quantity: prod.po_quantity,
+                achievedQty,
+                rejectedQty,
+                semiFinishedDetails,
+            });
+        }
+    }
+
+    // Logic for packing_details
+    const rawPackingDocs = await falconPacking
+        .find({ work_order: id, delivery_stage: 'Packed' })
+        .populate('product', 'name uom')
+        .populate('packed_by', 'username')
+        .lean();
+
+    const productMap = {};
+    for (const doc of rawPackingDocs) {
+        const productId = doc.product?._id?.toString();
+        const productName = doc.product?.name || 'N/A';
+        const uom = doc.product?.uom || 'nos';
+        const sfId = doc.semi_finished_id;
+
+        if (!productMap[productId]) {
+            productMap[productId] = { productId, productName, uom, semiFinishedProducts: {} };
+        }
+        if (!productMap[productId].semiFinishedProducts[sfId]) {
+            productMap[productId].semiFinishedProducts[sfId] = { sfId, quantity: 0, qrCodes: [] };
+        }
+        productMap[productId].semiFinishedProducts[sfId].quantity += doc.semi_finished_quantity || 0;
+        productMap[productId].semiFinishedProducts[sfId].qrCodes.push({
+            code: doc.qr_id || 'N/A',
+            url: doc.qr_code || '',
+        });
+    }
+
+    const packing_details = Object.keys(productMap).length > 0 ? [{
+        workOrderId: workOrder.work_order_number,
+        jobOrder: jobOrders.map(jo => jo.job_order_id).join(', ') || 'N/A',
+        status: 'Packed',
+        createdBy: workOrder.created_by?.username || 'N/A',
+        timestamp: workOrder.createdAt,
+        products: Object.values(productMap).map(prod => ({
+            ...prod,
+            semiFinishedProducts: Object.values(prod.semiFinishedProducts),
+        })),
+    }] : [];
+
+    // Logic for dispatch_details
+    const rawDispatchDocs = await falocnDispatch
+        .find({ job_order: { $in: jobOrders.map(jo => jo._id) } })
+        .populate('products.product_id', 'name')
+        .lean();
+
+    const dispatch_details = rawDispatchDocs.map(dispatch => {
+        const relatedJobOrder = jobOrders.find(jo => jo._id.toString() === dispatch.job_order.toString());
+        const products = dispatch.products.map(product => {
+            const jobOrderProduct = relatedJobOrder?.products.find(
+                p => p.product._id.toString() === product.product_id.toString()
+            );
+            return {
+                productName: product.product_id?.name || 'N/A',
+                productId: product.product_id._id.toString(),
+                dispatchQty: product.dispatch_quantity || 0,
+                uom: jobOrderProduct?.uom || 'nos',
+            };
+        });
+
+        return {
+            dispatchId: dispatch._id.toString(),
+            jobOrder: relatedJobOrder?.job_order_id || 'N/A',
+            workOrderId: workOrder.work_order_number,
+            status: dispatch.status || 'Approved',
+            timestamp: dispatch.date,
+            vehicleNumber: dispatch.vehicle_number || 'N/A',
+            createdBy: dispatch.created_by?.toString() || 'N/A',
+            products,
+        };
+    });
+
+    // Format the work order and retain original structure
+    const formattedWorkOrder = formatDateToIST(workOrder);
+    formattedWorkOrder.products = productsWithNames;
+    formattedWorkOrder.internal_work_order_details = internalDetails;
+    formattedWorkOrder.job_order_semi_details = jobOrderSemiDetails;
+    formattedWorkOrder.jobOrderDetailsWithSemiFinished = jobOrderDetailsWithSemiFinished;
+    formattedWorkOrder.packing_details = packing_details;
+    formattedWorkOrder.dispatch_details = dispatch_details;
+
+    return res.status(200).json(
+        new ApiResponse(200, formattedWorkOrder, `Work order data for ID ${id} found.`)
+    );
+});
+
+
+
+
 
 
 
