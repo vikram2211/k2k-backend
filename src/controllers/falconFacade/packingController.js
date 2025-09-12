@@ -2874,7 +2874,16 @@ const getWorkOrderDetails = asyncHandler(async (req, res) => {
                 ],
                 as: 'packedQuantities'
               }
-            }
+            },
+             // NEW: Lookup to fetch product names
+    {
+        $lookup: {
+            from: 'falconproducts', // Assuming your product collection is named 'falconproducts'
+            localField: 'internalWorkOrderDetails.product_id',
+            foreignField: '_id',
+            as: 'productDetails'
+        }
+    }
           ]);
           
 
@@ -2893,7 +2902,13 @@ const getWorkOrderDetails = asyncHandler(async (req, res) => {
           processedJobOrder.products = processedJobOrder.products.map(product => {
             const productKey = product.product.toString();
             const productCode = product.code;
-          
+            
+             // Find the product name from the lookup
+    const productDetail = processedJobOrder.productDetails.find(
+        pd => pd._id.toString() === productKey
+    );
+    const productName = productDetail?.name || 'Unknown Product';
+
             // Filter internal work order details for this product
             const iwoDetails = processedJobOrder.internalWorkOrderDetails.filter(
               iwo => iwo.product_id.toString() === productKey && iwo.code === productCode
@@ -2915,7 +2930,9 @@ const getWorkOrderDetails = asyncHandler(async (req, res) => {
                 po_quantity: iwo.quantity,
                 max_pack_qty: achievedQty - packedQty
               };
-            }).filter(sf => sf.achieved_quantity > 0);;
+            }).filter(sf => sf.achieved_quantity > 0);
+            // Add product name to the product object
+    product.product_name = productName;
           
             return product;
           });
