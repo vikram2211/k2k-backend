@@ -5080,6 +5080,155 @@ export const addDowntime = async (req, res, next) => {
   }
 };
 
+export const updateDowntime_15_09_2025 = async (req, res, next) => {
+  try {
+    const { prodId, downtimeId } = req.params;
+    const { description, minutes, remarks, downtime_start_time } = req.body;
+
+    // Validate required params
+    if (!prodId || !downtimeId) {
+      return next(new ApiError(400, 'prodId and downtimeId are required'));
+    }
+
+    const minutesNumber = minutes !== undefined ? Number(minutes) : undefined;
+    if (minutesNumber !== undefined && (isNaN(minutesNumber) || minutesNumber < 0)) {
+      return next(new ApiError(400, 'Minutes must be a non-negative number'));
+    }
+    if (minutesNumber !== undefined) downtimeEntry.minutes = minutesNumber;
+
+    // Validate minutes if provided
+    if (minutes !== undefined && (isNaN(minutes) || minutes < 0)) {
+      return next(new ApiError(400, 'Minutes must be a non-negative number'));
+    }
+
+    // Parse downtime_start_time if provided
+    let parsedDowntimeStartTime;
+    if (downtime_start_time) {
+      const today = new Date();
+      parsedDowntimeStartTime = parse(
+        downtime_start_time,
+        'HH:mm',
+        new Date(today.getFullYear(), today.getMonth(), today.getDate())
+      );
+      if (isNaN(parsedDowntimeStartTime)) {
+        parsedDowntimeStartTime = parse(
+          downtime_start_time,
+          'h:mm a',
+          new Date(today.getFullYear(), today.getMonth(), today.getDate())
+        );
+      }
+      if (isNaN(parsedDowntimeStartTime)) {
+        return next(new ApiError(400, 'Invalid downtime_start_time format. Use e.g., "20:33" or "10:30 AM"'));
+      }
+    }
+
+    // Find the DailyProduction document
+    const dailyProduction = await DailyProduction.findById(prodId);
+    if (!dailyProduction) {
+      return next(new ApiError(404, 'DailyProduction document not found'));
+    }
+
+    // Find the downtime entry
+    const downtimeEntry = dailyProduction.downtime.id(downtimeId);
+    if (!downtimeEntry) {
+      return next(new ApiError(404, 'Downtime entry not found'));
+    }
+
+    // Update fields if provided
+    if (description !== undefined) downtimeEntry.description = description;
+    if (minutes !== undefined) downtimeEntry.minutes = minutes;
+    if (remarks !== undefined) downtimeEntry.remarks = remarks;
+    if (downtime_start_time !== undefined) downtimeEntry.downtime_start_time = parsedDowntimeStartTime;
+
+    // Update user and save
+    dailyProduction.updated_by = req.user?._id || null;
+    const updatedProduction = await dailyProduction.save();
+
+    return res.status(200).json({
+      success: true,
+      message: 'Downtime updated successfully',
+      data: updatedProduction,
+    });
+  } catch (error) {
+    console.error('Error updating downtime:', error);
+    next(new ApiError(500, 'Internal Server Error', error.message));
+  }
+};
+
+
+
+
+export const updateDowntime = async (req, res, next) => {
+  try {
+    const { prodId, downtimeId } = req.params; // or req.query if using query params
+    const { description, minutes, remarks, downtime_start_time } = req.body;
+
+    // Validate required params
+    if (!prodId || !downtimeId) {
+      return next(new ApiError(400, 'prodId and downtimeId are required'));
+    }
+
+    // Validate minutes if provided
+    const minutesNumber = minutes !== undefined ? Number(minutes) : undefined;
+    if (minutesNumber !== undefined && (isNaN(minutesNumber) || minutesNumber < 0)) {
+      return next(new ApiError(400, 'Minutes must be a non-negative number'));
+    }
+
+    // Parse downtime_start_time if provided
+    let parsedDowntimeStartTime;
+    if (downtime_start_time) {
+      const today = new Date();
+      parsedDowntimeStartTime = parse(
+        downtime_start_time,
+        'HH:mm',
+        new Date(today.getFullYear(), today.getMonth(), today.getDate())
+      );
+      if (isNaN(parsedDowntimeStartTime)) {
+        parsedDowntimeStartTime = parse(
+          downtime_start_time,
+          'h:mm a',
+          new Date(today.getFullYear(), today.getMonth(), today.getDate())
+        );
+      }
+      if (isNaN(parsedDowntimeStartTime)) {
+        return next(new ApiError(400, 'Invalid downtime_start_time format. Use e.g., "20:33" or "10:30 AM"'));
+      }
+    }
+
+    // Find the DailyProduction document
+    const dailyProduction = await DailyProduction.findById(prodId);
+    if (!dailyProduction) {
+      return next(new ApiError(404, 'DailyProduction document not found'));
+    }
+
+    // Find the downtime entry
+    const downtimeEntry = dailyProduction.downtime.id(downtimeId);
+    if (!downtimeEntry) {
+      return next(new ApiError(404, 'Downtime entry not found'));
+    }
+
+    // Update fields if provided
+    if (description !== undefined) downtimeEntry.description = description;
+    if (minutesNumber !== undefined) downtimeEntry.minutes = minutesNumber;
+    if (remarks !== undefined) downtimeEntry.remarks = remarks;
+    if (downtime_start_time !== undefined) downtimeEntry.downtime_start_time = parsedDowntimeStartTime;
+
+    // Update user and save
+    dailyProduction.updated_by = req.user?._id || null;
+    const updatedProduction = await dailyProduction.save();
+
+    return res.status(200).json({
+      success: true,
+      message: 'Downtime updated successfully',
+      data: updatedProduction,
+    });
+  } catch (error) {
+    console.error('Error updating downtime:', error);
+    next(new ApiError(500, 'Internal Server Error', error.message));
+  }
+};
+
+
 
 
 
