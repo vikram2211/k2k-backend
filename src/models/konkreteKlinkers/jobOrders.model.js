@@ -38,9 +38,9 @@ const jobOrderSchema = new mongoose.Schema(
         },
       },
     ],
-    batch_number: {
-      type: Number,
-      required: true
+    batch_date: {
+      type: Date,
+      required: false
     },
 
     date: {

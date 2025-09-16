@@ -19,7 +19,7 @@ const dateStringSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Date must be i
 // ✅ Helper: Convert any valid format to ISO string (YYYY-MM-DD)
 function normalizeDate(input) {
   if (typeof input === 'string') {
-    // Try built-in parser
+    // Try built-in parser first
     let parsed = new Date(input);
     if (!isNaN(parsed)) return parsed;
 
@@ -27,6 +27,12 @@ function normalizeDate(input) {
     if (/^\d{2}\/\d{2}\/\d{4}$/.test(input)) {
       const [day, month, year] = input.split('/');
       parsed = new Date(`${year}-${month}-${day}`);
+      if (!isNaN(parsed)) return parsed;
+    }
+
+    // Try YYYY-MM-DD format
+    if (/^\d{4}-\d{2}-\d{2}$/.test(input)) {
+      parsed = new Date(input);
       if (!isNaN(parsed)) return parsed;
     }
 
@@ -63,7 +69,7 @@ const jobOrderZodSchema = z.object({
   work_order: objectIdSchema,
   sales_order_number: z.string().trim().min(1, "Sales order number is required").optional(),
   products: z.array(productSchema).min(1, "At least one product is required"),
-  batch_number: z.number().min(1, "Batch number must be at least 1"),
+  batch_date: dateStringSchema.optional(),
   date: dateRangeSchema,
   // plant_id: objectIdSchema,
   // factory_id: objectIdSchema,
@@ -392,13 +398,15 @@ export const createJobOrder1 = async (req, res, next) => {
 
 export const createJobOrder = async (req, res, next) => {
   console.log("came here");
-  try {
-
-
-    // ✅ Normalize date inputs before validation
+    try {
+      // ✅ Normalize date inputs before validation
     if (req.body.date) {
       req.body.date.from = normalizeDate(req.body.date.from).toISOString().split('T')[0];
       req.body.date.to = normalizeDate(req.body.date.to).toISOString().split('T')[0];
+    }
+
+    if (req.body.batch_date && req.body.batch_date.trim() !== '') {
+      req.body.batch_date = normalizeDate(req.body.batch_date).toISOString().split('T')[0];
     }
 
     if (Array.isArray(req.body.products)) {
@@ -466,6 +474,7 @@ export const createJobOrder = async (req, res, next) => {
         ...product,
         scheduled_date: new Date(product.scheduled_date),
       })),
+      ...(validatedData.batch_date && { batch_date: new Date(validatedData.batch_date) }),
       date: {
         from: new Date(validatedData.date.from),
         to: new Date(validatedData.date.to),
@@ -1112,7 +1121,7 @@ export const getJobOrders = async (req, res) => {
 //                         scheduled_date: 1,
 //                         plant_name: 1
 //                     },
-//                     batch_number: 1,
+//                     batch_date: 1,
 //                     status: 1,
 //                     createdAt: 1,
 //                     updatedAt: 1,
@@ -1420,7 +1429,7 @@ export const getJobOrderById1 = async (req, res) => {
             planned_quantity: 1,
             scheduled_date: 1,
           },
-          batch_number: 1,
+          batch_date: 1,
           date: 1,
           status: 1,
           createdAt: 1,
@@ -1793,7 +1802,7 @@ export const getJobOrderById = async (req, res) => {
             achieved_quantity: 1,
             rejected_quantity: 1,
           },
-          batch_number: 1,
+          batch_date: 1,
           date: 1,
           status: 1,
           createdAt: 1,
@@ -1876,9 +1885,14 @@ export const updateJobOrder_13_08_2025 = async (req, res) => {
       updateData.sales_order_number = bodyData.sales_order_number;
     }
 
-    // 6. Handle batch_number update if provided
-    if (bodyData.batch_number !== undefined) {
-      updateData.batch_number = bodyData.batch_number;
+    // 6. Handle batch_date update if provided
+    if (bodyData.batch_date !== undefined) {
+      if (bodyData.batch_date && typeof bodyData.batch_date === 'string' && bodyData.batch_date.trim() !== '') {
+        updateData.batch_date = new Date(bodyData.batch_date);
+      } else {
+        // Set to null for empty values
+        updateData.batch_date = null;
+      }
     }
 
     // 7. Handle status update if provided
@@ -2016,6 +2030,23 @@ export const updateJobOrder = async (req, res) => {
     // 3. Parse request body
     const bodyData = req.body;
 
+    // ✅ Normalize date inputs before validation (same as create function)
+    if (bodyData.date) {
+      bodyData.date.from = normalizeDate(bodyData.date.from).toISOString().split('T')[0];
+      bodyData.date.to = normalizeDate(bodyData.date.to).toISOString().split('T')[0];
+    }
+
+    if (bodyData.batch_date && bodyData.batch_date.trim() !== '') {
+      bodyData.batch_date = normalizeDate(bodyData.batch_date).toISOString().split('T')[0];
+    }
+
+    if (Array.isArray(bodyData.products)) {
+      bodyData.products = bodyData.products.map((p) => ({
+        ...p,
+        scheduled_date: normalizeDate(p.scheduled_date).toISOString().split('T')[0],
+      }));
+    }
+
     // 4. Initialize update data object
     const updateData = {};
 
@@ -2024,9 +2055,14 @@ export const updateJobOrder = async (req, res) => {
       updateData.sales_order_number = bodyData.sales_order_number;
     }
 
-    // 6. Handle batch_number update if provided
-    if (bodyData.batch_number !== undefined) {
-      updateData.batch_number = bodyData.batch_number;
+    // 6. Handle batch_date update if provided
+    if (bodyData.batch_date !== undefined) {
+      if (bodyData.batch_date && typeof bodyData.batch_date === 'string' && bodyData.batch_date.trim() !== '') {
+        updateData.batch_date = new Date(bodyData.batch_date);
+      } else {
+        // Set to null for empty values
+        updateData.batch_date = null;
+      }
     }
 
     // 7. Handle status update if provided
