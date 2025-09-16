@@ -3206,6 +3206,7 @@ const workOrderData = asyncHandler(async (req, res) => {
       .find({ work_order: workOrderId })
       .populate('products.shape', 'name') // Populate shape details if needed
       .lean();
+    
 
     // 5. Fetch shape details for all shapeIds in workOrder.products
     const shapeIds = workOrder.products.map(product => product.shapeId);
@@ -3222,14 +3223,19 @@ const workOrderData = asyncHandler(async (req, res) => {
 
     // 6. Map work order products with job order data and shape name
     const enrichedProducts = workOrder.products.map((workProduct) => {
-      // console.log("workProduct", workProduct);
       const matchingJobProducts = jobOrders.flatMap((jobOrder) =>
-        jobOrder.products.filter((jobProduct) => jobProduct.shape.toString() === workProduct.shapeId.toString())
+        jobOrder.products.filter((jobProduct) => {
+          return jobProduct.shape._id.toString() === workProduct.shapeId.toString();
+        })
       );
 
-      // Aggregate achieved and rejected quantities
+      // Aggregate achieved, rejected, and planned quantities
       const achievedQuantity = matchingJobProducts.reduce((sum, jobProduct) => sum + jobProduct.achieved_quantity, 0);
       const rejectedQuantity = matchingJobProducts.reduce((sum, jobProduct) => sum + jobProduct.rejected_quantity, 0);
+      const totalPlannedQuantity = matchingJobProducts.reduce((sum, jobProduct) => sum + jobProduct.planned_quantity, 0);
+      
+      // Calculate remaining quantity (PO quantity - total planned quantity)
+      const remainingQuantity = workProduct.quantity - totalPlannedQuantity;
 
       return {
         objId: workProduct._id,
@@ -3239,6 +3245,8 @@ const workOrderData = asyncHandler(async (req, res) => {
         poQuantity: workProduct.quantity,
         achievedQuantity,
         rejectedQuantity,
+        totalPlannedQuantity, // Add total planned quantity for reference
+        remainingQuantity, // Add remaining quantity
         deliveryDate: workProduct.deliveryDate,
         barMark: workProduct.barMark,
         memberDetails: workProduct.memberDetails,
