@@ -3078,7 +3078,7 @@ const getJobOrderById = asyncHandler(async (req, res) => {
     updatedAt: convertToIST(jobOrder.updatedAt),
     products: jobOrder.products.map((product) => {
       const workOrderProduct = jobOrder.work_order.products.find(
-        (wp) => wp.shapeId && wp.shapeId._id && product.shape._id && wp.shapeId._id.toString() === product.shape._id.toString()
+        (wp) => wp.shapeId && wp.shapeId._id && product.shape._id && wp.shapeId._id.toString() === product.shape._id.toString() && wp.diameter === product.dia
       );
       return {
         _id: product._id,
@@ -3225,7 +3225,19 @@ const workOrderData = asyncHandler(async (req, res) => {
     const enrichedProducts = workOrder.products.map((workProduct) => {
       const matchingJobProducts = jobOrders.flatMap((jobOrder) =>
         jobOrder.products.filter((jobProduct) => {
-          return jobProduct.shape._id.toString() === workProduct.shapeId.toString();
+          // Debug logging
+          console.log('Comparing job product shape:', jobProduct.shape, 'diameter:', jobProduct.dia, 'with work product shapeId:', workProduct.shapeId, 'diameter:', workProduct.diameter);
+          
+          // Handle both populated and non-populated shape references
+          const jobProductShapeId = jobProduct.shape && jobProduct.shape._id 
+            ? jobProduct.shape._id.toString() 
+            : jobProduct.shape.toString();
+          
+          // Match by both shape ID AND diameter
+          const shapeMatch = jobProductShapeId === workProduct.shapeId.toString();
+          const diameterMatch = jobProduct.dia === workProduct.diameter;
+          
+          return shapeMatch && diameterMatch;
         })
       );
 
@@ -3233,6 +3245,14 @@ const workOrderData = asyncHandler(async (req, res) => {
       const achievedQuantity = matchingJobProducts.reduce((sum, jobProduct) => sum + jobProduct.achieved_quantity, 0);
       const rejectedQuantity = matchingJobProducts.reduce((sum, jobProduct) => sum + jobProduct.rejected_quantity, 0);
       const totalPlannedQuantity = matchingJobProducts.reduce((sum, jobProduct) => sum + jobProduct.planned_quantity, 0);
+      
+      // Debug logging for quantity calculations
+      console.log(`Product ${workProduct.shapeId} (Dia: ${workProduct.diameter}): PO Quantity: ${workProduct.quantity}, Total Planned: ${totalPlannedQuantity}, Matching Job Products: ${matchingJobProducts.length}`);
+      
+      // Log each matching job product for detailed debugging
+      matchingJobProducts.forEach((jobProduct, index) => {
+        console.log(`  Job Product ${index + 1}: Planned: ${jobProduct.planned_quantity}, Dia: ${jobProduct.dia}, Job Order: ${jobProduct.jobOrderId || 'N/A'}`);
+      });
       
       // Calculate remaining quantity (PO quantity - total planned quantity)
       const remainingQuantity = workProduct.quantity - totalPlannedQuantity;
