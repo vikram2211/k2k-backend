@@ -3,6 +3,7 @@ import { ironShape } from "../../../models/ironSmith/helpers/ironShape.model.js"
 import { ironDimension } from "../../../models/ironSmith/helpers/ironDimension.model.js";
 import { RawMaterial } from "../../../models/ironSmith/helpers/client-project-qty.model.js";
 import { ironJobOrder } from "../../../models/ironSmith/jobOrders.model.js";
+import { ironDailyProduction } from "../../../models/ironSmith/dailyProductionPlanning.js";
 import { ironWorkOrder } from "../../../models/ironSmith/workOrder.model.js";
 import mongoose from "mongoose";
 import { ApiError } from '../../../utils/ApiError.js';
@@ -136,7 +137,7 @@ const getDimensions = async (req, res) => {
     }
 };
 
-const getWorkOrderProductByJobOrder = async (req, res) => {
+const getWorkOrderProductByJobOrder_17_09_2025 = async (req, res) => {
   try {
     let joId = req.params.id;
     const jobOrders = await ironJobOrder.find({_id:joId }) // Exclude cancelled orders if desired
@@ -186,6 +187,88 @@ const getWorkOrderProductByJobOrder = async (req, res) => {
     });
   }
 };
+
+
+
+
+const getWorkOrderProductByJobOrder = async (req, res) => {
+  try {
+    let joId = req.params.id;
+
+    // 1. Fetch job order with products
+    const jobOrders = await ironJobOrder.find({ _id: joId })
+      .populate({
+        path: 'work_order',
+        select: 'workOrderNumber _id',
+        model: 'ironWorkOrder',
+      })
+      .populate({
+        path: 'products.shape',
+        select: 'shape_code description',
+        model: 'ironShape',
+      })
+      .lean();
+
+    if (!jobOrders.length) {
+      return res.status(404).json({
+        success: false,
+        message: 'Job order not found',
+      });
+    }
+
+    const jobOrder = jobOrders[0];
+
+    // 2. For each product, fetch the latest production entry
+    const productsWithProductionData = await Promise.all(
+      jobOrder.products.map(async (product) => {
+        const productionEntry = await ironDailyProduction.findOne({
+          'products.object_id': product._id,
+          job_order: joId,
+        }).lean();
+
+        return {
+          objectId: product._id.toString(),
+          shapeId: product.shape._id.toString(),
+          shapeName: `${product.shape?.shape_code || ''} - ${product.shape?.description || ''}`.trim() || 'N/A',
+          plannedQuantity: product.planned_quantity,
+          scheduleDate: product.schedule_date,
+          dia: product.dia,
+          achievedQuantity: productionEntry?.products[0]?.achieved_quantity || 0, // From production
+          rejectedQuantity: productionEntry?.products[0]?.rejected_quantity || 0, // From production
+          recycledQuantity: productionEntry?.products[0]?.recycled_quantity || 0, // From production
+        };
+      })
+    );
+
+    // 3. Filter out products with achievedQuantity = 0
+    const filteredProducts = productsWithProductionData.filter(
+      (product) => product.achievedQuantity > 0
+    );
+
+    const formattedJobOrders = [{
+      jobOrderNumber: jobOrder.job_order_number,
+      workOrderNumber: jobOrder.work_order?.workOrderNumber || 'N/A',
+      workOrderId: jobOrder.work_order?._id?.toString() || 'N/A',
+      products: filteredProducts, // Only include products with achievedQuantity > 0
+      status: jobOrder.status,
+      createdAt: jobOrder.createdAt,
+    }];
+
+    return res.status(200).json({
+      success: true,
+      message: 'Job order details retrieved successfully',
+      data: formattedJobOrders,
+    });
+  } catch (error) {
+    console.error('Error fetching job order details:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Internal Server Error',
+      error: error.message,
+    });
+  }
+};
+
 
 const getRawMaterialDataByProjectId = async (req, res) => {
   const { projectId } = req.params;
