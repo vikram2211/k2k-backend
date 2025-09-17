@@ -23,6 +23,70 @@ const createPackingBundle1 = async (req, res) => {
       throw new ApiError(400, 'product_quantity, bundle_size, and weight must be numbers');
     }
 
+    // Check achieved production quantity
+    if (work_order && shape_id) {
+      // Get diameter from the request body or query parameters
+      const diameter = req.body.diameter || req.query.diameter;
+      
+      const productionData = await mongoose.connection.db.collection('irondailyproductions').aggregate([
+        {
+          $match: {
+            work_order: new mongoose.Types.ObjectId(work_order)
+          }
+        },
+        {
+          $unwind: '$products'
+        },
+        {
+          $lookup: {
+            from: 'ironjoborders',
+            let: { objectId: '$products.object_id' },
+            pipeline: [
+              {
+                $match: {
+                  $expr: {
+                    $in: ['$$objectId', '$products._id']
+                  }
+                }
+              },
+              {
+                $unwind: '$products'
+              },
+              {
+                $match: {
+                  $expr: {
+                    $and: [
+                      { $eq: ['$products._id', '$$objectId'] },
+                      { $eq: ['$products.shape', new mongoose.Types.ObjectId(shape_id)] },
+                      ...(diameter ? [{ $eq: ['$products.dia', parseInt(diameter)] }] : [])
+                    ]
+                  }
+                }
+              }
+            ],
+            as: 'jobOrderProduct'
+          }
+        },
+        {
+          $match: {
+            'jobOrderProduct.0': { $exists: true }
+          }
+        },
+        {
+          $group: {
+            _id: null,
+            totalAchieved: { $sum: '$products.achieved_quantity' }
+          }
+        }
+      ]).toArray();
+
+      const achievedQuantity = productionData.length > 0 ? productionData[0].totalAchieved : 0;
+      
+      if (product_quantity > achievedQuantity) {
+        throw new ApiError(400, `Product quantity (${product_quantity}) cannot exceed achieved production quantity (${achievedQuantity})`);
+      }
+    }
+
     // Calculate number of bundles
     const totalBundles = Math.floor(product_quantity / bundle_size);
     if (totalBundles === 0) {
@@ -1136,6 +1200,26 @@ const getShapesByWorkOrderId = async (req, res) => {
       });
     }
 
+    // Debug: Check if there's any production data for this work order
+    console.log('=== DEBUGGING PRODUCTION DATA ===');
+    console.log('Work Order ID:', work_order_id);
+    
+    // Check raw production data first
+    const rawProductionData = await mongoose.connection.db.collection('irondailyproductions').find({
+      work_order: new mongoose.Types.ObjectId(work_order_id)
+    }).toArray();
+    console.log('Raw production data count:', rawProductionData.length);
+    if (rawProductionData.length > 0) {
+      console.log('Sample production record:', JSON.stringify(rawProductionData[0], null, 2));
+    } else {
+      // Check if there are any production records at all
+      const allProductionData = await mongoose.connection.db.collection('irondailyproductions').find({}).limit(1).toArray();
+      console.log('Total production records in collection:', await mongoose.connection.db.collection('irondailyproductions').countDocuments());
+      if (allProductionData.length > 0) {
+        console.log('Sample production record structure:', JSON.stringify(allProductionData[0], null, 2));
+      }
+    }
+
     // Aggregation pipeline
     const shapes = await ironWorkOrder.aggregate([
       {
@@ -1148,13 +1232,18 @@ const getShapesByWorkOrderId = async (req, res) => {
       },
       { 
         $group: {
-          _id: '$products.shapeId',
+          _id: {
+            shapeId: '$products.shapeId',
+            diameter: '$products.diameter'
+          },
+          po_quantity: { $first: '$products.quantity' },
+          diameter: { $first: '$products.diameter' },
         },
       },
       {
         $lookup: {
           from: 'ironshapes',
-          localField: '_id',
+          localField: '_id.shapeId',
           foreignField: '_id',
           as: 'shapeDetails',
         },
@@ -1163,13 +1252,87 @@ const getShapesByWorkOrderId = async (req, res) => {
         $unwind: '$shapeDetails',
       },
       {
+        $lookup: {
+          from: 'irondailyproductions',
+          let: { 
+            workOrderId: new mongoose.Types.ObjectId(work_order_id),
+            shapeId: '$_id.shapeId',
+            diameter: '$_id.diameter'
+          },
+          pipeline: [
+            {
+              $match: {
+                $expr: {
+                  $and: [
+                    { $eq: ['$work_order', '$$workOrderId'] }
+                  ]
+                }
+              }
+            },
+            {
+              $unwind: '$products'
+            },
+            {
+              $lookup: {
+                from: 'ironjoborders',
+                let: { objectId: '$products.object_id' },
+                pipeline: [
+                  {
+                    $match: {
+                      $expr: {
+                        $in: ['$$objectId', '$products._id']
+                      }
+                    }
+                  },
+                  {
+                    $unwind: '$products'
+                  },
+                  {
+                    $match: {
+                      $expr: {
+                        $and: [
+                          { $eq: ['$products._id', '$$objectId'] },
+                          { $eq: ['$products.shape', '$$shapeId'] },
+                          { $eq: ['$products.dia', '$$diameter'] }
+                        ]
+                      }
+                    }
+                  }
+                ],
+                as: 'jobOrderProduct'
+              }
+            },
+            {
+              $match: {
+                'jobOrderProduct.0': { $exists: true }
+              }
+            },
+            {
+              $group: {
+                _id: null,
+                totalAchieved: { $sum: '$products.achieved_quantity' }
+              }
+            }
+          ],
+          as: 'productionData',
+        },
+      },
+      {
         $project: {
           _id: 0,
           shape_id: '$shapeDetails._id',
           shape_code: '$shapeDetails.shape_code',
+          po_quantity: 1,
+          diameter: 1,
+          achieved_quantity: { 
+            $ifNull: [{ $arrayElemAt: ['$productionData.totalAchieved', 0] }, 0] 
+          },
         },
       },
     ]);
+
+    console.log('Aggregation result - shapes found:', shapes.length);
+    console.log('Shapes data:', JSON.stringify(shapes, null, 2));
 
     if (!shapes.length) {
       return res.status(200).json({
