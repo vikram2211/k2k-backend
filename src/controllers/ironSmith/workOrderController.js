@@ -1,5 +1,6 @@
 import { ironWorkOrder } from "../../models/ironSmith/workOrder.model.js";
 import { RawMaterial } from "../../models/ironSmith/helpers/client-project-qty.model.js";
+import { Diameter } from "../../models/ironSmith/helpers/projectDia.model.js";
 import { asyncHandler } from "../../utils/asyncHandler.js";
 import { ApiError } from "../../utils/ApiError.js";
 import { ApiResponse } from "../../utils/ApiResponse.js";
@@ -278,7 +279,7 @@ const createIronWorkOrder_04_08_2025 = asyncHandler(async (req, res) => {
 });
 
 
-const createIronWorkOrder = asyncHandler(async (req, res) => {
+const createIronWorkOrder_19_09_2025 = asyncHandler(async (req, res) => {
     // 1. Validation schema (updated to require weight as a number)
     const dimensionSchema = Joi.object({
         name: Joi.string().required().messages({ 'string.empty': 'Dimension name is required' }),
@@ -573,6 +574,7 @@ const createIronWorkOrder = asyncHandler(async (req, res) => {
 
     for (const [diameter, usedWeight] of diameterWeightMap) {
         const rawMaterial = rawMaterials.find((rm) => rm.diameter === Number(diameter));
+        console.log("rawMaterial",rawMaterial);
         if (!rawMaterial) {
             throw new ApiError(400, `No raw material available for diameter ${diameter} mm`);
         }
@@ -659,6 +661,350 @@ const createIronWorkOrder = asyncHandler(async (req, res) => {
 
     return res.status(201).json(new ApiResponse(201, formattedWorkOrder, 'Work order created successfully'));
 });
+
+
+
+
+const createIronWorkOrder = asyncHandler(async (req, res) => {
+    // 1. Validation schema
+    const dimensionSchema = Joi.object({
+      name: Joi.string().required().messages({ 'string.empty': 'Dimension name is required' }),
+      value: Joi.string().required().messages({ 'string.empty': 'Dimension value is required' }),
+    });
+  
+    const fileSchema = Joi.object({
+      file_name: Joi.string().required().messages({ 'string.empty': 'File name is required' }),
+      file_url: Joi.string().uri().required().messages({ 'string.uri': 'File URL must be a valid URL' }),
+      uploaded_at: Joi.date().optional(),
+    });
+  
+    const productSchema = Joi.object({
+      shapeId: Joi.string()
+        .required()
+        .custom((value, helpers) => {
+          if (!mongoose.Types.ObjectId.isValid(value)) {
+            return helpers.error('any.invalid', { message: `Shape ID (${value}) is not a valid ObjectId` });
+          }
+          return value;
+        }, 'ObjectId validation'),
+      uom: Joi.string().required().messages({ 'string.empty': 'UOM is required' }),
+      quantity: Joi.number().min(0).required().messages({
+        'number.base': 'Quantity must be a number',
+        'number.min': 'Quantity must be non-negative',
+      }),
+      deliveryDate: Joi.date().optional().allow(null).messages({ 'date.base': 'Delivery date must be a valid date' }),
+      barMark: Joi.string().optional().allow(''),
+      memberDetails: Joi.string().optional().allow(''),
+      memberQuantity: Joi.number().min(0).required().messages({
+        'number.base': 'Quantity must be a number',
+        'number.min': 'Quantity must be non-negative',
+      }),
+      diameter: Joi.number().min(0).required().messages({
+        'number.base': 'Diameter must be a number',
+      }),
+      type: Joi.string().required().messages({
+        'string.empty': 'Type is required',
+      }),
+      weight: Joi.string().required().custom((value, helpers) => {
+        const numValue = parseFloat(value);
+        if (isNaN(numValue) || numValue < 0) {
+          return helpers.error('any.invalid', { message: 'Weight must be a valid non-negative number' });
+        }
+        return value;
+      }, 'Weight validation'),
+      dimensions: Joi.array().items(dimensionSchema).optional(),
+    });
+  
+    const workOrderSchema = Joi.object({
+      clientId: Joi.string()
+        .required()
+        .custom((value, helpers) => {
+          if (!mongoose.Types.ObjectId.isValid(value)) {
+            return helpers.error('any.invalid', { message: `Client ID (${value}) is not a valid ObjectId` });
+          }
+          return value;
+        }, 'ObjectId validation'),
+      projectId: Joi.string()
+        .required()
+        .custom((value, helpers) => {
+          if (!mongoose.Types.ObjectId.isValid(value)) {
+            return helpers.error('any.invalid', { message: `Project ID (${value}) is not a valid ObjectId` });
+          }
+          return value;
+        }, 'ObjectId validation'),
+      workOrderNumber: Joi.string().required().messages({ 'string.empty': 'Work order number is required' }),
+      workOrderDate: Joi.date().required().messages({ 'date.base': 'Work order date must be a valid date' }),
+      products: Joi.array().items(productSchema).min(1).required().messages({
+        'array.min': 'At least one product is required',
+      }),
+      files: Joi.array().items(fileSchema).optional(),
+      created_by: Joi.string()
+        .required()
+        .custom((value, helpers) => {
+          if (!mongoose.Types.ObjectId.isValid(value)) {
+            return helpers.error('any.invalid', { message: `Created by ID (${value}) is not a valid ObjectId` });
+          }
+          return value;
+        }, 'ObjectId validation'),
+      updated_by: Joi.string()
+        .required()
+        .custom((value, helpers) => {
+          if (!mongoose.Types.ObjectId.isValid(value)) {
+            return helpers.error('any.invalid', { message: `Updated by ID (${value}) is not a valid ObjectId` });
+          }
+          return value;
+        }, 'ObjectId validation'),
+    });
+  
+    // 2. Parse form-data
+    const bodyData = req.body;
+    const userId = req.user?._id?.toString();
+  
+    // Validate userId
+    if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
+      throw new ApiError(401, 'Invalid or missing user ID in request');
+    }
+  
+    // 3. Parse stringified fields
+    if (typeof bodyData.products === 'string') {
+      try {
+        bodyData.products = JSON.parse(bodyData.products);
+      } catch (e) {
+        throw new ApiError(400, 'Invalid products JSON format');
+      }
+    }
+  
+    // 4. Handle file uploads
+    let uploadedFiles = [];
+    if (req.files && req.files.length > 0) {
+      try {
+        for (const file of req.files) {
+          const sanitizedFilename = sanitizeFilename(file.originalname);
+          const maxFileSize = 5 * 1024 * 1024; // 5MB
+          if (file.size > maxFileSize) {
+            throw new ApiError(400, `File ${file.originalname} exceeds maximum size of 5MB`);
+          }
+          // Upload directly to S3 from memory buffer
+          const { url } = await putObject(
+            { data: file.buffer, mimetype: file.mimetype },
+            `iron-work-orders/${Date.now()}-${sanitizedFilename}`
+          );
+          uploadedFiles.push({
+            file_name: file.originalname,
+            file_url: url,
+            uploaded_at: new Date(),
+          });
+        }
+      } catch (error) {
+        throw new ApiError(500, `File upload failed: ${error.message}`);
+      }
+    } else if (bodyData.files && Array.isArray(bodyData.files)) {
+      const fileValidation = Joi.array().items(fileSchema).validate(bodyData.files, { abortEarly: false });
+      if (fileValidation.error) {
+        throw new ApiError(400, 'Invalid file data', fileValidation.error.details);
+      }
+      uploadedFiles = bodyData.files.map(f => ({
+        file_name: f.file_name,
+        file_url: f.file_url,
+        uploaded_at: f.uploaded_at ? new Date(f.uploaded_at) : new Date(),
+      }));
+    }
+  
+    // 5. Prepare work order data
+    const workOrderData = {
+      ...bodyData,
+      products: bodyData.products,
+      files: uploadedFiles,
+      workOrderDate: bodyData.workOrderDate ? new Date(bodyData.workOrderDate) : undefined,
+      created_by: userId,
+      updated_by: userId,
+    };
+  
+    // 6. Validate with Joi
+    const { error, value } = workOrderSchema.validate(workOrderData, { abortEarly: false });
+    if (error) {
+      if (req.files) {
+        req.files.forEach((file) => {
+          const tempFilePath = path.join('./public/temp', file.filename);
+          if (fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath);
+        });
+      }
+      throw new ApiError(400, 'Validation failed for work order creation', error.details);
+    }
+  
+    // 7. Validate referenced documents
+    const [client, project, shapes] = await Promise.all([
+      mongoose.model('ironClient').findById(value.clientId),
+      mongoose.model('ironProject').findById(value.projectId),
+      Promise.all(value.products.map((p) => mongoose.model('ironShape').findById(p.shapeId))),
+    ]);
+  
+    if (!client) throw new ApiError(404, `Client not found with ID: ${value.clientId}`);
+    if (!project) throw new ApiError(404, `Project not found with ID: ${value.projectId}`);
+    const invalidShape = shapes.findIndex((s) => !s);
+    if (invalidShape !== -1) {
+      throw new ApiError(404, `Shape not found with ID: ${value.products[invalidShape].shapeId}`);
+    }
+  
+    // 8. Calculate and validate raw material usage based on weight
+    const diameterWeightMap = new Map();
+    value.products.forEach((product) => {
+      const key = `${product.diameter}-${product.type}`;
+      const weight = parseFloat(product.weight);
+      if (!isNaN(weight)) {
+        const currentWeight = diameterWeightMap.get(key) || 0;
+        diameterWeightMap.set(key, currentWeight + weight);
+      } else {
+        throw new ApiError(400, `Invalid weight value for diameter ${product.diameter} mm and type ${product.type}`);
+      }
+    });
+  
+    // 9. Validate and deduct raw material
+    const bulkRawMaterialUpdates = [];
+    const bulkDiameterUpdates = [];
+    const workOrderId = new mongoose.Types.ObjectId(); // Generate work order ID
+  
+    for (const [key, usedWeight] of diameterWeightMap) {
+      const [diameter, type] = key.split('-');
+      const rawMaterials = await RawMaterial.find({
+        project: value.projectId,
+        diameter: Number(diameter),
+        type,
+        isDeleted: false,
+        qty: { $gt: 0 },
+      }).sort({ createdAt: 1 }); // FIFO: oldest first
+  
+      if (!rawMaterials.length) {
+        throw new ApiError(400, `No raw material available for diameter ${diameter} mm and type ${type}`);
+      }
+  
+      let remainingWeight = usedWeight;
+      for (const rawMaterial of rawMaterials) {
+        if (remainingWeight <= 0) break;
+  
+        const deductQty = Math.min(rawMaterial.qty, remainingWeight);
+        remainingWeight -= deductQty;
+  
+        bulkRawMaterialUpdates.push({
+          updateOne: {
+            filter: { _id: rawMaterial._id, isDeleted: false },
+            update: {
+              $inc: { qty: -deductQty },
+              $push: {
+                consumptionHistory: {
+                  workOrderId,
+                  workOrderNumber: value.workOrderNumber,
+                  quantity: deductQty,
+                  timestamp: new Date(),
+                },
+              },
+            },
+          },
+        });
+      }
+  
+      if (remainingWeight > 0) {
+        throw new ApiError(
+          400,
+          `Insufficient raw material for diameter ${diameter} mm and type ${type}. Required: ${usedWeight}, Available: ${usedWeight - remainingWeight}`
+        );
+      }
+  
+      // Update Diameter's subtracted array
+      const diameterRecord = await Diameter.findOne({
+        project: value.projectId,
+        value: Number(diameter),
+        type,
+        isDeleted: false,
+      });
+  
+      if (diameterRecord) {
+        bulkDiameterUpdates.push({
+          updateOne: {
+            filter: { _id: diameterRecord._id, isDeleted: false },
+            update: {
+              $push: {
+                subtracted: {
+                  quantity: usedWeight,
+                  workOrderId,
+                },
+              },
+            },
+          },
+        });
+      }
+    }
+  
+    // 10. Perform bulk updates
+    if (bulkRawMaterialUpdates.length > 0) {
+      await RawMaterial.bulkWrite(bulkRawMaterialUpdates);
+    }
+    if (bulkDiameterUpdates.length > 0) {
+      await Diameter.bulkWrite(bulkDiameterUpdates);
+    }
+  
+    // 11. Save to MongoDB with the generated ID
+    const workOrder = await ironWorkOrder.create({ ...value, _id: workOrderId });
+  
+    // 12. Populate and format response
+    const populatedWorkOrder = await ironWorkOrder
+      .findById(workOrder._id)
+      .populate({
+        path: 'clientId',
+        select: 'name address',
+        match: { isDeleted: false },
+      })
+      .populate({
+        path: 'projectId',
+        select: 'name address',
+        match: { isDeleted: false },
+      })
+      .populate({
+        path: 'products.shapeId',
+        select: 'name',
+        match: { isDeleted: false },
+      })
+      .populate({
+        path: 'created_by',
+        select: 'username email',
+      })
+      .populate({
+        path: 'updated_by',
+        select: 'username email',
+      })
+      .lean();
+  
+    if (!populatedWorkOrder) {
+      throw new ApiError(404, 'Failed to retrieve created work order');
+    }
+  
+    const formatDateToIST = (data) => {
+      const convertToIST = (date) => {
+        if (!date) return null;
+        return new Date(date).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
+      };
+      return {
+        ...data,
+        workOrderDate: convertToIST(data.workOrderDate),
+        createdAt: convertToIST(data.createdAt),
+        updatedAt: convertToIST(data.updatedAt),
+        products: data.products.map((p) => ({
+          ...p,
+          deliveryDate: convertToIST(p.deliveryDate),
+        })),
+        files: data.files.map((f) => ({
+          ...f,
+          uploaded_at: convertToIST(f.uploaded_at),
+        })),
+      };
+    };
+  
+    const formattedWorkOrder = formatDateToIST(populatedWorkOrder);
+    return res.status(201).json(new ApiResponse(201, formattedWorkOrder, 'Work order created successfully'));
+  });
+
+
+
 
 
 //////////////////GET API - To get all the iron work order data

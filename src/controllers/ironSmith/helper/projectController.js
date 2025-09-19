@@ -7,6 +7,8 @@ import { ironClient } from '../../../models/ironSmith/helpers/ironClient.model.j
 import Joi from 'joi';
 import { formatDateToIST } from '../../../utils/formatDate.js';
 import { RawMaterial } from '../../../models/ironSmith/helpers/client-project-qty.model.js';
+import { Diameter } from '../../../models/ironSmith/helpers/projectDia.model.js';
+
 
 
 // Helper function to send response
@@ -235,8 +237,8 @@ const deleteIronProject = asyncHandler(async (req, res) => {
 });
 
 
-const addRawMaterial = asyncHandler(async (req, res) => {
-    const { id, diameter, qty } = req.body;
+const addRawMaterial_18_09_2025 = asyncHandler(async (req, res) => {
+    const { id, diameter, qty,convertedQty,date } = req.body;
     console.log(id, diameter, qty);
     console.log(typeof(id));
     console.log(typeof(diameter));
@@ -254,10 +256,12 @@ const addRawMaterial = asyncHandler(async (req, res) => {
             }, 'ObjectId validation'),
         diameter: Joi.number().required().positive().messages({ 'number.base': 'Diameter must be a number' }),
         qty: Joi.number().required().positive().messages({ 'number.base': 'Quantity must be a number' }),
+        convertedQty: Joi.number().required().positive().messages({ 'number.base': 'Converted Quantity must be a number' }),
+        date: Joi.date().required().messages({ 'date.base': 'Date is required' }),
     });
 
     // Validate request body
-    const { error, value } = rawMaterialSchema.validate({ id, diameter, qty }, { abortEarly: false });
+    const { error, value } = rawMaterialSchema.validate({ id, diameter, qty,convertedQty,date }, { abortEarly: false });
     if (error) {
         throw new ApiError(400, 'Validation failed for raw material data', error.details);
     }
@@ -268,15 +272,113 @@ const addRawMaterial = asyncHandler(async (req, res) => {
         throw new ApiError(404, 'No non-deleted project found with the provided ID');
     }
 
+    // Optional: Verify convertedQty matches qty * 1000
+  if (value.convertedQty !== value.qty * 1000) {
+    throw new ApiError(400, 'Converted Quantity must be Quantity (tons) * 1000');
+  }
+
     // Create raw material entry
     const rawMaterial = await RawMaterial.create({
         project: id,
         diameter: value.diameter,
         qty: value.qty,
+        convertedQty: value.convertedQty,
+        date: value.date,
     });
 
     return sendResponse(res, new ApiResponse(201, rawMaterial, 'Raw material data added successfully'));
 });
+
+
+const addRawMaterial_19_09_2025 = asyncHandler(async (req, res) => {
+    const { id, diameter, type, qty, convertedQty, date } = req.body;
+
+    const schema = Joi.object({
+        id: Joi.string().required().custom((value, helpers) => {
+            if (!mongoose.Types.ObjectId.isValid(value)) {
+                return helpers.error('any.invalid');
+            }
+            return value;
+        }),
+        diameter: Joi.number().required().positive(),
+        type: Joi.string().required(), // Added type validation
+        qty: Joi.number().required().positive(),
+        convertedQty: Joi.number().required().positive(),
+        date: Joi.date().required(),
+    });
+
+    const { error } = schema.validate({ id, diameter, type, qty, convertedQty, date });
+    if (error) {
+        throw new ApiError(400, error.details[0].message);
+    }
+
+    const rawMaterial = await RawMaterial.create({
+        project: id,
+        diameter,
+        type,
+        qty,
+        convertedQty,
+        date,
+    });
+    return res.status(201).json(new ApiResponse(201, rawMaterial, 'Raw material added successfully'));
+});
+
+const addRawMaterial = asyncHandler(async (req, res) => {
+    const { id, diameter, type, qty, convertedQty, date } = req.body;
+  
+    const schema = Joi.object({
+      id: Joi.string().required().custom((value, helpers) => {
+        if (!mongoose.Types.ObjectId.isValid(value)) {
+          return helpers.error('any.invalid');
+        }
+        return value;
+      }),
+      diameter: Joi.number().required().positive(),
+      type: Joi.string().required(),
+      qty: Joi.number().required().positive(),
+      convertedQty: Joi.number().required().positive(),
+      date: Joi.date().required(),
+    });
+  
+    const { error } = schema.validate({ id, diameter, type, qty, convertedQty, date });
+    if (error) {
+      throw new ApiError(400, error.details[0].message);
+    }
+  
+    // Find the corresponding Diameter record
+    const diameterRecord = await Diameter.findOne({
+      project: id,
+      value: diameter,
+      type,
+      isDeleted: false,
+    });
+  
+    if (!diameterRecord) {
+      throw new ApiError(404, `Diameter ${diameter} mm with type ${type} not found for this project`);
+    }
+  
+    // Create the RawMaterial
+    const rawMaterial = await RawMaterial.create({
+      project: id,
+      diameter,
+      type,
+      qty,
+      convertedQty,
+      date,
+    });
+  
+    // Update the Diameter's added array
+    await Diameter.updateOne(
+      { _id: diameterRecord._id },
+      {
+        $push: {
+          added: { quantity: qty },
+        },
+      }
+    );
+  
+    return res.status(201).json(new ApiResponse(201, rawMaterial, 'Raw material added successfully'));
+  });
 
 // Update raw material data
 const updateRawMaterial = asyncHandler(async (req, res) => {
@@ -356,7 +458,7 @@ const getRawMaterialsByProjectId = asyncHandler(async (req, res) => {
     return sendResponse(res, new ApiResponse(200, rawMaterials, 'Raw material data fetched successfully'));
 });
 
-const getRawMaterialConsumption = asyncHandler(async (req, res) => {
+const getRawMaterialConsumption_18_09_2025 = asyncHandler(async (req, res) => {
     const { _id, dia, projectId } = req.query;
 
     // Validate query parameters
@@ -416,4 +518,374 @@ const getRawMaterialConsumption = asyncHandler(async (req, res) => {
     return res.status(200).json(new ApiResponse(200, response, 'Raw material consumption details retrieved successfully'));
 });
 
-export { createIronProject, updateIronProject, getAllIronProjects, getIronProjectById, deleteIronProject, addRawMaterial, updateRawMaterial, deleteRawMaterial, getRawMaterialsByProjectId, getRawMaterialConsumption};
+
+// backend/controllers/rawMaterialController.js
+const getRawMaterialConsumption_18_09_2025_5_30_PM = asyncHandler(async (req, res) => {
+    const { projectId } = req.params;
+    console.log("projectId",projectId);
+
+    if (!mongoose.Types.ObjectId.isValid(projectId)) {
+        throw new ApiError(400, `Invalid project ID: ${projectId}`);
+    }
+
+    const rawMaterials = await RawMaterial.find({ project: projectId, isDeleted: false })
+        .populate({
+            path: 'consumptionHistory.workOrderId',
+            select: 'workOrderNumber',
+            // match: { isDeleted: false },
+        })
+        .lean();
+        console.log("rawMaterials",rawMaterials);
+
+    if (!rawMaterials.length) {
+        throw new ApiError(404, 'No raw material data found for the given project ID');
+    }
+
+    const response = rawMaterials.map((rm) => ({
+        _id: rm._id,
+        project: rm.project,
+        diameter: rm.diameter,
+        type: rm.type,
+        qty: rm.qty,
+        convertedQty: rm.convertedQty,
+        date: rm.date,
+        createdAt: rm.createdAt,
+        updatedAt: rm.updatedAt,
+        consumptionHistory: rm.consumptionHistory
+            .filter((ch) => ch.workOrderId) // Filter out failed populations
+            .map((ch) => ({
+                workOrderId: ch.workOrderId._id,
+                workOrderNumber: ch.workOrderId.workOrderNumber,
+                quantity: ch.quantity,
+                timestamp: ch.timestamp,
+            })),
+    }));
+
+    return sendResponse(res, new ApiResponse(200, response, 'Raw materials fetched successfully'));
+});
+
+
+
+
+
+const getRawMaterialConsumption_19_09_2025_12_PM = asyncHandler(async (req, res) => {
+    const { projectId } = req.params;
+    console.log("projectId", projectId);
+
+    if (!mongoose.Types.ObjectId.isValid(projectId)) {
+        throw new ApiError(400, `Invalid project ID: ${projectId}`);
+    }
+
+    const rawMaterials = await RawMaterial.find({ project: projectId, isDeleted: false })
+        .populate({
+            path: 'consumptionHistory.workOrderId',
+            select: 'workOrderNumber', // Ensure workOrderNumber is selected
+            // match: { isDeleted: false }, // Optional: Filter out deleted work orders
+        })
+        .lean();
+    console.log("rawMaterials", rawMaterials);
+
+    if (!rawMaterials.length) {
+        throw new ApiError(404, 'No raw material data found for the given project ID');
+    }
+    rawMaterials.map((rm) => (
+        rm.consumptionHistory.map((ch) => (console.log("ch",ch)))))
+
+    const response = rawMaterials.map((rm) => ({
+        _id: rm._id,
+        project: rm.project,
+        diameter: rm.diameter,
+        type: rm.type,
+        qty: rm.qty,
+        convertedQty: rm.convertedQty,
+        date: rm.date,
+        createdAt: rm.createdAt,
+        updatedAt: rm.updatedAt,
+        consumptionHistory: rm.consumptionHistory.map((ch) => ({
+            workOrderId: ch.workOrderId ? ch.workOrderId._id : null,
+            workOrderNumber: ch.workOrderId ? ch.workOrderId.workOrderNumber : 'N/A', // Handle missing population
+            quantity: ch.quantity || 0,
+            timestamp: ch.timestamp || null,
+        })),
+    }));
+
+    return sendResponse(res, new ApiResponse(200, response, 'Raw materials fetched successfully'));
+});
+
+
+
+
+
+
+const getRawMaterialConsumption = asyncHandler(async (req, res) => {
+    const { projectId } = req.params;
+    console.log("projectId", projectId);
+
+    if (!mongoose.Types.ObjectId.isValid(projectId)) {
+        throw new ApiError(400, `Invalid project ID: ${projectId}`);
+    }
+
+    // Fetch RawMaterial data
+    const rawMaterials = await RawMaterial.find({ project: projectId, isDeleted: false })
+        .populate({
+            path: 'consumptionHistory.workOrderId',
+            select: 'workOrderNumber',
+        })
+        .lean();
+
+    console.log("rawMaterials", rawMaterials);
+
+    if (!rawMaterials.length) {
+        throw new ApiError(404, 'No raw material data found for the given project ID');
+    }
+
+    // Fetch Diameter data and aggregate added/subtracted quantities
+    const diameters = await Diameter.aggregate([
+        { $match: { project: new mongoose.Types.ObjectId(projectId), isDeleted: false } },
+        { $unwind: "$added" }, // Unwind the added array
+        { $unwind: "$subtracted" }, // Unwind the subtracted array
+        {
+            $group: {
+                _id: { diameter: "$value", type: "$type" },
+                totalAdded: { $sum: "$added.quantity" }, // Sum all quantities in added array
+                totalSubtracted: { $sum: "$subtracted.quantity" }, // Sum all quantities in subtracted array
+            },
+        },
+    ]);
+    console.log("diameters", diameters);
+
+    // Map rawMaterials with diameter-derived totals
+    const response = rawMaterials.map((rm) => {
+        const diameterData = diameters.find(
+            (d) => d._id.diameter === rm.diameter && d._id.type === rm.type
+        ) || { totalAdded: 0, totalSubtracted: 0 };
+
+        return {
+            _id: rm._id,
+            project: rm.project,
+            diameter: rm.diameter,
+            type: rm.type,
+            qty: rm.qty, // Retain RawMaterial qty for reference, or replace with totalAdded if Diameter is authoritative
+            convertedQty: rm.convertedQty,
+            date: rm.date,
+            createdAt: rm.createdAt,
+            updatedAt: rm.updatedAt,
+            consumptionHistory: rm.consumptionHistory.map((ch) => ({
+                workOrderId: ch.workOrderId ? ch.workOrderId._id : null,
+                workOrderNumber: ch.workOrderId ? ch.workOrderId.workOrderNumber : 'N/A',
+                quantity: ch.quantity || 0,
+                timestamp: ch.timestamp || null,
+            })),
+            // Add diameter-derived totals
+            totalAdded: diameterData.totalAdded || 0,
+            totalSubtracted: diameterData.totalSubtracted || 0,
+        };
+    });
+
+    return sendResponse(res, new ApiResponse(200, response, 'Raw materials fetched successfully'));
+});
+
+
+
+
+
+const getRawMaterialConsumption_correct_response  = asyncHandler(async (req, res) => {
+    const { projectId } = req.params;
+    console.log("projectId", projectId);
+
+    if (!mongoose.Types.ObjectId.isValid(projectId)) {
+        throw new ApiError(400, `Invalid project ID: ${projectId}`);
+    }
+
+    // Fetch RawMaterial data
+    const rawMaterials = await RawMaterial.find({ project: projectId, isDeleted: false })
+        .populate({
+            path: 'consumptionHistory.workOrderId',
+            select: 'workOrderNumber',
+        })
+        .lean();
+
+    console.log("rawMaterials", rawMaterials);
+
+    if (!rawMaterials.length) {
+        throw new ApiError(404, 'No raw material data found for the given project ID');
+    }
+
+    // Fetch Diameter data and aggregate added/subtracted quantities
+    // const diameters = await Diameter.aggregate([
+    //     { $match: { project: new mongoose.Types.ObjectId(projectId), isDeleted: false } },
+    //     { $unwind: "$added" }, // Unwind the added array
+    //     { $unwind: "$subtracted" }, // Unwind the subtracted array
+    //     {
+    //         $group: {
+    //             _id: { diameter: "$value", type: "$type" },
+    //             totalAdded: { $sum: "$added.quantity" }, // Sum all quantities in added array
+    //             totalSubtracted: { $sum: "$subtracted.quantity" }, // Sum all quantities in subtracted array
+    //         },
+    //     },
+    // ]);
+
+
+    const diameters = await Diameter.aggregate([
+        { $match: { project: new mongoose.Types.ObjectId(projectId), isDeleted: false } },
+      
+        // Calculate total added and subtracted per document
+        {
+          $addFields: {
+            totalAdded: { $sum: "$added.quantity" },
+            totalSubtracted: { $sum: "$subtracted.quantity" },
+          },
+        },
+      
+        // Group by diameter and type
+        {
+          $group: {
+            _id: { diameter: "$value", type: "$type" },
+            totalAdded: { $sum: "$totalAdded" },
+            totalSubtracted: { $sum: "$totalSubtracted" },
+          },
+        },
+      ]);
+
+
+    console.log("diameters", diameters);
+
+    // Prepare response with RawMaterials and a separate totals object
+    const response = {
+        rawMaterials: rawMaterials.map((rm) => ({
+            _id: rm._id,
+            project: rm.project,
+            diameter: rm.diameter,
+            type: rm.type,
+            qty: rm.qty,
+            convertedQty: rm.convertedQty,
+            date: rm.date,
+            createdAt: rm.createdAt,
+            updatedAt: rm.updatedAt,
+            consumptionHistory: rm.consumptionHistory.map((ch) => ({
+                workOrderId: ch.workOrderId ? ch.workOrderId._id : null,
+                workOrderNumber: ch.workOrderId ? ch.workOrderId.workOrderNumber : 'N/A',
+                quantity: ch.quantity || 0,
+                timestamp: ch.timestamp || null,
+            })),
+        })),
+        totals: diameters.reduce((acc, d) => {
+            acc[`${d._id.diameter}_${d._id.type}`] = {
+                diameter: d._id.diameter,
+                type: d._id.type,
+                totalAdded: d.totalAdded || 0,
+                totalSubtracted: d.totalSubtracted || 0,
+            };
+            return acc;
+        }, {}),
+    };
+
+    return sendResponse(res, new ApiResponse(200, response, 'Raw materials fetched successfully'));
+});
+
+
+
+
+
+
+const addDiameter_18_09_2025 = asyncHandler(async (req, res) => {
+    const { projectId, value } = req.body;
+  
+    const schema = Joi.object({
+      projectId: Joi.string().required().custom((value, helpers) => {
+        if (!mongoose.Types.ObjectId.isValid(value)) {
+          return helpers.error('any.invalid');
+        }
+        return value;
+      }),
+      value: Joi.number().required().positive(),
+    });
+  
+    const { error } = schema.validate({ projectId, value });
+    if (error) {
+      throw new ApiError(400, error.details[0].message);
+    }
+  
+    // const existingDiameter = await Diameter.findOne({ project: projectId, value });
+    // if (existingDiameter) {
+    //   throw new ApiError(400, 'Diameter already exists for this project');
+    // }
+  
+    const diameter = await Diameter.create({ project: projectId, value });
+    return res.status(201).json(new ApiResponse(201, diameter, 'Diameter added successfully'));
+  });
+
+
+  const addDiameter = asyncHandler(async (req, res) => {
+    const { projectId, value, type } = req.body;
+
+    const schema = Joi.object({
+        projectId: Joi.string().required().custom((value, helpers) => {
+            if (!mongoose.Types.ObjectId.isValid(value)) {
+                return helpers.error('any.invalid');
+            }
+            return value;
+        }),
+        value: Joi.number().required().positive(),
+        type: Joi.string().required(), // New validation for Type
+    });
+
+    const { error } = schema.validate({ projectId, value, type });
+    if (error) {
+        throw new ApiError(400, error.details[0].message);
+    }
+
+    // const existingDiameter = await Diameter.findOne({ project: projectId, value });
+    // if (existingDiameter) {
+    //   throw new ApiError(400, 'Diameter already exists for this project');
+    // }
+
+    const diameter = await Diameter.create({ project: projectId, value, type });
+    return res.status(201).json(new ApiResponse(201, diameter, 'Diameter added successfully'));
+});
+
+
+const deleteDiameter = asyncHandler(async (req, res) => {
+    const { projectId, value } = req.body;
+
+    const schema = Joi.object({
+        projectId: Joi.string().required().custom((value, helpers) => {
+            if (!mongoose.Types.ObjectId.isValid(value)) {
+                return helpers.error('any.invalid');
+            }
+            return value;
+        }),
+        value: Joi.number().required().positive(),
+    });
+
+    const { error } = schema.validate({ projectId, value });
+    if (error) {
+        throw new ApiError(400, error.details[0].message);
+    }
+
+    const existingDiameter = await Diameter.findOne({ project: projectId, value, isDeleted: false });
+    if (!existingDiameter) {
+        throw new ApiError(404, 'Diameter not found for this project');
+    }
+
+    existingDiameter.isDeleted = true;
+    await existingDiameter.save();
+
+    return res.status(200).json(new ApiResponse(200, null, 'Diameter marked as deleted successfully'));
+});
+
+  
+  // Fetch diameters for a project
+const getDiametersByProjectId = asyncHandler(async (req, res) => {
+    const { projectId } = req.params;
+    console.log("projectId",projectId);
+  
+    if (!mongoose.Types.ObjectId.isValid(projectId)) {
+      throw new ApiError(400, 'Invalid project ID');
+    }
+  
+    const diameters = await Diameter.find({ project: projectId, isDeleted: false });
+    return res.status(200).json(new ApiResponse(200, diameters, 'Diameters fetched successfully'));
+  });
+
+export { createIronProject, updateIronProject, getAllIronProjects, getIronProjectById, deleteIronProject, addRawMaterial, updateRawMaterial, deleteRawMaterial, getRawMaterialsByProjectId, getRawMaterialConsumption, addDiameter, getDiametersByProjectId,deleteDiameter};

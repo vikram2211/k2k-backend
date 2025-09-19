@@ -32,24 +32,7 @@
 
 
 
-
 import mongoose from "mongoose";
-
-const consumptionHistorySchema = new mongoose.Schema({
-  workOrderId: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'ironWorkOrder',
-    required: true,
-  },
-  quantity: {
-    type: Number,
-    required: true,
-  },
-  timestamp: {
-    type: Date,
-    default: Date.now,
-  },
-});
 
 const rawMaterialSchema = new mongoose.Schema(
   {
@@ -62,11 +45,30 @@ const rawMaterialSchema = new mongoose.Schema(
       type: Number,
       required: true,
     },
+    type: {
+      type: String,
+      required: true, // Matches the Diameter type
+    },
     qty: {
       type: Number,
       required: true,
     },
-    consumptionHistory: [consumptionHistorySchema], // Tracks quantity per work order
+    convertedQty: {
+      type: Number,
+      required: true,
+    },
+    date: {
+      type: Date,
+      required: true,
+    },
+    consumptionHistory: [
+      {
+        workOrderId: { type: String },
+        workOrderNumber: { type: String },
+        quantity: { type: Number },
+        timestamp: { type: Date },
+      },
+    ],
     isDeleted: {
       type: Boolean,
       default: false,

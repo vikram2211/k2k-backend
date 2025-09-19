@@ -270,8 +270,9 @@ const getWorkOrderProductByJobOrder = async (req, res) => {
 };
 
 
-const getRawMaterialDataByProjectId = async (req, res) => {
+const getRawMaterialDataByProjectId_18_09_2025 = async (req, res) => {
   const { projectId } = req.params;
+  console.log("projectId",projectId);
 
   // Validate projectId
   if (!mongoose.Types.ObjectId.isValid(projectId)) {
@@ -283,6 +284,7 @@ const getRawMaterialDataByProjectId = async (req, res) => {
       // Fetch raw materials for the given project ID, excluding deleted ones
       const rawMaterials = await RawMaterial.find({ project: projectId, isDeleted: false })
           .lean();
+          console.log("rawMaterials",rawMaterials);
 
       // If no raw materials are found, return an empty array
       if (!rawMaterials || rawMaterials.length === 0) {
@@ -301,6 +303,7 @@ const getRawMaterialDataByProjectId = async (req, res) => {
           }
           return acc;
       }, []);
+      console.log("rawMaterialData",rawMaterialData);
 
       // Return the processed data
       // return sendResponse(res, new ApiResponse(200, rawMaterialData, 'Raw material data fetched successfully'));
@@ -313,5 +316,51 @@ const getRawMaterialDataByProjectId = async (req, res) => {
 
   }
 };
+
+
+
+
+const getRawMaterialDataByProjectId = async (req, res) => {
+  const { projectId } = req.params;
+  console.log("projectId", projectId);
+
+  // Validate projectId
+  if (!mongoose.Types.ObjectId.isValid(projectId)) {
+      return res.status(400).json({ success: false, message: "Provided Project ID is not a valid ObjectId" });
+  }
+
+  try {
+      // Fetch raw materials for the given project ID, excluding deleted ones
+      const rawMaterials = await RawMaterial.find({ project: projectId, isDeleted: false })
+          .lean();
+      console.log("rawMaterials", rawMaterials);
+
+      // If no raw materials are found, return an empty array
+      if (!rawMaterials || rawMaterials.length === 0) {
+          return res.status(200).json({ success: true, rawMaterialData: [], message: "No raw material data found for the given project ID" });
+      }
+
+      // Group quantities by diameter and type
+      const rawMaterialData = rawMaterials.reduce((acc, material) => {
+          const key = `${material.diameter}-${material.type}`; // Unique key combining diameter and type
+          const existingMaterial = acc.find(item => `${item.diameter}-${item.type}` === key);
+          if (existingMaterial) {
+              existingMaterial.qty += material.qty; // Sum quantities for duplicate diameter-type combinations
+          } else {
+              acc.push({ diameter: material.diameter, type: material.type, qty: material.qty });
+          }
+          return acc;
+      }, []);
+      console.log("rawMaterialData", rawMaterialData);
+
+      // Return the processed data
+      return res.status(200).json({ success: true, rawMaterialData, message: "Raw material data fetched successfully" });
+
+  } catch (error) {
+      console.error('Error fetching raw material data:', error);
+      return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
 
 export { getIronProjectBasedOnClient, getIronDimensionBasedOnShape, getDimensions, getWorkOrderProductByJobOrder, getRawMaterialDataByProjectId  };
