@@ -63,7 +63,12 @@ const rawMaterialSchema = new mongoose.Schema(
     },
     consumptionHistory: [
       {
-        workOrderId: { type: String },
+        // workOrderId: { type: String },
+        workOrderId: { 
+          type: mongoose.Schema.Types.ObjectId, 
+          ref: 'ironWorkOrder', 
+          required: true 
+        },
         workOrderNumber: { type: String },
         quantity: { type: Number },
         timestamp: { type: Date },
