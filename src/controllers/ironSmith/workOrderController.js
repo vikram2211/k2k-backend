@@ -81,6 +81,7 @@ const createIronWorkOrder_04_08_2025 = asyncHandler(async (req, res) => {
             }, 'ObjectId validation'),
         workOrderNumber: Joi.string().required().messages({ 'string.empty': 'Work order number is required' }),
         workOrderDate: Joi.date().required().messages({ 'date.base': 'Work order date must be a valid date' }),
+        deliveryDate: Joi.date().optional().allow(null).messages({ 'date.base': 'Delivery date must be a valid date' }),
         products: Joi.array().items(productSchema).min(1).required().messages({
             'array.min': 'At least one product is required',
         }),
@@ -182,6 +183,7 @@ const createIronWorkOrder_04_08_2025 = asyncHandler(async (req, res) => {
         products: bodyData.products,
         files: uploadedFiles,
         workOrderDate: bodyData.workOrderDate ? new Date(bodyData.workOrderDate) : undefined,
+        deliveryDate: bodyData.deliveryDate ? new Date(bodyData.deliveryDate) : undefined,
         created_by: userId,
         updated_by: userId,
     };
@@ -260,11 +262,11 @@ const createIronWorkOrder_04_08_2025 = asyncHandler(async (req, res) => {
         return {
             ...data,
             workOrderDate: convertToIST(data.workOrderDate),
+            deliveryDate: convertToIST(data.deliveryDate),
             createdAt: convertToIST(data.createdAt),
             updatedAt: convertToIST(data.updatedAt),
             products: data.products.map((p) => ({
                 ...p,
-                deliveryDate: convertToIST(p.deliveryDate),
             })),
             files: data.files.map((f) => ({
                 ...f,
@@ -306,7 +308,6 @@ const createIronWorkOrder_19_09_2025 = asyncHandler(async (req, res) => {
             'number.base': 'Quantity must be a number',
             'number.min': 'Quantity must be non-negative',
         }),
-        deliveryDate: Joi.date().optional().allow(null).messages({ 'date.base': 'Delivery date must be a valid date' }).optional(),
         barMark: Joi.string().optional().allow(''),
         memberDetails: Joi.string().optional().allow(''),
         memberQuantity: Joi.number().min(0).required().messages({
@@ -323,6 +324,7 @@ const createIronWorkOrder_19_09_2025 = asyncHandler(async (req, res) => {
             }
             return value;
         }, 'Weight validation'),
+        cuttingLength: Joi.number().min(0).optional().allow(null),
         dimensions: Joi.array().items(dimensionSchema).optional(),
     });
 
@@ -345,6 +347,8 @@ const createIronWorkOrder_19_09_2025 = asyncHandler(async (req, res) => {
             }, 'ObjectId validation'),
         workOrderNumber: Joi.string().required().messages({ 'string.empty': 'Work order number is required' }),
         workOrderDate: Joi.date().required().messages({ 'date.base': 'Work order date must be a valid date' }),
+        deliveryDate: Joi.date().optional().allow(null).messages({ 'date.base': 'Delivery date must be a valid date' }),
+        globalMemberDetails: Joi.string().optional().allow(''),
         products: Joi.array().items(productSchema).min(1).required().messages({
             'array.min': 'At least one product is required',
         }),
@@ -522,6 +526,7 @@ const createIronWorkOrder_19_09_2025 = asyncHandler(async (req, res) => {
         products: bodyData.products,
         files: uploadedFiles,
         workOrderDate: bodyData.workOrderDate ? new Date(bodyData.workOrderDate) : undefined,
+        deliveryDate: bodyData.deliveryDate ? new Date(bodyData.deliveryDate) : undefined,
         created_by: userId,
         updated_by: userId,
     };
@@ -644,11 +649,11 @@ const createIronWorkOrder_19_09_2025 = asyncHandler(async (req, res) => {
         return {
             ...data,
             workOrderDate: convertToIST(data.workOrderDate),
+            deliveryDate: convertToIST(data.deliveryDate),
             createdAt: convertToIST(data.createdAt),
             updatedAt: convertToIST(data.updatedAt),
             products: data.products.map((p) => ({
                 ...p,
-                deliveryDate: convertToIST(p.deliveryDate),
             })),
             files: data.files.map((f) => ({
                 ...f,
@@ -1391,11 +1396,11 @@ const getAllIronWorkOrders = asyncHandler(async (req, res) => {
         return data.map((item) => ({
             ...item,
             workOrderDate: convertToIST(item.workOrderDate),
+            deliveryDate: convertToIST(item.deliveryDate),
             createdAt: convertToIST(item.createdAt),
             updatedAt: convertToIST(item.createdAt),
             products: item.products.map((p) => ({
                 ...p,
-                deliveryDate: convertToIST(p.deliveryDate),
             })),
             files: item.files.map((f) => ({
                 ...f,
@@ -1625,6 +1630,21 @@ const getIronWorkOrderById = asyncHandler(async (req, res) => {
         const [time, period] = timePart.split(' ');
         return `${day}-${month}-${year} ${time} ${period}`;
     };
+
+    // Format date only (DD-MM-YYYY)
+    const formatDateOnly = (date) => {
+        if (!date) return null;
+        const istDate = new Date(date).toLocaleDateString('en-IN', {
+            timeZone: 'Asia/Kolkata',
+            day: '2-digit',
+            month: '2-digit',
+            year: 'numeric',
+        });
+        // Convert to desired format: DD-MM-YYYY
+        const [day, month, year] = istDate.split('/');
+        return `${day}-${month}-${year}`;
+    };
+
     workOrder.products.map((product) => console.log("product", product))
 
     // 6. Structure response to match desired format
@@ -1649,6 +1669,8 @@ const getIronWorkOrderById = asyncHandler(async (req, res) => {
             created_at: formatDateToIST(workOrder.createdAt),
             created_by: workOrder.created_by?.username || 'Unknown',
             date: formatDateToIST(workOrder.workOrderDate),
+            delivery_date: formatDateOnly(workOrder.deliveryDate),
+            globalMemberDetails: workOrder.globalMemberDetails || '',
             status: workOrder.status,
         },
         products: workOrder.products.map((product) => ({
@@ -1663,10 +1685,10 @@ const getIronWorkOrderById = asyncHandler(async (req, res) => {
             uom: product.uom,
             quantity: product.quantity,
             memberDetails: product.memberDetails || '',
-            deliveryDate: formatDateToIST(product.deliveryDate),
             memberQuantity: product.memberQuantity,
             diameter: product.diameter || null,
             weight: product.weight || '',
+            cuttingLength: product.cuttingLength || null,
             dimensions: product.dimensions || [],
             _id: product._id,
         })),
@@ -2060,9 +2082,7 @@ const updateIronWorkOrder = asyncHandler(async (req, res) => {
         memberQuantity: Number(product.memberQuantity),
         diameter: Number(product.diameter),
         weight: String(product.weight),
-        deliveryDate: product.deliveryDate
-            ? moment(product.deliveryDate, ['DD-MM-YYYY', 'YYYY-MM-DD']).toDate()
-            : null,
+        cuttingLength: product.cuttingLength ? Number(product.cuttingLength) : null,
         dimensions: product.dimensions || [],
         ...(product._id && mongoose.Types.ObjectId.isValid(product._id) ? { _id: product._id } : {}),
     }));
@@ -2070,6 +2090,11 @@ const updateIronWorkOrder = asyncHandler(async (req, res) => {
     // Normalize workOrderDate
     const normalizedWorkOrderDate = bodyData.workOrderDate
         ? moment(bodyData.workOrderDate, ['DD-MM-YYYY', 'YYYY-MM-DD']).toDate()
+        : null;
+
+    // Normalize deliveryDate
+    const normalizedDeliveryDate = bodyData.deliveryDate
+        ? moment(bodyData.deliveryDate, ['DD-MM-YYYY', 'YYYY-MM-DD']).toDate()
         : null;
 
     // Validate normalized products with Joi
@@ -2087,16 +2112,13 @@ const updateIronWorkOrder = asyncHandler(async (req, res) => {
             'number.base': 'Quantity must be a number',
             'number.min': 'Quantity must be non-negative',
         }),
-        deliveryDate: Joi.date().optional().allow(null).messages({
-            'date.base': 'Delivery date must be a valid date',
-        }),
         barMark: Joi.string().optional().allow(''),
         memberDetails: Joi.string().optional().allow(''),
         memberQuantity: Joi.number().min(0).required().messages({
             'number.base': 'Member quantity must be a number',
             'number.min': 'Member quantity must be non-negative',
         }),
-        diameter: Joi.number().min(0).required().messages({
+        diameter: Joi.number().min(0).required().messages({ 
             'number.base': 'Diameter must be a number',
             'number.min': 'Diameter must be non-negative',
         }),
@@ -2107,6 +2129,7 @@ const updateIronWorkOrder = asyncHandler(async (req, res) => {
             }
             return value;
         }, 'Weight validation'),
+        cuttingLength: Joi.number().min(0).optional().allow(null),
         dimensions: Joi.array()
             .items(
                 Joi.object({
@@ -2142,6 +2165,8 @@ const updateIronWorkOrder = asyncHandler(async (req, res) => {
             }, 'ObjectId validation'),
         workOrderNumber: Joi.string().required().messages({ 'string.empty': 'Work order number is required' }),
         workOrderDate: Joi.date().required().messages({ 'date.base': 'Work order date must be a valid date' }),
+        deliveryDate: Joi.date().optional().allow(null).messages({ 'date.base': 'Delivery date must be a valid date' }),
+        globalMemberDetails: Joi.string().optional().allow(''),
         products: Joi.array().items(productSchema).min(1).required().messages({
             'array.min': 'At least one product is required',
         }),
@@ -2174,6 +2199,7 @@ const updateIronWorkOrder = asyncHandler(async (req, res) => {
             ...bodyData,
             products: normalizedProducts,
             workOrderDate: normalizedWorkOrderDate,
+            deliveryDate: normalizedDeliveryDate,
             updated_by: userId,
         },
         { abortEarly: false }
@@ -2357,6 +2383,7 @@ const updateIronWorkOrder = asyncHandler(async (req, res) => {
         ...bodyData,
         products: normalizedProducts,
         workOrderDate: normalizedWorkOrderDate || existingWorkOrder.workOrderDate,
+        deliveryDate: normalizedDeliveryDate || existingWorkOrder.deliveryDate,
         updated_by: userId,
         ...(files.length > 0 && { files }),
     };
