@@ -12,12 +12,13 @@ const ProductSchema = new mongoose.Schema({
     shapeId: { type: mongoose.Schema.Types.ObjectId, ref: 'ironShape', required: true },
     uom: { type: String, required: true },
     quantity: { type: Number, required: true, min: 0 },
-    deliveryDate: { type: Date },
     barMark: { type: String },
     memberDetails: { type: String },
     memberQuantity: { type: Number },
     diameter: { type: Number },
+    type: { type: String },
     weight: { type: String },
+    cuttingLength: { type: Number },
     dimensions: [DimensionSchema],
 });
 
@@ -26,6 +27,8 @@ const WorkOrderSchema = new mongoose.Schema({
     projectId: { type: mongoose.Schema.Types.ObjectId, ref: 'ironProject', required: true },
     workOrderNumber: { type: String, required: true, unique: true },
     workOrderDate: { type: Date, required: true },
+    deliveryDate: { type: Date },
+    globalMemberDetails: { type: String },
     products: [ProductSchema],
     files: [
         {
