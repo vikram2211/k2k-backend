@@ -17,16 +17,16 @@ const machineSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
-    file: {
-      file_name: {
-        type: String,
-        required: true,
-      },
-      file_url: {
-        type: String,
-        required: true,
-      },
-    },
+    // file: {
+    //   file_name: {
+    //     type: String,
+    //     required: true,
+    //   },
+    //   file_url: {
+    //     type: String,
+    //     required: true,
+    //   },
+    // },
 
    
     created_by: {

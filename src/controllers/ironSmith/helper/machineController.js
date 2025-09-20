@@ -17,7 +17,7 @@ const sendResponse = (res, response) => {
 };
 
 // Create a machine
-const createIronMachine_19_09_2025 = asyncHandler(async (req, res) => {
+const createIronMachine = asyncHandler(async (req, res) => {
     console.log("Inside iron machine creation API");
     console.log("Machine creation request:", req.body);
   
@@ -49,7 +49,7 @@ const createIronMachine_19_09_2025 = asyncHandler(async (req, res) => {
     return sendResponse(res, new ApiResponse(201, machine, 'Machine created successfully'));
   });
 
-  const createIronMachine = asyncHandler(async (req, res) => {
+  const createIronMachine_19_09_2025 = asyncHandler(async (req, res) => {
     console.log("Inside iron machine creation API");
     console.log("Machine creation request:", req.body);
   
