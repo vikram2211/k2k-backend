@@ -42,7 +42,7 @@ const createMachine_20_09_2025 = asyncHandler(async (req, res, next) => {
 });
 
 const createMachine = asyncHandler(async (req, res, next) => {
-  console.log("Machine creation request:", req.body);
+  console.log("Machine req body:", req.body);
 
   const machineSchema = Joi.object({
     plant_id: Joi.string().required().messages({ "string.empty": "Plant ID is required" }),

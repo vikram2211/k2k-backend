@@ -833,7 +833,12 @@ const createIronWorkOrder = asyncHandler(async (req, res) => {
     // 6. Validate with Joi
     const { error, value } = workOrderSchema.validate(workOrderData, { abortEarly: false });
     if (error) {
-      // No need to cleanup files since they're stored in memory, not on disk
+    //   if (req.files) {
+    //     req.files.forEach((file) => {
+    //       const tempFilePath = path.join('./public/temp', file.filename);
+    //       if (fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath);
+    //     });
+    //   }
       throw new ApiError(400, 'Validation failed for work order creation', error.details);
     }
   
@@ -884,30 +889,64 @@ const createIronWorkOrder = asyncHandler(async (req, res) => {
       }
   
       let remainingWeight = usedWeight;
-      for (const rawMaterial of rawMaterials) {
-        if (remainingWeight <= 0) break;
+    //   for (const rawMaterial of rawMaterials) {
+    //     if (remainingWeight <= 0) break;
   
+    //     const deductQty = Math.min(rawMaterial.qty, remainingWeight);
+    //     remainingWeight -= deductQty;
+  
+    //     bulkRawMaterialUpdates.push({
+    //       updateOne: {
+    //         filter: { _id: rawMaterial._id, isDeleted: false },
+    //         update: {
+    //           $inc: { qty: -deductQty },
+    //           $push: {
+    //             consumptionHistory: {
+    //               workOrderId,
+    //               workOrderNumber: value.workOrderNumber,
+    //               quantity: deductQty,
+    //               timestamp: new Date(),
+    //             },
+    //           },
+    //         },
+    //       },
+    //     });
+    //   }
+  
+
+
+    for (const rawMaterial of rawMaterials) {
+        if (remainingWeight <= 0) break;
+    
         const deductQty = Math.min(rawMaterial.qty, remainingWeight);
         remainingWeight -= deductQty;
-  
+    
+        // Calculate remaining qty and update convertedQty
+        const remainingQty = rawMaterial.qty - deductQty; // New line
+        const newConvertedQty = remainingQty * 1000; // New line
+    
         bulkRawMaterialUpdates.push({
-          updateOne: {
-            filter: { _id: rawMaterial._id, isDeleted: false },
-            update: {
-              $inc: { qty: -deductQty },
-              $push: {
-                consumptionHistory: {
-                  workOrderId,
-                  workOrderNumber: value.workOrderNumber,
-                  quantity: deductQty,
-                  timestamp: new Date(),
+            updateOne: {
+                filter: { _id: rawMaterial._id, isDeleted: false },
+                update: {
+                    $inc: { qty: -deductQty },
+                    $set: { convertedQty: newConvertedQty }, // New line
+                    $push: {
+                        consumptionHistory: {
+                            workOrderId,
+                            workOrderNumber: value.workOrderNumber,
+                            quantity: deductQty,
+                            timestamp: new Date(),
+                        },
+                    },
                 },
-              },
             },
-          },
         });
-      }
-  
+    }
+
+
+
+
       if (remainingWeight > 0) {
         throw new ApiError(
           400,

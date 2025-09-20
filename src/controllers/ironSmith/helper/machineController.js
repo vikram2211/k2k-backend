@@ -17,7 +17,7 @@ const sendResponse = (res, response) => {
 };
 
 // Create a machine
-const createIronMachine = asyncHandler(async (req, res) => {
+const createIronMachine_19_09_2025 = asyncHandler(async (req, res) => {
     console.log("Inside iron machine creation API");
     console.log("Machine creation request:", req.body);
   
@@ -47,6 +47,71 @@ const createIronMachine = asyncHandler(async (req, res) => {
   
     // Send response
     return sendResponse(res, new ApiResponse(201, machine, 'Machine created successfully'));
+  });
+
+  const createIronMachine = asyncHandler(async (req, res) => {
+    console.log("Inside iron machine creation API");
+    console.log("Machine creation request:", req.body);
+  
+    // ✅ Validation schema for machine fields
+    const machineSchema = Joi.object({
+      name: Joi.string().required().messages({ "string.empty": "Name is required" }),
+      role: Joi.string().required().messages({ "string.empty": "Role is required" }),
+    });
+  
+    // Validate request body
+    const { error, value } = machineSchema.validate(req.body, { abortEarly: false });
+    if (error) {
+      throw new ApiError(400, "Validation failed for machine creation", error.details);
+    }
+  
+    const { name, role } = value;
+    const created_by = req.user?._id;
+  
+    // Validate created_by
+    if (!created_by || !mongoose.Types.ObjectId.isValid(created_by)) {
+      throw new ApiError(400, "Invalid or missing user ID in request");
+    }
+  
+    // ✅ Handle file upload to S3
+    let fileData = null;
+    if (req.files && req.files.length > 0) {
+      const uploadedFiles = [];
+      for (const file of req.files) {
+        try {
+          // Key format: machines/<timestamp>-filename.pdf|jpg|png
+          const s3Key = `machines/${Date.now()}-${sanitizeFilename(file.originalname)}`;
+          const { url } = await putObject(
+            { data: file.buffer, mimetype: file.mimetype },
+            s3Key
+          );
+  
+          uploadedFiles.push({
+            file_name: file.originalname,
+            file_url: url,
+          });
+        } catch (err) {
+          throw new ApiError(500, `Failed to upload machine file: ${err.message}`);
+        }
+      }
+  
+      // Use only first file for now
+      fileData = uploadedFiles[0];
+    } else {
+      throw new ApiError(400, "Machine file (pdf/image) is required");
+    }
+  
+    // ✅ Create machine record
+    const machine = await ironMachine.create({
+      name,
+      role,
+      created_by,
+      isDeleted: false,
+      file: fileData,
+    });
+  
+    // ✅ Send response
+    return sendResponse(res, new ApiResponse(201, machine, "Machine created successfully"));
   });
 
 // Update a machine

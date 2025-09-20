@@ -104,7 +104,7 @@ const getIronDimensionBasedOnShape = async (req, res, next) => {
   };
   
 
-const getDimensions = async (req, res) => {
+const getDimensions_19_09_2025 = async (req, res) => {
     try {
         const dimensions = await ironDimension.find({}, '_id dimension_name').lean();
 
@@ -136,6 +136,43 @@ const getDimensions = async (req, res) => {
         });
     }
 };
+
+
+const getDimensions = async (req, res) => {
+  try {
+      const dimensions = await ironDimension
+          .find({}, '_id dimension_name')
+          .sort({ dimension_name: 1 })  // ascending order
+          .lean();
+
+      return res.status(200).json({
+          status: 'success',
+          data: dimensions,
+      });
+  } catch (error) {
+      if (error.name === 'ValidationError') {
+          const formattedErrors = Object.values(error.errors).map(err => ({
+              field: err.path,
+              message: err.message,
+          }));
+          return res.status(400).json({ success: false, errors: formattedErrors });
+      }
+
+      if (error.name === 'CastError') {
+          return res.status(400).json({
+              success: false,
+              message: `Invalid ${error.path}: ${error.value}`,
+          });
+      }
+
+      console.error("Error fetching dimensions:", error.message);
+      res.status(500).json({
+          success: false,
+          message: "Internal server error"
+      });
+  }
+};
+
 
 const getWorkOrderProductByJobOrder_17_09_2025 = async (req, res) => {
   try {
