@@ -6,7 +6,7 @@ import { Machine } from "../../../models/konkreteKlinkers/helpers/machine.model.
 import Joi from "joi";
 
 // Create a new machine
-const createMachine = asyncHandler(async (req, res, next) => {
+const createMachine_20_09_2025 = asyncHandler(async (req, res, next) => {
   console.log("Machine creation request:", req.body);
 
   // Joi validation schema
@@ -40,6 +40,38 @@ const createMachine = asyncHandler(async (req, res, next) => {
 
   return res.status(201).json(new ApiResponse(201, machine, "Machine created successfully"));
 });
+
+const createMachine = asyncHandler(async (req, res, next) => {
+  console.log("Machine creation request:", req.body);
+
+  const machineSchema = Joi.object({
+    plant_id: Joi.string().required().messages({ "string.empty": "Plant ID is required" }),
+    name: Joi.string().required().messages({ "string.empty": "Machine name is required" }),
+  });
+
+  const { error, value } = machineSchema.validate(req.body, { abortEarly: false });
+  if (error) {
+    return next(new ApiError(400, "Validation failed for machine creation", error.details));
+  }
+
+  const { plant_id, name } = value;
+  const created_by = req.user._id;
+
+  if (!mongoose.Types.ObjectId.isValid(plant_id)) {
+    return next(new ApiError(400, `Provided Plant ID (${plant_id}) is not a valid ObjectId`));
+  }
+
+  // Create the machine
+  const machine = await Machine.create({ plant_id, name, created_by });
+
+  // Populate the plant_id field before sending the response
+  const populatedMachine = await Machine.findById(machine._id)
+    .populate("plant_id", "plant_name")
+    .populate("created_by", "username email");
+
+  return res.status(201).json(new ApiResponse(201, populatedMachine, "Machine created successfully"));
+});
+
 
 // Update a machine
 const updateMachine = asyncHandler(async (req, res, next) => {
