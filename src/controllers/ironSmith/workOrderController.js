@@ -707,8 +707,10 @@ const createIronWorkOrder = asyncHandler(async (req, res) => {
       diameter: Joi.number().min(0).required().messages({
         'number.base': 'Diameter must be a number',
       }),
-      type: Joi.string().required().messages({
-        'string.empty': 'Type is required',
+      type: Joi.string().optional().allow(''),
+      cuttingLength: Joi.number().min(0).optional().allow(null).messages({
+        'number.base': 'Cutting length must be a number',
+        'number.min': 'Cutting length must be non-negative',
       }),
       weight: Joi.string().required().custom((value, helpers) => {
         const numValue = parseFloat(value);
@@ -739,6 +741,8 @@ const createIronWorkOrder = asyncHandler(async (req, res) => {
         }, 'ObjectId validation'),
       workOrderNumber: Joi.string().required().messages({ 'string.empty': 'Work order number is required' }),
       workOrderDate: Joi.date().required().messages({ 'date.base': 'Work order date must be a valid date' }),
+      deliveryDate: Joi.date().optional().allow(null).messages({ 'date.base': 'Delivery date must be a valid date' }),
+      globalMemberDetails: Joi.string().optional().allow(''),
       products: Joi.array().items(productSchema).min(1).required().messages({
         'array.min': 'At least one product is required',
       }),
@@ -801,6 +805,7 @@ const createIronWorkOrder = asyncHandler(async (req, res) => {
           });
         }
       } catch (error) {
+        // No need to cleanup files since they're stored in memory, not on disk
         throw new ApiError(500, `File upload failed: ${error.message}`);
       }
     } else if (bodyData.files && Array.isArray(bodyData.files)) {
@@ -828,12 +833,7 @@ const createIronWorkOrder = asyncHandler(async (req, res) => {
     // 6. Validate with Joi
     const { error, value } = workOrderSchema.validate(workOrderData, { abortEarly: false });
     if (error) {
-      if (req.files) {
-        req.files.forEach((file) => {
-          const tempFilePath = path.join('./public/temp', file.filename);
-          if (fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath);
-        });
-      }
+      // No need to cleanup files since they're stored in memory, not on disk
       throw new ApiError(400, 'Validation failed for work order creation', error.details);
     }
   

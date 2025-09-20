@@ -16,6 +16,7 @@ const ProductSchema = new mongoose.Schema({
     memberDetails: { type: String },
     memberQuantity: { type: Number },
     diameter: { type: Number },
+    type: { type: String },
     weight: { type: String },
     cuttingLength: { type: Number },
     dimensions: [DimensionSchema],
