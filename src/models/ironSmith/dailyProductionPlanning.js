@@ -12,6 +12,11 @@ const ironDailyProductionSchema = new mongoose.Schema(
       ref: 'ironJobOrder',
       required: true,
     },
+    color: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Color',
+      required: true,
+    },
     products: [
       {
         shape_id: {
@@ -24,6 +29,11 @@ const ironDailyProductionSchema = new mongoose.Schema(
           ref: 'ironJobOrder.products', // Reference to the products array _id in ironJobOrder
           required: true,
         },
+        // color: {
+        //   type: mongoose.Schema.Types.ObjectId,
+        //   ref: 'Color',
+        //   required: true,
+        // },
         planned_quantity: {
           type: Number,
           required: true,

@@ -381,7 +381,7 @@ const addRawMaterial = asyncHandler(async (req, res) => {
   });
 
 // Update raw material data
-const updateRawMaterial = asyncHandler(async (req, res) => {
+const updateRawMaterial_22_09_2025 = asyncHandler(async (req, res) => {
     const { id } = req.params;
     const {  qty } = req.body; //diameter,
 
@@ -420,8 +420,101 @@ const updateRawMaterial = asyncHandler(async (req, res) => {
     return sendResponse(res, new ApiResponse(200, rawMaterial, 'Raw material data updated successfully'));
 });
 
+const updateRawMaterial = asyncHandler(async (req, res) => {
+    const { id } = req.params; // RawMaterial ID
+    const { qty, type } = req.body;
+
+    // Validation schema
+    const rawMaterialSchema = Joi.object({
+        qty: Joi.number().required().positive().messages({
+            'number.base': 'Quantity must be a number',
+            'number.positive': 'Quantity must be positive',
+            'any.required': 'Quantity is required',
+        }),
+        type: Joi.string().optional(), // Type is optional unless you allow changing it
+    });
+
+    // Validate request body
+    const { error, value } = rawMaterialSchema.validate({ qty, type }, { abortEarly: false });
+    if (error) {
+        throw new ApiError(400, 'Validation failed for raw material update', error.details);
+    }
+
+    // Validate rawMaterialId
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+        throw new ApiError(400, `Provided Raw Material ID (${id}) is not a valid ObjectId`);
+    }
+
+    // Start a MongoDB session for transaction
+    const session = await mongoose.startSession();
+    session.startTransaction();
+
+    try {
+        // Find the existing RawMaterial
+        const rawMaterial = await RawMaterial.findOne({ _id: id, isDeleted: false }, null, { session });
+        if (!rawMaterial) {
+            throw new ApiError(404, 'No non-deleted raw material found with the given ID');
+        }
+
+        // Find the corresponding Diameter record
+        const diameterRecord = await Diameter.findOne(
+            {
+                project: rawMaterial.project,
+                value: rawMaterial.diameter,
+                type: value.type || rawMaterial.type, // Use provided type or existing type
+                isDeleted: false,
+            },
+            null,
+            { session }
+        );
+        if (!diameterRecord) {
+            throw new ApiError(404, `Diameter ${rawMaterial.diameter} mm with type ${value.type || rawMaterial.type} not found for this project`);
+        }
+
+        // Calculate convertedQty
+        const convertedQty = value.qty * 1000;
+
+        // Update RawMaterial
+        const updatedRawMaterial = await RawMaterial.findOneAndUpdate(
+            { _id: id, isDeleted: false },
+            { qty: value.qty, convertedQty, type: value.type || rawMaterial.type },
+            { new: true, session }
+        );
+
+        // Update Diameter's added array
+        // Strategy: Remove the previous added entry (if it exists) and push a new one
+        const previousAddedEntry = diameterRecord.added.find(
+            (entry) => entry.timestamp.toISOString() === rawMaterial.createdAt.toISOString()
+        );
+        if (previousAddedEntry) {
+            await Diameter.updateOne(
+                { _id: diameterRecord._id },
+                { $pull: { added: { timestamp: rawMaterial.createdAt } } },
+                { session }
+            );
+        }
+
+        await Diameter.updateOne(
+            { _id: diameterRecord._id },
+            { $push: { added: { quantity: value.qty, timestamp: new Date() } } },
+            { session }
+        );
+
+        // Commit the transaction
+        await session.commitTransaction();
+        session.endSession();
+
+        return res.status(200).json(new ApiResponse(200, updatedRawMaterial, 'Raw material and diameter data updated successfully'));
+    } catch (error) {
+        // Rollback the transaction on error
+        await session.abortTransaction();
+        session.endSession();
+        throw error instanceof ApiError ? error : new ApiError(500, 'Failed to update raw material and diameter data');
+    }
+});
+
 // Delete raw material data
-const deleteRawMaterial = asyncHandler(async (req, res) => {
+const deleteRawMaterial_22_09_2025 = asyncHandler(async (req, res) => {
     const { id } = req.params;
 
     if (!mongoose.Types.ObjectId.isValid(id)) {
@@ -438,6 +531,83 @@ const deleteRawMaterial = asyncHandler(async (req, res) => {
     }
 
     return sendResponse(res, new ApiResponse(200, null, 'Raw material data marked as deleted successfully'));
+});
+
+
+
+const deleteRawMaterial = asyncHandler(async (req, res) => {
+    const  rawMaterialId  = req.params.id;
+    console.log("rawMaterialId",rawMaterialId);
+
+    // Validation schema
+    const schema = Joi.object({
+        rawMaterialId: Joi.string().required().custom((value, helpers) => {
+            if (!mongoose.Types.ObjectId.isValid(value)) {
+                return helpers.error('any.invalid');
+            }
+            return value;
+        }),
+    });
+
+    const { error } = schema.validate({ rawMaterialId });
+    if (error) {
+        throw new ApiError(400, error.details[0].message);
+    }
+
+    // Start a MongoDB session for transaction
+    const session = await mongoose.startSession();
+    session.startTransaction();
+
+    try {
+        // Find the RawMaterial record
+        const rawMaterial = await RawMaterial.findOne(
+            { _id: rawMaterialId, isDeleted: false },
+            null,
+            { session }
+        );
+        if (!rawMaterial) {
+            throw new ApiError(404, 'Raw material not found or already deleted');
+        }
+
+        // Find the corresponding Diameter record
+        const diameterRecord = await Diameter.findOne(
+            {
+                project: rawMaterial.project,
+                value: rawMaterial.diameter,
+                type: rawMaterial.type,
+                isDeleted: false,
+            },
+            null,
+            { session }
+        );
+        if (!diameterRecord) {
+            throw new ApiError(404, `Diameter ${rawMaterial.diameter} mm with type ${rawMaterial.type} not found for this project`);
+        }
+
+        // Update RawMaterial: set qty and convertedQty to 0, mark as deleted
+        rawMaterial.qty = 0;
+        rawMaterial.convertedQty = 0;
+        rawMaterial.isDeleted = true;
+        await rawMaterial.save({ session });
+
+        // Remove the corresponding entry from Diameter's added array
+        await Diameter.updateOne(
+            { _id: diameterRecord._id },
+            { $pull: { added: { timestamp: rawMaterial.createdAt } } },
+            { session }
+        );
+
+        // Commit the transaction
+        await session.commitTransaction();
+        session.endSession();
+
+        return res.status(200).json(new ApiResponse(200, null, 'Raw material marked as deleted successfully'));
+    } catch (error) {
+        // Rollback the transaction on error
+        await session.abortTransaction();
+        session.endSession();
+        throw error instanceof ApiError ? error : new ApiError(500, 'Failed to delete raw material');
+    }
 });
 
 const getRawMaterialsByProjectId = asyncHandler(async (req, res) => {
@@ -845,7 +1015,7 @@ const addDiameter_18_09_2025 = asyncHandler(async (req, res) => {
 });
 
 
-const deleteDiameter = asyncHandler(async (req, res) => {
+const deleteDiameter_22_09_2025 = asyncHandler(async (req, res) => {
     const { projectId, value } = req.body;
 
     const schema = Joi.object({
@@ -872,6 +1042,65 @@ const deleteDiameter = asyncHandler(async (req, res) => {
     await existingDiameter.save();
 
     return res.status(200).json(new ApiResponse(200, null, 'Diameter marked as deleted successfully'));
+});
+
+const deleteDiameter = asyncHandler(async (req, res) => {
+    const { projectId, value, type } = req.body;
+
+    // Validate input
+    const schema = Joi.object({
+        projectId: Joi.string().required().custom((value, helpers) => {
+            if (!mongoose.Types.ObjectId.isValid(value)) {
+                return helpers.error('any.invalid');
+            }
+            return value;
+        }),
+        value: Joi.number().required().positive(),
+        type: Joi.string().required(), // Add type to validation
+    });
+
+    const { error } = schema.validate({ projectId, value, type });
+    if (error) {
+        throw new ApiError(400, error.details[0].message);
+    }
+
+    // Start a MongoDB session for transaction
+    const session = await mongoose.startSession();
+    session.startTransaction();
+
+    try {
+        // Find the Diameter record
+        const existingDiameter = await Diameter.findOne(
+            { project: projectId, value, type, isDeleted: false },
+            null,
+            { session }
+        );
+        if (!existingDiameter) {
+            throw new ApiError(404, `Diameter ${value} mm with type ${type} not found for this project`);
+        }
+
+        // Mark the Diameter as deleted
+        existingDiameter.isDeleted = true;
+        await existingDiameter.save({ session });
+
+        // Mark related RawMaterial records as deleted
+        await RawMaterial.updateMany(
+            { project: projectId, diameter: value, type, isDeleted: false },
+            { $set: { isDeleted: true } },
+            { session }
+        );
+
+        // Commit the transaction
+        await session.commitTransaction();
+        session.endSession();
+
+        return res.status(200).json(new ApiResponse(200, null, 'Diameter and related raw materials marked as deleted successfully'));
+    } catch (error) {
+        // Rollback the transaction on error
+        await session.abortTransaction();
+        session.endSession();
+        throw error instanceof ApiError ? error : new ApiError(500, 'Failed to delete diameter and related raw materials');
+    }
 });
 
   

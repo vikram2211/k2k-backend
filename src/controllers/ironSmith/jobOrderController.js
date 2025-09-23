@@ -12,6 +12,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { ironWorkOrder } from '../../models/ironSmith/workOrder.model.js';
 import { ironShape } from '../../models/ironSmith/helpers/ironShape.model.js';
 import { ironDailyProduction } from '../../models/ironSmith/dailyProductionPlanning.js';
+import {Color} from '../../models/color.model.js'
 
 
 const createIronJobOrder_24_07_2025 = asyncHandler(async (req, res) => {
@@ -498,23 +499,24 @@ const createIronJobOrder = asyncHandler(async (req, res) => {
       'number.base': 'Planned quantity must be a number',
       'number.min': 'Planned quantity must be non-negative',
     }),
-    schedule_date: Joi.date().required().messages({
-      'date.base': 'Schedule date must be a valid date',
-    }),
+    // schedule_date: Joi.date().required().messages({
+    //   'date.base': 'Schedule date must be a valid date',
+    // }),
     dia: Joi.number().min(0).required().messages({
       'number.base': 'Diameter must be a number',
       'number.min': 'Diameter must be non-negative',
     }),
     selected_machines: Joi.array()
-      .items(
-        Joi.string().custom((value, helpers) => {
-          if (!mongoose.Types.ObjectId.isValid(value)) {
-            return helpers.error('any.invalid', { message: `Machine ID (${value}) is not a valid ObjectId` });
-          }
-          return value;
-        }, 'ObjectId validation')
-      )
-      .optional(),
+        .items(
+            Joi.string().custom((value, helpers) => {
+                if (!mongoose.Types.ObjectId.isValid(value)) {
+                    return helpers.error('any.invalid', { message: `Machine ID (${value}) is not a valid ObjectId` });
+                }
+                return value;
+            }, 'ObjectId validation')
+        )
+        .optional()
+        .default([]),
   });
 
   const jobOrderSchema = Joi.object({
@@ -535,6 +537,9 @@ const createIronJobOrder = asyncHandler(async (req, res) => {
         'date.base': 'End date must be a valid date',
       }),
     }).required(),
+    color: Joi.string().required().messages({
+      'string.empty': 'Color is required',
+  }),
     products: Joi.array().items(productSchema).min(1).required().messages({
       'array.min': 'At least one product is required',
     }),
@@ -578,39 +583,81 @@ const createIronJobOrder = asyncHandler(async (req, res) => {
   const jobOrderNumber = `JO-${String(counter.sequence_value).padStart(3, '0')}`;
 
   // 6. Generate QR codes and upload to S3 for each product
+  // const productsWithQr = await Promise.all(
+  //   value.products.map(async (product) => {
+  //     const qrCodeId = `${jobOrderNumber}-${uuidv4()}`;
+  //     const qrContent = `joborder/${jobOrderNumber}/product/${qrCodeId}`;
+  //     let qrCodeBuffer;
+  //     try {
+  //       qrCodeBuffer = await QRCode.toBuffer(qrContent, {
+  //         type: 'png',
+  //         errorCorrectionLevel: 'H',
+  //         margin: 1,
+  //         width: 200,
+  //       });
+  //     } catch (error) {
+  //       throw new ApiError(500, `Failed to generate QR code for ${qrCodeId}: ${error.message}`);
+  //     }
+  //     const fileName = `qr-codes/${qrCodeId}-${Date.now()}.png`;
+  //     const file = { data: qrCodeBuffer, mimetype: 'image/png' };
+  //     let qrCodeUrl;
+  //     try {
+  //       const { url } = await putObject(file, fileName);
+  //       qrCodeUrl = url;
+  //     } catch (error) {
+  //       throw new ApiError(500, `Failed to upload QR code to S3 for ${qrCodeId}: ${error.message}`);
+  //     }
+  //     return {
+  //       ...product,
+  //       qr_code_id: qrCodeId,
+  //       qr_code_url: qrCodeUrl,
+  //       schedule_date: product.schedule_date ? new Date(product.schedule_date) : undefined,
+  //       selected_machines: product.selected_machines || [],
+  //     };
+  //   })
+  // );
+
+
+
+
   const productsWithQr = await Promise.all(
     value.products.map(async (product) => {
-      const qrCodeId = `${jobOrderNumber}-${uuidv4()}`;
-      const qrContent = `joborder/${jobOrderNumber}/product/${qrCodeId}`;
-      let qrCodeBuffer;
-      try {
-        qrCodeBuffer = await QRCode.toBuffer(qrContent, {
-          type: 'png',
-          errorCorrectionLevel: 'H',
-          margin: 1,
-          width: 200,
-        });
-      } catch (error) {
-        throw new ApiError(500, `Failed to generate QR code for ${qrCodeId}: ${error.message}`);
-      }
-      const fileName = `qr-codes/${qrCodeId}-${Date.now()}.png`;
-      const file = { data: qrCodeBuffer, mimetype: 'image/png' };
-      let qrCodeUrl;
-      try {
-        const { url } = await putObject(file, fileName);
-        qrCodeUrl = url;
-      } catch (error) {
-        throw new ApiError(500, `Failed to upload QR code to S3 for ${qrCodeId}: ${error.message}`);
-      }
-      return {
-        ...product,
-        qr_code_id: qrCodeId,
-        qr_code_url: qrCodeUrl,
-        schedule_date: product.schedule_date ? new Date(product.schedule_date) : undefined,
-        selected_machines: product.selected_machines || [],
-      };
+        const qrCodeId = `${jobOrderNumber}-${uuidv4()}`;
+        const qrContent = `joborder/${jobOrderNumber}/product/${qrCodeId}`;
+        let qrCodeBuffer;
+        try {
+            qrCodeBuffer = await QRCode.toBuffer(qrContent, {
+                type: 'png',
+                errorCorrectionLevel: 'H',
+                margin: 1,
+                width: 200,
+            });
+        } catch (error) {
+            throw new ApiError(500, `Failed to generate QR code for ${qrCodeId}: ${error.message}`);
+        }
+        const fileName = `qr-codes/${qrCodeId}-${Date.now()}.png`;
+        const file = { data: qrCodeBuffer, mimetype: 'image/png' };
+        let qrCodeUrl;
+        try {
+            const { url } = await putObject(file, fileName);
+            qrCodeUrl = url;
+        } catch (error) {
+            throw new ApiError(500, `Failed to upload QR code to S3 for ${qrCodeId}: ${error.message}`);
+        }
+        return {
+            ...product,
+            qr_code_id: qrCodeId,
+            qr_code_url: qrCodeUrl,
+            selected_machines: product.selected_machines || [],
+        };
     })
-  );
+);
+
+
+
+
+
+
 
   // 7. Prepare job order data with created_by and updated_by
   const jobOrderData = {
@@ -620,6 +667,7 @@ const createIronJobOrder = asyncHandler(async (req, res) => {
       from: value.date_range?.from ? new Date(value.date_range.from) : undefined,
       to: value.date_range?.to ? new Date(value.date_range.to) : undefined,
     },
+    color:value.color,
     products: productsWithQr,
     created_by: userId,
     updated_by: userId,
@@ -638,14 +686,14 @@ const createIronJobOrder = asyncHandler(async (req, res) => {
   }
 
   // 9. Validate product-specific machines
-  for (const product of value.products) {
-    if (product.selected_machines && product.selected_machines.length) {
-      const productMachines = await mongoose.model('ironMachine').find({ _id: { $in: product.selected_machines } });
-      if (productMachines.length !== product.selected_machines.length) {
-        throw new ApiError(404, `One or more machines not found for shape ID: ${product.shape}`);
-      }
-    }
-  }
+  // for (const product of value.products) {
+  //   if (product.selected_machines && product.selected_machines.length) {
+  //     const productMachines = await mongoose.model('ironMachine').find({ _id: { $in: product.selected_machines } });
+  //     if (productMachines.length !== product.selected_machines.length) {
+  //       throw new ApiError(404, `One or more machines not found for shape ID: ${product.shape}`);
+  //     }
+  //   }
+  // }
 
 
 
@@ -759,30 +807,36 @@ for (const product of value.products) {
     throw new ApiError(400, 'Production is already in progress for this job order');
   }
 
+  // const dailyProductionPromises = jobOrder.products.map(async (product) => {
+  //   const s
+  
+
+
   const dailyProductionPromises = jobOrder.products.map(async (product) => {
     const schemaProduct = {
-      object_id: product._id, // Use the saved product _id
-      shape_id: product.shape,
-      planned_quantity: product.planned_quantity,
-      achieved_quantity: 0,
-      rejected_quantity: 0,
-      recycled_quantity: 0,
-      machines: product.selected_machines || [],
+        object_id: product._id,
+        shape_id: product.shape,
+        planned_quantity: product.planned_quantity,
+        achieved_quantity: 0,
+        rejected_quantity: 0,
+        recycled_quantity: 0,
+        machines: [],
     };
 
     const newProduction = new ironDailyProduction({
-      work_order: jobOrderData.work_order,
-      job_order: jobOrder._id,
-      products: [schemaProduct],
-      date: new Date(product.schedule_date),
-      submitted_by: userId,
-      created_by: userId,
-      updated_by: userId,
-      status: 'Pending',
+        work_order: jobOrderData.work_order,
+        job_order: jobOrder._id,
+        color:jobOrderData.color,
+        products: [schemaProduct],
+        // date: new Date(jobOrderData.date_range.from),
+        submitted_by: userId,
+        created_by: userId,
+        updated_by: userId,
+        status: 'Pending',
     });
 
     return newProduction.save();
-  });
+});
 
   const savedProductions = await Promise.all(dailyProductionPromises);
 
@@ -817,25 +871,47 @@ for (const product of value.products) {
   }
 
   // 13. Convert timestamps to IST
+  // const formatDateToIST = (data) => {
+  //   const convertToIST = (date) => {
+  //     if (!date) return null;
+  //     return new Date(date).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
+  //   };
+  //   return {
+  //     ...data,
+  //     date_range: {
+  //       from: convertToIST(data.date_range.from),
+  //       to: convertToIST(data.date_range.to),
+  //     },
+  //     createdAt: convertToIST(data.createdAt),
+  //     updatedAt: convertToIST(data.updatedAt),
+  //     products: data.products.map((p) => ({
+  //       ...p,
+  //       schedule_date: convertToIST(p.schedule_date),
+  //     })),
+  //   };
+  // };
+
+
+
   const formatDateToIST = (data) => {
     const convertToIST = (date) => {
-      if (!date) return null;
-      return new Date(date).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
+        if (!date) return null;
+        return new Date(date).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
     };
     return {
-      ...data,
-      date_range: {
-        from: convertToIST(data.date_range.from),
-        to: convertToIST(data.date_range.to),
-      },
-      createdAt: convertToIST(data.createdAt),
-      updatedAt: convertToIST(data.updatedAt),
-      products: data.products.map((p) => ({
-        ...p,
-        schedule_date: convertToIST(p.schedule_date),
-      })),
+        ...data,
+        date_range: {
+            from: convertToIST(data.date_range.from),
+            to: convertToIST(data.date_range.to),
+        },
+        createdAt: convertToIST(data.createdAt),
+        updatedAt: convertToIST(data.updatedAt),
+        products: data.products,
     };
-  };
+};
+
+
+
 
   const formattedJobOrder = formatDateToIST(populatedJobOrder);
 
@@ -2775,6 +2851,7 @@ const getJobOrderById1 = asyncHandler(async (req, res) => {
 
   // 1. Validate job order ID
   if (!mongoose.Types.ObjectId.isValid(id)) {
+    console.log("inside get by id");
     throw new ApiError(400, `Invalid job order ID: ${id}`);
   }
 
@@ -2993,6 +3070,7 @@ const getJobOrderById_07_08_2025 = asyncHandler(async (req, res) => {
 
 const getJobOrderById = asyncHandler(async (req, res) => {
   const { id } = req.params;
+  console.log("id",id);
 
   // 1. Validate job order ID
   if (!mongoose.Types.ObjectId.isValid(id)) {
@@ -3196,6 +3274,7 @@ const workOrderData = asyncHandler(async (req, res) => {
       .populate('clientId', 'name address') // Populate client details
       .populate('projectId', 'name address client') // Populate project details, including client reference
       .lean();
+      console.log("workOrder",workOrder)
 
     if (!workOrder) {
       return res.status(404).json(new ApiResponse(404, null, 'Work order not found'));
@@ -3282,6 +3361,7 @@ const workOrderData = asyncHandler(async (req, res) => {
       workOrderId: workOrder._id,
       workOrderNumber: workOrder.workOrderNumber,
       workOrderDate: workOrder.workOrderDate,
+      workOrderDeliveryDate: workOrder.deliveryDate,
       client: workOrder.clientId,
       project: workOrder.projectId,
       products: enrichedProducts,
@@ -3296,4 +3376,17 @@ const workOrderData = asyncHandler(async (req, res) => {
   }
 });
 
-export { createIronJobOrder, getAllIronJobOrders, updateIronJobOrder, getProductDetailsByQrCode, getJobOrderById, deleteIronJobOrder, workOrderData };
+
+
+
+
+const getAllColors = asyncHandler(async (req, res) => {
+  console.log("inside color route");
+  const colors = await Color.find().select('name code');
+  return res.status(200).json(new ApiResponse(200, colors, 'Colors fetched successfully'));
+
+});
+
+
+
+export { createIronJobOrder, getAllIronJobOrders, updateIronJobOrder, getProductDetailsByQrCode, getJobOrderById, deleteIronJobOrder, workOrderData,getAllColors };

@@ -34,6 +34,12 @@ const ironJobOrderSchema = new mongoose.Schema(
         },
       },
     },
+
+    color: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Color',
+      required: [true, 'Color is required'],
+    },
     products: [
       {
         shape: {
@@ -46,15 +52,20 @@ const ironJobOrderSchema = new mongoose.Schema(
           required: [true, 'Planned quantity is required'],
           min: [0, 'Planned quantity must be non-negative'],
         },
-        schedule_date: {
-          type: Date,
-          required: [true, 'Schedule date is required'],
-        },
+        // schedule_date: {
+        //   type: Date,
+        //   required: [true, 'Schedule date is required'],
+        // },
         dia: {
           type: Number,
           required: [true, 'Diameter is required'],
           min: [0, 'Diameter must be non-negative'],
         },
+        // color: {
+        //   type: mongoose.Schema.Types.ObjectId,
+        //   ref: 'Color',
+        //   required: [true, 'Color is required'],
+        // },
         achieved_quantity: {
           type: Number,
           default: 0,

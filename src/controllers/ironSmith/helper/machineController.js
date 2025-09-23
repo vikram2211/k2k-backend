@@ -3,6 +3,7 @@ import { asyncHandler } from '../../../utils/asyncHandler.js';
 import { ApiError } from '../../../utils/ApiError.js';
 import { ApiResponse } from '../../../utils/ApiResponse.js';
 import { ironMachine } from '../../../models/ironSmith/helpers/ironMachine.model.js';
+import {putObject} from '../../../../util/putObject.js';
 import Joi from 'joi';
 import { formatDateToIST } from '../../../utils/formatDate.js';
 
@@ -17,7 +18,7 @@ const sendResponse = (res, response) => {
 };
 
 // Create a machine
-const createIronMachine = asyncHandler(async (req, res) => {
+const createIronMachine_19_09_2025 = asyncHandler(async (req, res) => {
     console.log("Inside iron machine creation API");
     console.log("Machine creation request:", req.body);
   
@@ -48,8 +49,11 @@ const createIronMachine = asyncHandler(async (req, res) => {
     // Send response
     return sendResponse(res, new ApiResponse(201, machine, 'Machine created successfully'));
   });
+  const sanitizeFilename = (filename) => {
+    return filename.replace(/[^a-zA-Z0-9.-]/g, '_');
+  };
 
-  const createIronMachine_19_09_2025 = asyncHandler(async (req, res) => {
+  const createIronMachine = asyncHandler(async (req, res) => {
     console.log("Inside iron machine creation API");
     console.log("Machine creation request:", req.body);
   
@@ -115,7 +119,7 @@ const createIronMachine = asyncHandler(async (req, res) => {
   });
 
 // Update a machine
-const updateIronMachine = asyncHandler(async (req, res) => {
+const updateIronMachine_22_09_2025 = asyncHandler(async (req, res) => {
   // Validation schema
   const machineSchema = Joi.object({
     name: Joi.string().optional().allow('').messages({ 'string.empty': 'Name cannot be empty' }),
@@ -166,6 +170,77 @@ const updateIronMachine = asyncHandler(async (req, res) => {
   // Send response
   return sendResponse(res, new ApiResponse(200, machine, 'Machine updated successfully'));
 });
+
+
+
+
+const updateIronMachine = asyncHandler(async (req, res) => {
+  const { id: machineId } = req.params;
+
+  // Validate machineId
+  if (!mongoose.Types.ObjectId.isValid(machineId)) {
+      throw new ApiError(400, `Provided Machine ID (${machineId}) is not a valid ObjectId`);
+  }
+
+  // Prepare update data
+  const updateData = {};
+
+  // Handle file upload to S3
+  if (req.files && req.files.length > 0) {
+      const uploadedFiles = [];
+      for (const file of req.files) {
+          try {
+              const s3Key = `machines/${Date.now()}-${sanitizeFilename(file.originalname)}`;
+              const { url } = await putObject(
+                  { data: file.buffer, mimetype: file.mimetype },
+                  s3Key
+              );
+              uploadedFiles.push({
+                  file_name: file.originalname,
+                  file_url: url,
+              });
+          } catch (err) {
+              throw new ApiError(500, `Failed to upload machine file: ${err.message}`);
+          }
+      }
+      updateData.file = uploadedFiles[0];
+  }
+
+  // Parse FormData for name and role
+  if (req.body.name) updateData.name = req.body.name;
+  if (req.body.role) updateData.role = req.body.role;
+
+  // If updateData is still empty, but a file was uploaded, force include the file
+  if (Object.keys(updateData).length === 0 && req.files && req.files.length > 0) {
+      updateData.file = {
+          file_name: req.files[0].originalname,
+          file_url: `machines/${Date.now()}-${sanitizeFilename(req.files[0].originalname)}`,
+      };
+  }
+
+  // Check if updateData is empty
+  if (Object.keys(updateData).length === 0) {
+      throw new ApiError(400, 'No valid fields provided for update');
+  }
+
+  // Update machine
+  const machine = await ironMachine.findByIdAndUpdate(machineId, updateData, { new: true })
+      .populate('created_by', 'username email')
+      .lean();
+
+  if (!machine) {
+      throw new ApiError(404, 'No machine found with the given ID');
+  }
+
+  // Send response
+  return sendResponse(res, new ApiResponse(200, machine, 'Machine updated successfully'));
+});
+
+
+
+
+
+
 
 // Fetch all machines
 const getAllIronMachines = asyncHandler(async (req, res) => {

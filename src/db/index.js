@@ -1,6 +1,7 @@
 import mongoose from 'mongoose';
 import { Admin } from '../models/admin.model.js';
 import seedAdminData from '../seeders/admin.seeder.js';
+import seedColors from '../seeders/color.seeder.js';
 import dotenv from 'dotenv';
 dotenv.config();
 
@@ -40,6 +41,9 @@ const dbConnect = async () => {
     console.log("existingAdmin",existingAdmin);
     // const existingMerchant = await Merchandiser.findOne({ userType: 'Merchandiser' });
     if (!existingAdmin)  await seedAdminData();
+    
+    // const existingColors = await mongoose.model('Color').countDocuments();
+    // if (existingColors === 0) await seedColors();
 
     console.log(`Database connected to host: ${conn.connection.host}`);
 
