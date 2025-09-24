@@ -59,11 +59,11 @@ const ironDailyProductionSchema = new mongoose.Schema(
         },
       },
     ],
-    date: {
-      type: Date,
-      required: true,
-      default: Date.now, // Production entry date
-    },
+    // date: {
+    //   type: Date,
+    //   required: true,
+    //   default: Date.now, // Production entry date
+    // },
     qc_checked_by: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User', // QC conducted by plant supervisor or operator

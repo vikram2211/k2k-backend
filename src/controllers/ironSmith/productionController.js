@@ -189,7 +189,7 @@ const getProductionData_30_07_2025 = asyncHandler(async (req, res) => {
   );
 });
 
-const getProductionData = asyncHandler(async (req, res) => {
+const getProductionData_24_09_2025 = asyncHandler(async (req, res) => {
   // Get user-provided date from query or default to current date for reference
   let userDate;
   if (req.query.date) {
@@ -330,6 +330,123 @@ const getProductionData = asyncHandler(async (req, res) => {
     }, 'Production data fetched successfully')
   );
 });
+
+const getProductionData = asyncHandler(async (req, res) => {
+  // 1. Get today's date in IST
+  const today = new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' });
+  const [todayDateStr] = today.split(',');
+  const [monthToday, dayToday, yearToday] = todayDateStr.split('/');
+  const currentDate = new Date(`${yearToday}-${monthToday.padStart(2, '0')}-${dayToday.padStart(2, '0')}T00:00:00Z`);
+
+  // 2. Fetch production records (with full population)
+  const productions = req.query.date
+    ? await ironDailyProduction
+        .find({ date: new Date(req.query.date) })
+        .populate({
+          path: 'work_order',
+          select: '_id workOrderNumber',
+          populate: [
+            {
+              path: 'clientId',
+              model: 'ironClient',
+              select: 'name -_id',
+              options: { lean: true },
+              transform: (doc) => doc.name,
+            },
+            {
+              path: 'projectId',
+              model: 'ironProject',
+              select: 'name -_id',
+              options: { lean: true },
+              transform: (doc) => doc.name,
+            },
+          ],
+        })
+        .populate({
+          path: 'job_order',
+          select: 'job_order_number date_range',
+        })
+        .populate({
+          path: 'products.shape_id',
+          select: 'shape_code name',
+        })
+        .populate({
+          path: 'products.machines',
+          select: 'name',
+        })
+        .populate({
+          path: 'submitted_by created_by updated_by qc_checked_by production_logs.user',
+          select: 'username email',
+        })
+        .lean()
+    : await ironDailyProduction
+        .find()
+        .populate({
+          path: 'work_order',
+          select: '_id workOrderNumber',
+          populate: [
+            {
+              path: 'clientId',
+              model: 'ironClient',
+              select: 'name -_id',
+              options: { lean: true },
+              transform: (doc) => doc.name,
+            },
+            {
+              path: 'projectId',
+              model: 'ironProject',
+              select: 'name -_id',
+              options: { lean: true },
+              transform: (doc) => doc.name,
+            },
+          ],
+        })
+        .populate({
+          path: 'job_order',
+          select: 'job_order_number date_range',
+        })
+        .populate({
+          path: 'products.shape_id',
+          select: 'shape_code name',
+        })
+        .populate({
+          path: 'products.machines',
+          select: 'name',
+        })
+        .populate({
+          path: 'submitted_by created_by updated_by qc_checked_by production_logs.user',
+          select: 'username email',
+        })
+        .lean();
+
+  // 3. Categorize based on Job Order's date_range
+  const categorizedProductions = {
+    pastDPR: [],
+    todayDPR: [],
+    futureDPR: [],
+  };
+  console.log("productions",productions);
+
+  productions.forEach((production) => {
+    const { date_range } = production.job_order;
+    const fromDate = new Date(date_range.from);
+    const toDate = new Date(date_range.to);
+
+    if (fromDate <= currentDate && toDate >= currentDate) {
+      categorizedProductions.todayDPR.push(production);
+    } else if (toDate < currentDate) {
+      categorizedProductions.pastDPR.push(production);
+    } else {
+      categorizedProductions.futureDPR.push(production);
+    }
+  });
+
+  // 4. Return the same response structure
+  return res.status(200).json(
+    new ApiResponse(200, categorizedProductions, 'Production data fetched successfully')
+  );
+});
+
 
 const manageIronProductionActions1 = asyncHandler(async (req, res) => {
   try {
@@ -1728,6 +1845,7 @@ const addQcCheck_06_08_2025 = asyncHandler(async (req, res) => {
     );
   }
 });
+
 const addQcCheck = asyncHandler(async (req, res) => {
   try {
     const { job_order, shape_id, object_id, rejected_quantity, remarks } = req.body;
