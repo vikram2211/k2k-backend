@@ -1944,4 +1944,51 @@ const addQcCheck = asyncHandler(async (req, res) => {
   }
 });
 
-export {getProductionData,manageIronProductionActions,updateIronProductionQuantities, addIronDowntime, getIronDowntime, getProductionLog, addQcCheck};
+const addMachineToProduction = asyncHandler(async (req, res) => {
+  try {
+    const { productionId, machineId } = req.body;
+
+    if (!productionId || !machineId) {
+      return res
+        .status(400)
+        .json({ message: "productionId and machineId are required" });
+    }
+
+    // Validate ObjectIds
+    if (
+      !mongoose.Types.ObjectId.isValid(productionId) ||
+      !mongoose.Types.ObjectId.isValid(machineId)
+    ) {
+      return res.status(400).json({ message: "Invalid ObjectId(s)" });
+    }
+
+    // Update the only product's machines array
+    const production = await ironDailyProduction.findOneAndUpdate(
+      { _id: productionId },
+      { $addToSet: { "products.0.machines": machineId } }, // directly access first (only) product
+      { new: true }
+    ).populate("products.machines");
+
+    if (!production) {
+      return res
+        .status(404)
+        .json({ message: "Production not found" });
+    }
+
+    res.status(200).json({
+      message: "Machine successfully added to production",
+      production,
+    });
+  } catch (error) {
+    console.error("Error adding machine:", error);
+    res.status(500).json({
+      message: "Internal Server Error",
+      error: error.message,
+    });
+  }
+});
+
+
+
+
+export {getProductionData,manageIronProductionActions,updateIronProductionQuantities, addIronDowntime, getIronDowntime, getProductionLog, addQcCheck, addMachineToProduction};
