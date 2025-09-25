@@ -323,7 +323,7 @@ const addRawMaterial_19_09_2025 = asyncHandler(async (req, res) => {
     return res.status(201).json(new ApiResponse(201, rawMaterial, 'Raw material added successfully'));
 });
 
-const addRawMaterial = asyncHandler(async (req, res) => {
+const addRawMaterial_23_09_2025_WORKING = asyncHandler(async (req, res) => {
     const { id, diameter, type, qty, convertedQty, date } = req.body;
   
     const schema = Joi.object({
@@ -355,6 +355,63 @@ const addRawMaterial = asyncHandler(async (req, res) => {
   
     if (!diameterRecord) {
       throw new ApiError(404, `Diameter ${diameter} mm with type ${type} not found for this project`);
+    }
+  
+    // Create the RawMaterial
+    const rawMaterial = await RawMaterial.create({
+      project: id,
+      diameter,
+      type,
+      qty,
+      convertedQty,
+      date,
+    });
+  
+    // Update the Diameter's added array
+    await Diameter.updateOne(
+      { _id: diameterRecord._id },
+      {
+        $push: {
+          added: { quantity: qty },
+        },
+      }
+    );
+  
+    return res.status(201).json(new ApiResponse(201, rawMaterial, 'Raw material added successfully'));
+  });
+
+
+  const addRawMaterial = asyncHandler(async (req, res) => {
+    const { id, diameter, type, qty, convertedQty, date } = req.body;
+  
+    const schema = Joi.object({
+      id: Joi.string().required().custom((value, helpers) => {
+        if (!mongoose.Types.ObjectId.isValid(value)) {
+          return helpers.error('any.invalid');
+        }
+        return value;
+      }),
+      diameter: Joi.number().required().positive(),
+      type: Joi.string().required(),
+      qty: Joi.number().required().positive(),
+      convertedQty: Joi.number().required().positive(),
+      date: Joi.date().required(),
+    });
+  
+    const { error } = schema.validate({ id, diameter, type, qty, convertedQty, date });
+    if (error) {
+      throw new ApiError(400, error.details[0].message);
+    }
+  
+    // Find the corresponding Diameter record (no type)
+    const diameterRecord = await Diameter.findOne({
+      project: id,
+      value: diameter,
+      isDeleted: false,
+    });
+  
+    if (!diameterRecord) {
+      throw new ApiError(404, `Diameter ${diameter} mm not found for this project`);
     }
   
     // Create the RawMaterial
@@ -420,7 +477,7 @@ const updateRawMaterial_22_09_2025 = asyncHandler(async (req, res) => {
     return sendResponse(res, new ApiResponse(200, rawMaterial, 'Raw material data updated successfully'));
 });
 
-const updateRawMaterial = asyncHandler(async (req, res) => {
+const updateRawMaterial_23_09_2025 = asyncHandler(async (req, res) => {
     const { id } = req.params; // RawMaterial ID
     const { qty, type } = req.body;
 
@@ -512,6 +569,232 @@ const updateRawMaterial = asyncHandler(async (req, res) => {
         throw error instanceof ApiError ? error : new ApiError(500, 'Failed to update raw material and diameter data');
     }
 });
+
+
+
+
+
+
+const updateRawMaterial_23_09_2025_WORKING = asyncHandler(async (req, res) => {
+    const { id } = req.params; // RawMaterial ID
+    const { qty, type, date } = req.body;
+
+    // Validation schema
+    const rawMaterialSchema = Joi.object({
+        qty: Joi.number().required().positive().messages({
+            'number.base': 'Quantity must be a number',
+            'number.positive': 'Quantity must be positive',
+            'any.required': 'Quantity is required',
+        }),
+        type: Joi.string().optional(),
+        date: Joi.date().required().messages({
+            'date.base': 'Date must be a valid date',
+            'any.required': 'Date is required',
+        }),
+    });
+
+    // Validate request body
+    const { error, value } = rawMaterialSchema.validate({ qty, type, date }, { abortEarly: false });
+    if (error) {
+        throw new ApiError(400, 'Validation failed for raw material update', error.details);
+    }
+
+    // Validate rawMaterialId
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+        throw new ApiError(400, `Provided Raw Material ID (${id}) is not a valid ObjectId`);
+    }
+
+    // Start a MongoDB session for transaction
+    const session = await mongoose.startSession();
+    session.startTransaction();
+
+    try {
+        // Find the existing RawMaterial
+        const rawMaterial = await RawMaterial.findOne({ _id: id, isDeleted: false }, null, { session });
+        if (!rawMaterial) {
+            throw new ApiError(404, 'No non-deleted raw material found with the given ID');
+        }
+
+        // Find the corresponding Diameter record
+        const diameterRecord = await Diameter.findOne(
+            {
+                project: rawMaterial.project,
+                value: rawMaterial.diameter,
+                type: value.type || rawMaterial.type,
+                isDeleted: false,
+            },
+            null,
+            { session }
+        );
+        if (!diameterRecord) {
+            throw new ApiError(404, `Diameter ${rawMaterial.diameter} mm with type ${value.type || rawMaterial.type} not found for this project`);
+        }
+
+        // Calculate convertedQty
+        const convertedQty = value.qty * 1000;
+
+        // Update RawMaterial
+        const updatedRawMaterial = await RawMaterial.findOneAndUpdate(
+            { _id: id, isDeleted: false },
+            {
+                qty: value.qty,
+                convertedQty,
+                type: value.type || rawMaterial.type,
+                date: value.date,
+            },
+            { new: true, session }
+        );
+
+        // Update Diameter's added array
+        // Strategy: Remove the previous added entry (if it exists) and push a new one
+        const previousAddedEntry = diameterRecord.added.find(
+            (entry) => entry.timestamp.toISOString() === rawMaterial.createdAt.toISOString()
+        );
+        if (previousAddedEntry) {
+            await Diameter.updateOne(
+                { _id: diameterRecord._id },
+                { $pull: { added: { timestamp: rawMaterial.createdAt } } },
+                { session }
+            );
+        }
+
+        await Diameter.updateOne(
+            { _id: diameterRecord._id },
+            { $push: { added: { quantity: value.qty, timestamp: new Date() } } },
+            { session }
+        );
+
+        // Commit the transaction
+        await session.commitTransaction();
+        session.endSession();
+
+        return res.status(200).json(new ApiResponse(200, updatedRawMaterial, 'Raw material and diameter data updated successfully'));
+    } catch (error) {
+        // Rollback the transaction on error
+        await session.abortTransaction();
+        session.endSession();
+        throw error instanceof ApiError ? error : new ApiError(500, 'Failed to update raw material and diameter data');
+    }
+});
+
+
+
+
+
+
+
+
+
+const updateRawMaterial = asyncHandler(async (req, res) => {
+    const { id } = req.params; // RawMaterial ID
+    const { qty, type, date } = req.body;
+
+    // Validation schema
+    const rawMaterialSchema = Joi.object({
+        qty: Joi.number().required().positive().messages({
+            'number.base': 'Quantity must be a number',
+            'number.positive': 'Quantity must be positive',
+            'any.required': 'Quantity is required',
+        }),
+        type: Joi.string().required().messages({ // Made required since editable
+            'any.required': 'Type is required',
+        }),
+        date: Joi.date().required().messages({
+            'date.base': 'Date must be a valid date',
+            'any.required': 'Date is required',
+        }),
+    });
+
+    // Validate request body
+    const { error, value } = rawMaterialSchema.validate({ qty, type, date }, { abortEarly: false });
+    if (error) {
+        throw new ApiError(400, 'Validation failed for raw material update', error.details);
+    }
+
+    // Validate rawMaterialId
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+        throw new ApiError(400, `Provided Raw Material ID (${id}) is not a valid ObjectId`);
+    }
+
+    // Start a MongoDB session for transaction
+    const session = await mongoose.startSession();
+    session.startTransaction();
+
+    try {
+        // Find the existing RawMaterial
+        const rawMaterial = await RawMaterial.findOne({ _id: id, isDeleted: false }, null, { session });
+        if (!rawMaterial) {
+            throw new ApiError(404, 'No non-deleted raw material found with the given ID');
+        }
+
+        // Find the corresponding Diameter record (no type)
+        const diameterRecord = await Diameter.findOne(
+            {
+                project: rawMaterial.project,
+                value: rawMaterial.diameter,
+                isDeleted: false,
+            },
+            null,
+            { session }
+        );
+        if (!diameterRecord) {
+            throw new ApiError(404, `Diameter ${rawMaterial.diameter} mm not found for this project`);
+        }
+
+        // Calculate convertedQty
+        const convertedQty = value.qty * 1000;
+
+        // Update RawMaterial
+        const updatedRawMaterial = await RawMaterial.findOneAndUpdate(
+            { _id: id, isDeleted: false },
+            {
+                qty: value.qty,
+                convertedQty,
+                type: value.type,
+                date: value.date,
+            },
+            { new: true, session }
+        );
+
+        // Update Diameter's added array
+        // Strategy: Remove the previous added entry (if it exists) and push a new one
+        const previousAddedEntry = diameterRecord.added.find(
+            (entry) => entry.timestamp.toISOString() === rawMaterial.createdAt.toISOString()
+        );
+        if (previousAddedEntry) {
+            await Diameter.updateOne(
+                { _id: diameterRecord._id },
+                { $pull: { added: { timestamp: rawMaterial.createdAt } } },
+                { session }
+            );
+        }
+
+        await Diameter.updateOne(
+            { _id: diameterRecord._id },
+            { $push: { added: { quantity: value.qty, timestamp: new Date() } } },
+            { session }
+        );
+
+        // Commit the transaction
+        await session.commitTransaction();
+        session.endSession();
+
+        return res.status(200).json(new ApiResponse(200, updatedRawMaterial, 'Raw material and diameter data updated successfully'));
+    } catch (error) {
+        // Rollback the transaction on error
+        await session.abortTransaction();
+        session.endSession();
+        throw error instanceof ApiError ? error : new ApiError(500, 'Failed to update raw material and diameter data');
+    }
+});
+
+
+
+
+
+
+
+
 
 // Delete raw material data
 const deleteRawMaterial_22_09_2025 = asyncHandler(async (req, res) => {
@@ -986,7 +1269,7 @@ const addDiameter_18_09_2025 = asyncHandler(async (req, res) => {
   });
 
 
-  const addDiameter = asyncHandler(async (req, res) => {
+  const addDiameter_23_09_2025_WORKING = asyncHandler(async (req, res) => {
     const { projectId, value, type } = req.body;
 
     const schema = Joi.object({
@@ -1011,6 +1294,36 @@ const addDiameter_18_09_2025 = asyncHandler(async (req, res) => {
     // }
 
     const diameter = await Diameter.create({ project: projectId, value, type });
+    return res.status(201).json(new ApiResponse(201, diameter, 'Diameter added successfully'));
+});
+
+
+
+
+const addDiameter = asyncHandler(async (req, res) => {
+    const { projectId, value } = req.body;
+
+    const schema = Joi.object({
+        projectId: Joi.string().required().custom((value, helpers) => {
+            if (!mongoose.Types.ObjectId.isValid(value)) {
+                return helpers.error('any.invalid');
+            }
+            return value;
+        }),
+        value: Joi.number().required().positive(),
+    });
+
+    const { error } = schema.validate({ projectId, value });
+    if (error) {
+        throw new ApiError(400, error.details[0].message);
+    }
+
+    const existingDiameter = await Diameter.findOne({ project: projectId, value });
+    if (existingDiameter) {
+      throw new ApiError(400, 'Diameter already exists for this project');
+    }
+
+    const diameter = await Diameter.create({ project: projectId, value });
     return res.status(201).json(new ApiResponse(201, diameter, 'Diameter added successfully'));
 });
 

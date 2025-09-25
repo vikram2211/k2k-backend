@@ -11,12 +11,12 @@ const diameterSchema = new mongoose.Schema(
     value: {
       type: Number,
       required: true,
-      //   unique: true, 
+        unique: true, 
     },
-    type: {
-      type: String,
-      required: true, // New field for Type
-    },
+    // type: {
+    //   type: String,
+    //   required: true, // New field for Type
+    // },
     added: [
       {
         quantity: { type: Number, required: true },
