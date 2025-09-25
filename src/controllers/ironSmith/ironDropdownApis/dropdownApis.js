@@ -2,6 +2,7 @@ import { ironProject } from "../../../models/ironSmith/helpers/ironProject.model
 import { ironShape } from "../../../models/ironSmith/helpers/ironShape.model.js";
 import { ironDimension } from "../../../models/ironSmith/helpers/ironDimension.model.js";
 import { RawMaterial } from "../../../models/ironSmith/helpers/client-project-qty.model.js";
+import { Diameter } from "../../../models/ironSmith/helpers/projectDia.model.js";
 import { ironJobOrder } from "../../../models/ironSmith/jobOrders.model.js";
 import { ironDailyProduction } from "../../../models/ironSmith/dailyProductionPlanning.js";
 import { ironWorkOrder } from "../../../models/ironSmith/workOrder.model.js";
@@ -357,7 +358,7 @@ const getRawMaterialDataByProjectId_18_09_2025 = async (req, res) => {
 
 
 
-const getRawMaterialDataByProjectId = async (req, res) => {
+const getRawMaterialDataByProjectId_23_09_2025 = async (req, res) => {
   const { projectId } = req.params;
   console.log("projectId", projectId);
 
@@ -388,6 +389,79 @@ const getRawMaterialDataByProjectId = async (req, res) => {
           }
           return acc;
       }, []);
+      console.log("rawMaterialData", rawMaterialData);
+
+      // Return the processed data
+      return res.status(200).json({ success: true, rawMaterialData, message: "Raw material data fetched successfully" });
+
+  } catch (error) {
+      console.error('Error fetching raw material data:', error);
+      return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+
+
+const getRawMaterialDataByProjectId = async (req, res) => {
+  const { projectId } = req.params;
+  const { groupByType } = req.query; // Optional query param to group by type
+  console.log("projectId", projectId);
+
+  // Validate projectId
+  if (!mongoose.Types.ObjectId.isValid(projectId)) {
+      return res.status(400).json({ success: false, message: "Provided Project ID is not a valid ObjectId" });
+  }
+
+  try {
+      // Fetch valid diameters for the project
+      const validDiameters = await Diameter.find({ project: projectId, isDeleted: false })
+          .select('value')
+          .lean();
+      const validDiameterValues = validDiameters.map((dia) => dia.value);
+
+      // Fetch raw materials for the given project ID, excluding deleted ones
+      const rawMaterials = await RawMaterial.find({ project: projectId, isDeleted: false })
+          .select('diameter type qty')
+          .lean();
+      console.log("rawMaterials", rawMaterials);
+
+      // If no raw materials are found, return an empty array
+      if (!rawMaterials || rawMaterials.length === 0) {
+          return res.status(200).json({ success: true, rawMaterialData: [], message: "No raw material data found for the given project ID" });
+      }
+
+      // Group quantities
+      let rawMaterialData;
+      if (groupByType === 'true') {
+          // Group by diameter and type
+          rawMaterialData = rawMaterials.reduce((acc, material) => {
+              if (!validDiameterValues.includes(material.diameter)) {
+                  return acc; // Skip invalid diameters
+              }
+              const key = `${material.diameter}-${material.type}`;
+              const existingMaterial = acc.find((item) => `${item.diameter}-${item.type}` === key);
+              if (existingMaterial) {
+                  existingMaterial.qty += material.qty;
+              } else {
+                  acc.push({ diameter: material.diameter, type: material.type, qty: material.qty });
+              }
+              return acc;
+          }, []);
+      } else {
+          // Group by diameter only
+          rawMaterialData = rawMaterials.reduce((acc, material) => {
+              if (!validDiameterValues.includes(material.diameter)) {
+                  return acc; // Skip invalid diameters
+              }
+              const existingMaterial = acc.find((item) => item.diameter === material.diameter);
+              if (existingMaterial) {
+                  existingMaterial.qty += material.qty;
+              } else {
+                  acc.push({ diameter: material.diameter, qty: material.qty });
+              }
+              return acc;
+          }, []);
+      }
       console.log("rawMaterialData", rawMaterialData);
 
       // Return the processed data
