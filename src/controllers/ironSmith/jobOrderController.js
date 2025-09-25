@@ -1327,7 +1327,7 @@ const updateIronJobOrder_10_09_2025 = asyncHandler(async (req, res) => {
         return value;
       })
     ).optional(),
-  });
+  }).unknown(true);
 
   const jobOrderSchema = Joi.object({
     work_order: Joi.string().optional(),
@@ -1336,8 +1336,9 @@ const updateIronJobOrder_10_09_2025 = asyncHandler(async (req, res) => {
       from: Joi.date().optional(),
       to: Joi.date().optional(),
     }).optional(),
+    color: Joi.string().optional().allow(''),
     products: Joi.array().items(productSchema).optional(),
-  });
+  }).unknown(true);
 
   const bodyData = req.body;
   const userId = req.user?._id?.toString();
@@ -1452,6 +1453,7 @@ const updateIronJobOrder_10_09_2025 = asyncHandler(async (req, res) => {
         to: value.date_range.to ? new Date(value.date_range.to) : existingJobOrder.date_range.to,
       },
     }),
+    ...(value.color !== undefined && { color: value.color }),
     products: updatedProducts,
     updated_by: userId,
     updatedAt: new Date(),
@@ -1526,6 +1528,7 @@ const updateIronJobOrder_11_09_2025_12_AM = asyncHandler(async (req, res) => {
       from: Joi.date().optional(),
       to: Joi.date().optional(),
     }).optional(),
+    color: Joi.string().optional().allow(''),
     products: Joi.array().items(productSchema).optional(),
   });
 
@@ -1761,6 +1764,7 @@ if (value.products) {
         to: value.date_range.to ? new Date(value.date_range.to) : existingJobOrder.date_range.to,
       },
     }),
+    ...(value.color !== undefined && { color: value.color }),
     products: updatedProducts,
     updated_by: userId,
     updatedAt: new Date(),
@@ -2430,8 +2434,9 @@ const updateIronJobOrder = asyncHandler(async (req, res) => {
       from: Joi.date().optional(),
       to: Joi.date().optional(),
     }).optional(),
+    color: Joi.string().optional().allow(''),
     products: Joi.array().items(productSchema).optional(),
-  });
+  }).unknown(true);
 
   const bodyData = req.body;
   const userId = req.user?._id?.toString();
@@ -2580,6 +2585,7 @@ console.log("updatedProducts222",updatedProducts);
         to: value.date_range.to ? new Date(value.date_range.to) : existingJobOrder.date_range.to,
       },
     }),
+    ...(value.color !== undefined && { color: value.color }),
     products: updatedProducts,
     updated_by: userId,
     updatedAt: new Date(),
@@ -3005,6 +3011,7 @@ const getJobOrderById_07_08_2025 = asyncHandler(async (req, res) => {
     ...jobOrder,
     workOrderId: jobOrder.work_order._id,
     workOrderNumber: jobOrder.work_order.workOrderNumber,
+    color: jobOrder.color || null,
     client: jobOrder.work_order.clientId
       ? {
         _id: jobOrder.work_order.clientId._id,

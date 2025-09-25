@@ -1415,7 +1415,7 @@ const getIronDowntime = async (req, res, next) => {
 
     // Fetch DailyProduction document for the shape_id, object_id, and job_order
     const dailyProduction = await ironDailyProduction.findOne({
-      job_order: job_order,
+      job_order: job_order, 
       'products.shape_id': shape_id,
       'products.object_id': object_id, // Use object_id instead of _id
     }).lean();
