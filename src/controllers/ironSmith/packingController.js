@@ -294,18 +294,13 @@ work_order: work_order });
 
 const createPackingBundle = async (req, res) => {
   try {
-    const { work_order, shape_id, object_id, product_quantity, bundle_size, weight, qr_codes } = req.body;
-    console.log("object_id",object_id);
-    console.log(typeof object_id);
-    
+    const { work_order, shape_id, object_id, product_quantity, bundle_size, weight, qr_codes, bundle_quantities } = req.body;
 
     // Update packed_quantity in job order
     const jobOrder = await ironJobOrder.findOne({ work_order: work_order });
     if (!jobOrder) {
       throw new ApiError(404, "Job order not found");
     }
-    console.log("jobOrder",jobOrder);
-    
 
     const productIndex = jobOrder.products.findIndex(
       (p) => p._id.toString() === object_id.toString()
@@ -317,13 +312,13 @@ const createPackingBundle = async (req, res) => {
     jobOrder.products[productIndex].packed_quantity += product_quantity;
     await jobOrder.save();
 
-    // Create packing records for each QR code
+    // Create packing records for each QR code with the correct bundle quantity
     const packingRecords = await iornPacking.insertMany(
-      qr_codes.map((qrCode) => ({
+      qr_codes.map((qrCode, index) => ({
         work_order,
         shape_id,
         object_id,
-        product_quantity: bundle_size,
+        product_quantity: bundle_quantities[index], // Use the correct bundle quantity
         bundle_size,
         weight: weight || 0,
         qr_code: qrCode,
@@ -387,6 +382,7 @@ const createPackingBundle = async (req, res) => {
     });
   }
 };
+
 
 
 
@@ -1721,7 +1717,7 @@ const getShapesByWorkOrderId_25_09_2025_6_PM = async (req, res) => {
 
 
 
-const getShapesByWorkOrderId = async (req, res) => {
+const getShapesByWorkOrderId_26_09_2025_11_PM = async (req, res) => {
   try {
     const { work_order_id } = req.query;
 
@@ -1918,6 +1914,241 @@ const getShapesByWorkOrderId = async (req, res) => {
     });
   }
 };
+
+
+const getShapesByWorkOrderId = async (req, res) => {
+  try {
+    const { work_order_id } = req.query;
+    if (!work_order_id) {
+      return res.status(400).json({
+        success: false,
+        message: 'work_order_id is required',
+      });
+    }
+    if (!mongoose.Types.ObjectId.isValid(work_order_id)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid work_order_id format',
+      });
+    }
+
+    const shapes = await ironWorkOrder.aggregate([
+      {
+        $match: {
+          _id: new mongoose.Types.ObjectId(work_order_id),
+        },
+      },
+      {
+        $unwind: '$products',
+      },
+      {
+        $lookup: {
+          from: 'ironjoborders',
+          localField: '_id',
+          foreignField: 'work_order',
+          as: 'jobOrders',
+        },
+      },
+      {
+        $unwind: {
+          path: '$jobOrders',
+          preserveNullAndEmptyArrays: true,
+        },
+      },
+      {
+        $unwind: {
+          path: '$jobOrders.products',
+          preserveNullAndEmptyArrays: true,
+        },
+      },
+      {
+        $match: {
+          $expr: {
+            $and: [
+              { $eq: ['$jobOrders.products.shape', '$products.shapeId'] },
+              { $eq: ['$jobOrders.products.dia', '$products.diameter'] },
+            ],
+          },
+        },
+      },
+      {
+        $lookup: {
+          from: 'irondailyproductions',
+          let: {
+            jobOrderId: '$jobOrders._id',
+            shapeId: '$products.shapeId',
+            objectId: '$jobOrders.products._id',
+            diameter: '$products.diameter',
+          },
+          pipeline: [
+            {
+              $match: {
+                $expr: {
+                  $eq: ['$job_order', '$$jobOrderId'],
+                },
+              },
+            },
+            {
+              $unwind: '$products',
+            },
+            {
+              $match: {
+                $expr: {
+                  $and: [
+                    { $eq: ['$products.shape_id', '$$shapeId'] },
+                    { $eq: ['$products.object_id', '$$objectId'] },
+                  ],
+                },
+              },
+            },
+            {
+              $group: {
+                _id: null,
+                totalAchieved: { $sum: '$products.achieved_quantity' },
+                totalRejected: { $sum: '$products.rejected_quantity' },
+                totalRecycled: { $sum: '$products.recycled_quantity' },
+              },
+            },
+          ],
+          as: 'productionData',
+        },
+      },
+      {
+        $lookup: {
+          from: 'ironshapes',
+          localField: 'products.shapeId',
+          foreignField: '_id',
+          pipeline: [
+            { $match: { isDeleted: false } },
+          ],
+          as: 'shapeDetails',
+        },
+      },
+      {
+        $unwind: {
+          path: '$shapeDetails',
+          preserveNullAndEmptyArrays: false,
+        },
+      },
+      // --- NEW: Lookup for total packed quantity ---
+      {
+        $lookup: {
+          from: 'ironpackings',
+          let: {
+            objectId: '$jobOrders.products._id',
+          },
+          pipeline: [
+            {
+              $match: {
+                $expr: {
+                  $eq: ['$object_id', '$$objectId'],
+                },
+              },
+            },
+            {
+              $group: {
+                _id: null,
+                totalPacked: { $sum: '$product_quantity' },
+              },
+            },
+          ],
+          as: 'packingData',
+        },
+      },
+      // --- END NEW ---
+      {
+        $group: {
+          _id: {
+            barMark: '$products.barMark',
+            jobOrderId: '$jobOrders._id',
+            jobOrderNumber: '$jobOrders.job_order_number',
+            shapeId: '$products.shapeId',
+            diameter: '$products.diameter',
+            objectId: '$jobOrders.products._id',
+          },
+          shapeCode: { $first: '$shapeDetails.shape_code' },
+          po_quantity: { $first: '$products.quantity' },
+          achieved_quantity: {
+            $sum: {
+              $ifNull: [{ $arrayElemAt: ['$productionData.totalAchieved', 0] }, 0],
+            },
+          },
+          rejected_quantity: {
+            $sum: {
+              $ifNull: [{ $arrayElemAt: ['$productionData.totalRejected', 0] }, 0],
+            },
+          },
+          recycled_quantity: {
+            $sum: {
+              $ifNull: [{ $arrayElemAt: ['$productionData.totalRecycled', 0] }, 0],
+            },
+          },
+          // --- NEW: Calculate total packed quantity ---
+          total_packed_quantity: {
+            $sum: {
+              $ifNull: [{ $arrayElemAt: ['$packingData.totalPacked', 0] }, 0],
+            },
+          },
+          // --- END NEW ---
+        },
+      },
+      {
+        $project: {
+          _id: 0,
+          barMark: '$_id.barMark',
+          job_order_id: '$_id.jobOrderId',
+          job_order_number: '$_id.jobOrderNumber',
+          shape_id: '$_id.shapeId',
+          shape_code: '$shapeCode',
+          diameter: '$_id.diameter',
+          object_id: '$_id.objectId',
+          po_quantity: 1,
+          achieved_quantity: 1,
+          rejected_quantity: 1,
+          recycled_quantity: 1,
+          total_packed_quantity: 1, // Include total_packed_quantity
+          // --- NEW: Calculate available quantity ---
+          available_quantity: {
+            $subtract: ['$achieved_quantity', '$total_packed_quantity'],
+          },
+          // --- END NEW ---
+        },
+      },
+      {
+        $sort: {
+          job_order_number: 1,
+          barMark: 1,
+          shape_id: 1,
+          diameter: 1,
+        },
+      },
+    ]);
+
+    console.log('Aggregation result - shapes found:', shapes.length);
+    console.log('Shapes data:', JSON.stringify(shapes, null, 2));
+
+    if (!shapes.length) {
+      return res.status(200).json({
+        success: true,
+        message: 'No shapes found for the given work_order_id',
+        data: [],
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: 'Shapes retrieved successfully',
+      data: shapes,
+    });
+  } catch (error) {
+    console.error('Error retrieving shapes:', error);
+    res.status(error.statusCode || 500).json({
+      success: false,
+      message: error.message || 'Internal server error',
+    });
+  }
+};
+
 
 
 export { createPackingBundle, generatePackingQRCode, getAllPackingDetails, getPackingDetailsById , updatePackingDetails, getShapesByWorkOrderId};
