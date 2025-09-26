@@ -76,6 +76,14 @@ const ironJobOrderSchema = new mongoose.Schema(
           default: 0,
           min: [0, 'Rejected quantity must be non-negative'],
         },
+        packed_quantity: {
+          type: Number,
+          default: 0,
+        },
+        dispatched_quantity: {
+          type: Number,
+          default: 0,
+        },
         selected_machines: [
           {
             type: mongoose.Schema.Types.ObjectId,

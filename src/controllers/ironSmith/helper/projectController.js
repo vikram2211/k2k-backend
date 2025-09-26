@@ -1070,7 +1070,7 @@ const getRawMaterialConsumption_19_09_2025_12_PM = asyncHandler(async (req, res)
 
 
 
-const getRawMaterialConsumption = asyncHandler(async (req, res) => {
+const getRawMaterialConsumption_26_09_2025 = asyncHandler(async (req, res) => {
     const { projectId } = req.params;
     console.log("projectId", projectId);
 
@@ -1137,6 +1137,96 @@ const getRawMaterialConsumption = asyncHandler(async (req, res) => {
 
     return sendResponse(res, new ApiResponse(200, response, 'Raw materials fetched successfully'));
 });
+
+
+
+const getRawMaterialConsumption = asyncHandler(async (req, res) => {
+    const { projectId } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(projectId)) {
+        throw new ApiError(400, `Invalid project ID: ${projectId}`);
+    }
+
+    // Fetch RawMaterial data
+    const rawMaterials = await RawMaterial.find({ project: projectId, isDeleted: false })
+        .populate({
+            path: 'consumptionHistory.workOrderId',
+            select: 'workOrderNumber',
+        })
+        .lean();
+
+    if (!rawMaterials.length) {
+        throw new ApiError(404, 'No raw material data found for the given project ID');
+    }
+
+    // Aggregation for added quantities
+    const addedAggregation = await Diameter.aggregate([
+        { $match: { project: new mongoose.Types.ObjectId(projectId), isDeleted: false } },
+        { $unwind: "$added" },
+        {
+            $group: {
+                _id: "$value",
+                totalAdded: { $sum: "$added.quantity" },
+            },
+        },
+    ]);
+
+    // Aggregation for subtracted quantities
+    const subtractedAggregation = await Diameter.aggregate([
+        { $match: { project: new mongoose.Types.ObjectId(projectId), isDeleted: false } },
+        { $unwind: "$subtracted" },
+        {
+            $group: {
+                _id: "$value",
+                totalSubtracted: { $sum: "$subtracted.quantity" },
+            },
+        },
+    ]);
+
+    // Merge the results
+    const diameterMap = {};
+    addedAggregation.forEach((item) => {
+        diameterMap[item._id] = { totalAdded: item.totalAdded, totalSubtracted: 0 };
+    });
+    subtractedAggregation.forEach((item) => {
+        if (diameterMap[item._id]) {
+            diameterMap[item._id].totalSubtracted = item.totalSubtracted;
+        } else {
+            diameterMap[item._id] = { totalAdded: 0, totalSubtracted: item.totalSubtracted };
+        }
+    });
+
+    const diameters = Object.entries(diameterMap).map(([diameter, totals]) => ({
+        _id: diameter,
+        ...totals,
+    }));
+
+    // Map rawMaterials with diameter-derived totals
+    const response = rawMaterials.map((rm) => {
+        const diameterData = diameters.find((d) => d._id == rm.diameter) || { totalAdded: 0, totalSubtracted: 0 };
+        return {
+            _id: rm._id,
+            project: rm.project,
+            diameter: rm.diameter,
+            type: rm.type,
+            qty: rm.qty,
+            convertedQty: rm.convertedQty,
+            date: rm.date,
+            createdAt: rm.createdAt,
+            updatedAt: rm.updatedAt,
+            consumptionHistory: rm.consumptionHistory.map((ch) => ({
+                workOrderId: ch.workOrderId ? ch.workOrderId._id : null,
+                workOrderNumber: ch.workOrderId ? ch.workOrderId.workOrderNumber : 'N/A',
+                quantity: ch.quantity || 0,
+                timestamp: ch.timestamp || null,
+            })),
+            totalAdded: diameterData.totalAdded || 0,
+            totalSubtracted: diameterData.totalSubtracted || 0,
+        };
+    });
+
+    return sendResponse(res, new ApiResponse(200, response, 'Raw materials fetched successfully'));
+});
+
 
 
 

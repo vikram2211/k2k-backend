@@ -13,6 +13,10 @@ const ironPackingSchema = new mongoose.Schema(
       ref: 'ironShape', // Reference to the Product schema
       required: true,
     },
+    object_id: {
+      type: mongoose.Schema.Types.ObjectId, // --- NEW: Add object_id field ---
+      required: true,
+    },
     product_quantity: {
       type: Number, // Quantity of the product being packed
       required: true,

@@ -622,7 +622,17 @@ const createIronJobOrder = asyncHandler(async (req, res) => {
 
   const productsWithQr = await Promise.all(
     value.products.map(async (product) => {
-        const qrCodeId = `${jobOrderNumber}-${uuidv4()}`;
+        // const qrCodeId = `${jobOrderNumber}-${uuidv4()}`;
+        // generate random 4 digit number
+        const randomFour = Math.floor(1000 + Math.random() * 9000);
+
+        // get last 4 digits of current timestamp
+        const timestampLastFour = Date.now().toString().slice(-4);
+
+        // combine them for qrCodeId
+        const qrCodeId = `${randomFour}${timestampLastFour}`;
+        console.log("qrCodeId", qrCodeId);
+        
         const qrContent = `joborder/${jobOrderNumber}/product/${qrCodeId}`;
         let qrCodeBuffer;
         try {

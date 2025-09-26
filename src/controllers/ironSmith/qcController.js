@@ -151,7 +151,7 @@ const createQCCheck2 = asyncHandler(async (req, res) => {
       return res.status(500).json(new ApiResponse(500, null, 'Internal Server Error', error.message));
     }
   });
-  const createQCCheck = asyncHandler(async (req, res) => {
+  const createQCCheck_25_09_2025 = asyncHandler(async (req, res) => {
     // Extract data from request body
     const { work_order, job_order, shape_id, object_id, rejected_quantity, recycled_quantity, remarks } = req.body;
   
@@ -246,6 +246,161 @@ const createQCCheck2 = asyncHandler(async (req, res) => {
       return res.status(500).json(new ApiResponse(500, null, 'Internal Server Error', error.message));
     }
   });
+
+  const createQCCheck = asyncHandler(async (req, res) => {
+  // Extract data from request body
+  const { work_order, job_order, shape_id, object_id, rejected_quantity, recycled_quantity, remarks } = req.body;
+
+  // Validate required fields
+  if (!work_order || !job_order || !shape_id || !object_id || rejected_quantity === undefined) {
+    return res.status(400).json(
+      new ApiResponse(400, null, 'Missing required fields: work_order, job_order, shape_id, object_id, and rejected_quantity are mandatory.')
+    );
+  }
+
+  // Validate that IDs are valid ObjectId
+  if (
+    !mongoose.Types.ObjectId.isValid(work_order) ||
+    !mongoose.Types.ObjectId.isValid(job_order) ||
+    !mongoose.Types.ObjectId.isValid(shape_id) ||
+    !mongoose.Types.ObjectId.isValid(object_id)
+  ) {
+    return res.status(400).json(
+      new ApiResponse(400, null, 'Invalid ObjectId format for work_order, job_order, shape_id, or object_id.')
+    );
+  }
+
+  // Validate quantities
+  if (rejected_quantity < 0 || (recycled_quantity !== undefined && recycled_quantity < 0)) {
+    return res.status(400).json(
+      new ApiResponse(400, null, 'Quantities cannot be negative.')
+    );
+  }
+
+  // Start a transaction to ensure atomicity
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    // Find the daily production document
+    const dailyProduction = await ironDailyProduction
+      .findOne({ 'products.object_id': object_id })
+      .session(session);
+
+    if (!dailyProduction) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(404).json(
+        new ApiResponse(404, null, 'Daily production document not found for this object_id.')
+      );
+    }
+
+    const productIndex = dailyProduction.products.findIndex(
+      (p) => p.object_id.toString() === object_id.toString()
+    );
+    if (productIndex === -1) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(404).json(
+        new ApiResponse(404, null, 'object_id not found in the products array.')
+      );
+    }
+
+    const currentAchievedQuantity = dailyProduction.products[productIndex].achieved_quantity || 0;
+    const currentRejectedQuantity = dailyProduction.products[productIndex].rejected_quantity || 0;
+    const currentRecycledQuantity = dailyProduction.products[productIndex].recycled_quantity || 0;
+
+    // Calculate incremental quantities
+    const incrementRejected = rejected_quantity;
+    const incrementRecycled = recycled_quantity !== undefined ? recycled_quantity : 0;
+
+    // Validate that the sum of rejected and recycled quantities doesn't exceed achieved quantity
+    if (incrementRejected + incrementRecycled > currentAchievedQuantity) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json(
+        new ApiResponse(
+          400,
+          null,
+          `Combined rejected (${incrementRejected}) and recycled (${incrementRecycled}) quantities cannot exceed achieved quantity (${currentAchievedQuantity}).`
+        )
+      );
+    }
+
+    // Check if a QC check already exists for the shape_id and object_id
+    let qcCheck = await ironQCCheck.findOne({ shape_id, object_id, status: 'Active' }).session(session);
+
+    if (qcCheck) {
+      // Increment existing record
+      qcCheck.rejected_quantity += incrementRejected;
+      if (recycled_quantity !== undefined) {
+        qcCheck.recycled_quantity += incrementRecycled;
+      }
+      qcCheck.remarks = remarks || qcCheck.remarks; // Update remarks if provided
+      qcCheck.updated_by = req.user?._id;
+      await qcCheck.save({ session });
+    } else {
+      // Create new QC check record
+      qcCheck = await ironQCCheck.create(
+        [
+          {
+            work_order,
+            job_order,
+            shape_id,
+            object_id,
+            rejected_quantity: incrementRejected,
+            recycled_quantity: incrementRecycled,
+            remarks: remarks || '',
+            created_by: req.user?._id,
+            status: 'Active',
+          },
+        ],
+        { session }
+      );
+      qcCheck = qcCheck[0]; // Since create returns an array
+    }
+
+    // Update dailyProduction with new rejected and recycled quantities
+    dailyProduction.products[productIndex].rejected_quantity = qcCheck.rejected_quantity;
+    dailyProduction.products[productIndex].recycled_quantity = qcCheck.recycled_quantity;
+    dailyProduction.products[productIndex].achieved_quantity =
+      currentAchievedQuantity - incrementRejected - incrementRecycled;
+    dailyProduction.updated_by = req.user?._id;
+    dailyProduction.production_logs.push({
+      action: 'QCCheck',
+      user: req.user?._id,
+      rejected_quantity: qcCheck.rejected_quantity,
+      recycled_quantity: qcCheck.recycled_quantity,
+      description: remarks || 'QC check performed',
+    });
+    await dailyProduction.save({ session });
+
+    // Populate references for response
+    const populatedQCCheck = await ironQCCheck
+      .findById(qcCheck._id)
+      .populate('work_order', 'workOrderNumber')
+      .populate('job_order', 'job_order_number')
+      .populate('shape_id', 'shape_code name')
+      .populate('created_by', 'username email')
+      .lean()
+      .session(session);
+
+    // Commit the transaction
+    await session.commitTransaction();
+    session.endSession();
+
+    return res.status(201).json(
+      new ApiResponse(201, populatedQCCheck, 'QC check record updated or created successfully.')
+    );
+  } catch (error) {
+    await session.abortTransaction();
+    session.endSession();
+    console.error('Error creating/updating QC check:', error);
+    return res.status(500).json(
+      new ApiResponse(500, null, 'Internal Server Error', error.message)
+    );
+  }
+});
 
 
 const getAllQCChecks = asyncHandler(async (req, res) => {
