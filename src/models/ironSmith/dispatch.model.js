@@ -135,15 +135,15 @@ const ironDispatchSchema = new mongoose.Schema(
       {
         type: String,
         required: true,
-        unique: true,
+        // unique: true,
       },
     ],
     qr_code_urls: [
       {
         type: String,
         required: false,
-        unique: true,
-        sparse: true,
+        // unique: true,
+        // sparse: true,
       },
     ],
     vehicle_number: {

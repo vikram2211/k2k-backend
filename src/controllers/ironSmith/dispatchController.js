@@ -3,6 +3,7 @@ import { asyncHandler } from '../../utils/asyncHandler.js';
 import { ApiError } from '../../utils/ApiError.js';
 import { ApiResponse } from '../../utils/ApiResponse.js';
 import { ironDispatch } from '../../models/ironSmith/dispatch.model.js';
+import { ironJobOrder } from '../../models/ironSmith/jobOrders.model.js';
 import { iornPacking } from '../../models/ironSmith/packing.model.js';
 import { ironWorkOrder } from '../../models/ironSmith/workOrder.model.js';
 import { ironShape } from '../../models/ironSmith/helpers/ironShape.model.js';
@@ -148,7 +149,7 @@ import fs from 'fs';
 // });
 
 
-const dispatchSchema = Joi.object({
+const dispatchSchema_26_09_2025 = Joi.object({
     work_order: Joi.string().required().messages({ 'string.empty': 'Work Order ID is required' }),
     invoice_or_sto: Joi.string().required().messages({ 'string.empty': 'Invoice/STO is required' }),
     gate_pass_no: Joi.string().required().messages({ 'string.empty': 'Gate Pass No is required' }),
@@ -188,7 +189,7 @@ const dispatchSchema = Joi.object({
     }),
   }).messages({ 'object.unknown': 'Unknown field detected' });
   
-  const createDispatch = asyncHandler(async (req, res, next) => {
+  const createDispatch_26_069_2025 = asyncHandler(async (req, res, next) => {
     let body = { ...req.body };
     console.log("body", body);
   
@@ -287,7 +288,408 @@ const dispatchSchema = Joi.object({
     }
   });
 
-const getScannedProducts = asyncHandler(async (req, res, next) => {
+
+const dispatchSchema = Joi.object({
+    work_order: Joi.string().required().messages({ 'string.empty': 'Work Order ID is required' }),
+    invoice_or_sto: Joi.string().required().messages({ 'string.empty': 'Invoice/STO is required' }),
+    gate_pass_no: Joi.string().required().messages({ 'string.empty': 'Gate Pass No is required' }),
+    vehicle_number: Joi.string().required().messages({ 'string.empty': 'Vehicle number is required' }),
+    ticket_number: Joi.string().required().messages({ 'string.empty': 'Ticket number is required' }),
+    qr_code_urls: Joi.alternatives()
+      .try(
+        Joi.array().items(Joi.string().uri()).min(1),
+        Joi.string().custom((value, helpers) => {
+          try {
+            const parsed = JSON.parse(value);
+            if (!Array.isArray(parsed) || parsed.length === 0) {
+              return helpers.error('array.min');
+            }
+            if (!parsed.every((item) => typeof item === 'string' && Joi.string().uri().validate(item).error === null)) {
+              return helpers.error('array.items');
+            }
+            return parsed;
+          } catch (e) {
+            return helpers.error('string.base');
+          }
+        })
+      )
+      .messages({
+        'string.uri': 'Each QR code URL must be a valid URL',
+        'array.min': 'At least one QR code URL is required',
+      }),
+    dispatchQuantities: Joi.object().pattern(
+      Joi.string(),
+      Joi.number().min(1).required()
+    ).required().messages({
+      'object.base': 'Dispatch quantities must be an object',
+      'number.base': 'Dispatch quantity must be a number',
+      'number.min': 'Dispatch quantity must be at least 1',
+      'any.required': 'Dispatch quantities are required'
+    }),
+    date: Joi.date()
+      .iso()
+      .required()
+      .messages({
+        'date.base': 'Date must be a valid ISO date',
+        'any.required': 'Date is required',
+      }),
+    invoice_file: Joi.array().items(Joi.string().uri()).optional().messages({
+      'string.uri': 'Each invoice file must be a valid URL',
+    }),
+  }).messages({ 'object.unknown': 'Unknown field detected' });
+
+
+// controller: ironSmith/dispatchController.js
+
+
+
+
+///////////////////////////WAS WORKING FINE -----
+// const createDispatch = asyncHandler(async (req, res, next) => {
+//   let body = { ...req.body };
+
+//   // Normalize qr_code_urls (stringified JSON → array)
+//   if (typeof body.qr_code_urls === 'string') {
+//     try {
+//       body.qr_code_urls = JSON.parse(body.qr_code_urls);
+//     } catch {
+//       return next(new ApiError(400, 'Invalid QR code URLs format: must be a valid JSON array'));
+//     }
+//   }
+
+//   // Joi validation
+//   const { error, value } = dispatchSchema.validate(body, { abortEarly: false });
+//   if (error) return next(new ApiError(400, 'Validation failed for dispatch creation', error.details));
+
+//   const {
+//     work_order,
+//     invoice_or_sto,
+//     gate_pass_no,
+//     vehicle_number,
+//     ticket_number,
+//     qr_code_urls,
+//     date,
+//     invoice_file: preUploadedFiles,
+//     dispatchQuantities, // { 'barMark-shapeCode': number }
+//   } = value;
+
+//   if (!mongoose.Types.ObjectId.isValid(work_order)) {
+//     return next(new ApiError(400, `Invalid Work Order ID: ${work_order}`));
+//   }
+
+//   // Helpers
+//   const normalizeBarMark = (bm) => {
+//     if (bm === null || bm === undefined) return 'null';
+//     const s = String(bm).trim();
+//     return s.length === 0 ? 'null' : s;
+//   };
+//   const makeKey = (entry) => `${normalizeBarMark(entry.barMark)}-${entry.shape_id.shape_code}`;
+//   const keyParts = (key) => {
+//     const idx = key.lastIndexOf('-');
+//     if (idx === -1) return { barMarkKey: normalizeBarMark(null), shapeCode: key };
+//     return { barMarkKey: normalizeBarMark(key.slice(0, idx)), shapeCode: key.slice(idx + 1) };
+//   };
+
+//   // Fetch packs for scanned QR URLs (FIFO)
+//   const packingEntries = await iornPacking
+//     .find({ qr_code_url: { $in: qr_code_urls } })
+//     .populate('shape_id', 'shape_code')
+//     .populate('work_order', 'workOrderNumber');
+
+//   if (!packingEntries?.length) {
+//     return next(new ApiError(404, 'No packing entries found for scanned QR code URLs'));
+//   }
+//   packingEntries.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+
+//   // Group by normalized barMark + shape_code
+//   const groupedPackingEntries = packingEntries.reduce((acc, entry) => {
+//     const k = makeKey(entry);
+//     (acc[k] ||= []).push(entry);
+//     return acc;
+//   }, {});
+
+//   // Deduct quantities
+//   const dispatchedByKey = {}; // { key: totalDispatched }
+//   for (const [rawKey, requestedRaw] of Object.entries(dispatchQuantities)) {
+//     let requestedQty = Number(requestedRaw) || 0;
+//     if (requestedQty <= 0) continue;
+
+//     const { barMarkKey, shapeCode } = keyParts(rawKey);
+//     let buckets = groupedPackingEntries[`${barMarkKey}-${shapeCode}`];
+
+//     // Fallback: when requesting 'null-<shape>', combine all groups where barMark is null/empty for that shape
+//     if (!buckets && barMarkKey === 'null') {
+//       const matchingKeys = Object.keys(groupedPackingEntries).filter((k) => {
+//         const { barMarkKey: bmk, shapeCode: sc } = keyParts(k);
+//         return bmk === 'null' && sc === shapeCode;
+//       });
+//       buckets = matchingKeys.flatMap((k) => groupedPackingEntries[k]);
+//     }
+
+//     if (!buckets?.length) continue;
+
+//     for (const entry of buckets) {
+//       if (requestedQty <= 0) break;
+//       const qtyToDeduct = Math.min(requestedQty, entry.product_quantity);
+//       if (qtyToDeduct <= 0) continue;
+
+//       entry.product_quantity -= qtyToDeduct;
+//       requestedQty -= qtyToDeduct;
+
+//       const k = makeKey(entry);
+//       dispatchedByKey[k] = (dispatchedByKey[k] || 0) + qtyToDeduct;
+
+//       entry.delivery_stage = entry.product_quantity === 0 ? 'Dispatched' : 'Packed';
+      
+//       await entry.save();
+//     }
+//   }
+
+//   // Build products from dispatched amounts (NOT remaining)
+//   const products = Object.entries(dispatchedByKey).map(([k, dispatchedQty]) => {
+//     const sample = (groupedPackingEntries[k] || [])[0];
+//     return {
+//       shape_id: sample.shape_id._id,
+//       product_name: sample.shape_id.shape_code,
+//       dispatch_quantity: dispatchedQty,
+//       bundle_size: sample.bundle_size,
+//       weight: sample.weight,
+//       // uom: sample.uom, // if available
+//     };
+//   });
+
+//   if (!products.length) {
+//     return next(new ApiError(400, 'Requested dispatch quantities could not be fulfilled from available packs'));
+//   }
+
+//   // Handle invoice files
+//   let invoiceFileUrls = [];
+//   if (req.files?.length) {
+//     for (const file of req.files) {
+//       const tempFilePath = path.join('./public/temp', file.filename);
+//       const fileBuffer = fs.readFileSync(tempFilePath);
+//       const { url } = await putObject({ data: fileBuffer, mimetype: file.mimetype }, `irondispatch/${Date.now()}-${file.originalname}`);
+//       invoiceFileUrls.push(url);
+//       fs.unlinkSync(tempFilePath);
+//     }
+//   } else if (preUploadedFiles?.length) {
+//     invoiceFileUrls = preUploadedFiles;
+//   }
+
+//   try {
+//     const userId = req.user.id;
+//     const [dispatchEntry] = await ironDispatch.create([
+//       {
+//         work_order,
+//         packing_ids: packingEntries.map((p) => p._id),
+//         products,
+//         invoice_or_sto,
+//         gate_pass_no,
+//         qr_codes: packingEntries.map((p) => p.qr_code),
+//         qr_code_urls,
+//         vehicle_number,
+//         ticket_number,
+//         created_by: userId,
+//         invoice_file: invoiceFileUrls,
+//         date,
+//       },
+//     ]);
+//     return res.status(201).json(new ApiResponse(201, dispatchEntry, 'Dispatch created successfully'));
+//   } catch (err) {
+//     return next(new ApiError(500, `Failed to create dispatch: ${err.message}`));
+//   }
+// });
+
+
+// controller: ironSmith/dispatchController.js
+const createDispatch = asyncHandler(async (req, res, next) => {
+  let body = { ...req.body };
+
+  if (typeof body.qr_code_urls === 'string') {
+    try {
+      body.qr_code_urls = JSON.parse(body.qr_code_urls);
+    } catch {
+      return next(new ApiError(400, 'Invalid QR code URLs format: must be a valid JSON array'));
+    }
+  }
+
+  const { error, value } = dispatchSchema.validate(body, { abortEarly: false });
+  if (error) return next(new ApiError(400, 'Validation failed for dispatch creation', error.details));
+
+  const {
+    work_order,
+    invoice_or_sto,
+    gate_pass_no,
+    vehicle_number,
+    ticket_number,
+    qr_code_urls,
+    date,
+    invoice_file: preUploadedFiles,
+    dispatchQuantities, // { 'barMark-shapeCode': number }
+  } = value;
+
+  if (!mongoose.Types.ObjectId.isValid(work_order)) {
+    return next(new ApiError(400, `Invalid Work Order ID: ${work_order}`));
+  }
+
+  const normalizeBarMark = (bm) => {
+    if (bm === null || bm === undefined) return 'null';
+    const s = String(bm).trim();
+    return s.length === 0 ? 'null' : s;
+  };
+  const makeKey = (entry) => `${normalizeBarMark(entry.barMark)}-${entry.shape_id.shape_code}`;
+  const keyParts = (key) => {
+    const idx = key.lastIndexOf('-');
+    if (idx === -1) return { barMarkKey: normalizeBarMark(null), shapeCode: key };
+    return { barMarkKey: normalizeBarMark(key.slice(0, idx)), shapeCode: key.slice(idx + 1) };
+  };
+
+  // Load packs for scanned QR URLs (FIFO)
+  const packingEntries = await iornPacking
+    .find({ qr_code_url: { $in: qr_code_urls } })
+    .populate('shape_id', 'shape_code')
+    .populate('work_order', 'workOrderNumber');
+
+  if (!packingEntries?.length) {
+    return next(new ApiError(404, 'No packing entries found for scanned QR code URLs'));
+  }
+  packingEntries.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+
+  // Group by normalized barMark + shape_code
+  const groupedPackingEntries = packingEntries.reduce((acc, entry) => {
+    const k = makeKey(entry);
+    (acc[k] ||= []).push(entry);
+    return acc;
+  }, {});
+
+  // Deduct and accumulate dispatched amounts
+  const dispatchedByKey = {};               // { 'barMark-shapeCode': number }
+  const dispatchedByJobProductId = {};      // { jobProductId: number } (ironJobOrder.products._id)
+  for (const [rawKey, requestedRaw] of Object.entries(dispatchQuantities)) {
+    let requestedQty = Number(requestedRaw) || 0;
+    if (requestedQty <= 0) continue;
+
+    const { barMarkKey, shapeCode } = keyParts(rawKey);
+    let buckets = groupedPackingEntries[`${barMarkKey}-${shapeCode}`];
+
+    // Fallback: if request is 'null-<shape>', combine all groups with null/empty barMark for that shape
+    if (!buckets && barMarkKey === 'null') {
+      const matchingKeys = Object.keys(groupedPackingEntries).filter((k) => {
+        const { barMarkKey: bmk, shapeCode: sc } = keyParts(k);
+        return bmk === 'null' && sc === shapeCode;
+      });
+      buckets = matchingKeys.flatMap((k) => groupedPackingEntries[k]);
+    }
+
+    if (!buckets?.length) continue;
+
+    for (const entry of buckets) {
+      if (requestedQty <= 0) break;
+
+      const qtyToDeduct = Math.min(requestedQty, entry.product_quantity);
+      if (qtyToDeduct <= 0) continue;
+
+      // Apply to packing entry
+      entry.product_quantity -= qtyToDeduct;
+      entry.delivery_stage = entry.product_quantity === 0 ? 'Dispatched' : 'Packed';
+      await entry.save();
+
+      requestedQty -= qtyToDeduct;
+
+      // Track dispatched by display group key
+      const k = makeKey(entry);
+      dispatchedByKey[k] = (dispatchedByKey[k] || 0) + qtyToDeduct;
+
+      // Track dispatched by job order product (_id stored in packing.object_id)
+      if (entry.object_id) {
+        const pid = entry.object_id.toString();
+        dispatchedByJobProductId[pid] = (dispatchedByJobProductId[pid] || 0) + qtyToDeduct;
+      }
+    }
+  }
+
+  // Build products payload from dispatched amounts
+  const products = Object.entries(dispatchedByKey).map(([k, dispatchedQty]) => {
+    const sample = (groupedPackingEntries[k] || [])[0];
+    return {
+      shape_id: sample.shape_id._id,
+      product_name: sample.shape_id.shape_code,
+      dispatch_quantity: dispatchedQty,
+      bundle_size: sample.bundle_size,
+      weight: sample.weight,
+      // uom: sample.uom, // if available
+    };
+  });
+
+  if (!products.length) {
+    return next(new ApiError(400, 'Requested dispatch quantities could not be fulfilled from available packs'));
+  }
+
+  // Update ironJobOrder products: packed_quantity -= dispatched, dispatched_quantity += dispatched
+  if (Object.keys(dispatchedByJobProductId).length > 0) {
+    const ops = Object.entries(dispatchedByJobProductId).map(([productId, qty]) => ({
+      updateOne: {
+        filter: { 'products._id': productId },
+        update: {
+          $inc: {
+            'products.$.packed_quantity': -qty,
+            'products.$.dispatched_quantity': qty,
+          },
+        },
+      },
+    }));
+    await ironJobOrder.bulkWrite(ops);
+  }
+
+  // Handle invoice files
+  let invoiceFileUrls = [];
+  if (req.files?.length) {
+    for (const file of req.files) {
+      const tempFilePath = path.join('./public/temp', file.filename);
+      const fileBuffer = fs.readFileSync(tempFilePath);
+      const { url } = await putObject({ data: fileBuffer, mimetype: file.mimetype }, `irondispatch/${Date.now()}-${file.originalname}`);
+      invoiceFileUrls.push(url);
+      fs.unlinkSync(tempFilePath);
+    }
+  } else if (preUploadedFiles?.length) {
+    invoiceFileUrls = preUploadedFiles;
+  }
+
+  // Ensure uniqueness within single dispatch doc only
+  const uniqueQrCodes = [...new Set(packingEntries.map((p) => p.qr_code))];
+  const uniqueQrUrls  = [...new Set(packingEntries.map((p) => p.qr_code_url))];
+
+  try {
+    const userId = req.user.id;
+    const [dispatchEntry] = await ironDispatch.create([
+      {
+        work_order,
+        packing_ids: packingEntries.map((p) => p._id),
+        products,
+        invoice_or_sto,
+        gate_pass_no,
+        qr_codes: uniqueQrCodes,
+        qr_code_urls: uniqueQrUrls,
+        vehicle_number,
+        ticket_number,
+        created_by: userId,
+        invoice_file: invoiceFileUrls,
+        date,
+      },
+    ]);
+    return res.status(201).json(new ApiResponse(201, dispatchEntry, 'Dispatch created successfully'));
+  } catch (err) {
+    return next(new ApiError(500, `Failed to create dispatch: ${err.message}`));
+  }
+});
+
+
+
+
+
+
+
+const getScannedProducts_26_09_2025 = asyncHandler(async (req, res, next) => {
     try {
         console.log("inside backend qr scan");
         const qrCode = req.query.qr_code;
@@ -347,6 +749,83 @@ const getScannedProducts = asyncHandler(async (req, res, next) => {
         });
     }
 });
+
+
+
+const getScannedProducts = asyncHandler(async (req, res, next) => {
+  try {
+    const qrCode = req.query.qr_code;
+    if (!qrCode) {
+      return res.status(400).json({ success: false, message: "Please provide a QR code" });
+    }
+
+    const getScannedProduct = await iornPacking.findOne({ qr_code: qrCode })
+      .populate('shape_id', 'shape_code')
+      .populate({
+        path: 'work_order',
+        populate: {
+          path: 'products',
+        },
+      })
+      .populate('packed_by', 'username');
+
+    if (!getScannedProduct) {
+      return res.status(404).json({
+        success: false,
+        message: `No packing entry found for QR code ${qrCode}`,
+      });
+    }
+
+    if (getScannedProduct.delivery_stage === 'Dispatched') {
+      return res.status(400).json({
+        success: false,
+        message: `QR code ${qrCode} has already been scanned and dispatched.`,
+      });
+    }
+
+    // Find the product in the work order's products array using object_id
+    const product = getScannedProduct.work_order.products.find(
+      (p) => p._id.toString() === getScannedProduct.object_id.toString()
+    );
+
+    const barMark = product?.barMark || null;
+
+    res.status(200).json({
+      success: true,
+      data: {
+        ...getScannedProduct.toObject(),
+        barMark, // Include barMark in the response
+         object_id: getScannedProduct.object_id,
+      },
+    });
+  } catch (error) {
+    if (req.files) {
+      req.files.forEach((file) => {
+        const tempFilePath = path.join('./public/temp', file.filename);
+        if (fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath);
+      });
+    }
+    if (error.name === 'ValidationError') {
+      const formattedErrors = Object.values(error.errors).map((err) => ({
+        field: err.path,
+        message: err.message,
+      }));
+      return res.status(400).json({
+        success: false,
+        errors: formattedErrors,
+      });
+    }
+    console.error('Error scanning QR code:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message || 'Internal Server Error',
+    });
+  }
+});
+
+
+
+
 
 
 const updateDispatchSchema = Joi.object({
