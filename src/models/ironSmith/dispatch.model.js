@@ -127,6 +127,10 @@ const ironDispatchSchema = new mongoose.Schema(
       type: String,
       required: true,
     },
+    gate_pass_no: {
+      type: String,
+      required: true,
+    },
     qr_codes: [
       {
         type: String,

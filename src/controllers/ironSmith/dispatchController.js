@@ -151,6 +151,7 @@ import fs from 'fs';
 const dispatchSchema = Joi.object({
     work_order: Joi.string().required().messages({ 'string.empty': 'Work Order ID is required' }),
     invoice_or_sto: Joi.string().required().messages({ 'string.empty': 'Invoice/STO is required' }),
+    gate_pass_no: Joi.string().required().messages({ 'string.empty': 'Gate Pass No is required' }),
     vehicle_number: Joi.string().required().messages({ 'string.empty': 'Vehicle number is required' }),
     ticket_number: Joi.string().required().messages({ 'string.empty': 'Ticket number is required' }),
     qr_code_urls: Joi.alternatives()
@@ -204,7 +205,7 @@ const dispatchSchema = Joi.object({
       return next(new ApiError(400, 'Validation failed for dispatch creation', error.details));
     }
   
-    const { work_order, invoice_or_sto, vehicle_number, qr_code_urls, date, ticket_number, invoice_file: preUploadedFiles } = value;
+    const { work_order, invoice_or_sto, gate_pass_no, vehicle_number, qr_code_urls, date, ticket_number, invoice_file: preUploadedFiles } = value;
     const userId = req.user.id;
   
     if (!mongoose.Types.ObjectId.isValid(work_order)) {
@@ -264,6 +265,7 @@ const dispatchSchema = Joi.object({
           packing_ids: packingEntries.map((p) => p._id),
           products,
           invoice_or_sto,
+          gate_pass_no,
           qr_codes: packingEntries.map((p) => p.qr_code), // Keep qr_codes for reference
           qr_code_urls, // Use the provided URLs
           vehicle_number,
@@ -352,6 +354,7 @@ const updateDispatchSchema = Joi.object({
         'date.base': 'Date must be a valid ISO date',
     }),
     invoice_or_sto: Joi.string().optional().messages({ 'string.empty': 'Invoice/STO cannot be empty' }),
+    gate_pass_no: Joi.string().optional().messages({ 'string.empty': 'Gate Pass No. cannot be empty' }),
     vehicle_number: Joi.string().optional().messages({ 'string.empty': 'Vehicle number cannot be empty' }),
     ticket_number: Joi.string().optional().messages({ 'string.empty': 'Ticket number cannot be empty' }),
     invoice_file: Joi.array().items(Joi.string()).optional(), // For new file URLs if pre-uploaded
@@ -368,7 +371,7 @@ const updateDispatch = asyncHandler(async (req, res, next) => {
         return next(new ApiError(400, 'Validation failed for dispatch update', error.details));
     }
 
-    const { date, invoice_or_sto, vehicle_number, ticket_number, invoice_file: newInvoiceFiles } = value;
+    const { date, invoice_or_sto, gate_pass_no, vehicle_number, ticket_number, invoice_file: newInvoiceFiles } = value;
     const userId = req.user.id;
 
     // Handle file uploads for invoice_file if present
@@ -394,6 +397,7 @@ const updateDispatch = asyncHandler(async (req, res, next) => {
     const updateData = {
         ...(date && { date }),
         ...(invoice_or_sto && { invoice_or_sto }),
+        ...(gate_pass_no && { gate_pass_no }),
         ...(vehicle_number && { vehicle_number }),
         ...(ticket_number && { ticket_number }),
         ...(invoiceFileUrls.length > 0 && { invoice_file: invoiceFileUrls }), // Append or replace invoice_file
@@ -401,7 +405,7 @@ const updateDispatch = asyncHandler(async (req, res, next) => {
     };
 
     if (Object.keys(updateData).length === 1 && updateData.updated_by) {
-        return next(new ApiError(400, 'At least one field (date, invoice_or_sto, vehicle_number, ticket_number, or invoice_file) must be updated'));
+        return next(new ApiError(400, 'At least one field (date, invoice_or_sto, gate_pass_no, vehicle_number, ticket_number, or invoice_file) must be updated'));
     }
 
     // Update the dispatch entry
@@ -615,6 +619,7 @@ const getDispatchById = asyncHandler(async (req, res, next) => {
                 work_order_number: dispatch.work_order.workOrderNumber || 'Unknown Work Order',
                 work_order_created_by: workOrderCreator ? workOrderCreator.username : 'Unknown User',
                 created_at: dispatch.work_order.createdAt || null,
+                gate_pass_no: dispatch.gate_pass_no || null,
             },
             dispatched_shape_details: shapeDetails,
         };
