@@ -1999,6 +1999,96 @@ const getIronWorkOrderById = asyncHandler(async (req, res) => {
         })
         .lean();
 
+    // 4.1. Fetch dynamic quantities from all sections
+    const shapeIds = workOrder.products.map(p => p.shapeId?._id).filter(Boolean);
+    // Keep a parallel array of stringified shape ids for safe comparisons
+    const shapeIdStrings = shapeIds.map((id) => id.toString());
+    
+    // Initialize quantities object
+    const quantitiesByShape = {};
+    shapeIds.forEach(shapeId => {
+        quantitiesByShape[shapeId.toString()] = { achieved: 0, packed: 0, dispatched: 0, recycled: 0 };
+    });
+
+    try {
+        // Fetch production data (achieved quantities)
+        const productionData = await mongoose.model('ironDailyProduction')
+            .find({ 
+                work_order: workOrderId,
+                'products.shape_id': { $in: shapeIds }
+            })
+            .select('products.shape_id products.achieved_quantity')
+            .lean();
+
+        // Process production data
+        productionData.forEach((prod) => {
+            (prod.products || []).forEach((product) => {
+                if (product.shape_id) {
+                    const shapeId = product.shape_id.toString();
+                    if (shapeIdStrings.includes(shapeId)) {
+                        quantitiesByShape[shapeId].achieved += product.achieved_quantity || 0;
+                    }
+                }
+            });
+        });
+
+        // Fetch packing data (packed quantities) - using ironPacking model
+        const packingData = await mongoose.model('ironPacking')
+            .find({ 
+                work_order: workOrderId,
+                shape_id: { $in: shapeIds }
+            })
+            .select('shape_id product_quantity')
+            .lean();
+
+        // Process packing data
+        packingData.forEach((pack) => {
+            const shapeId = pack.shape_id?.toString();
+            if (shapeId && shapeIdStrings.includes(shapeId)) {
+                quantitiesByShape[shapeId].packed += pack.product_quantity || 0;
+            }
+        });
+
+        // Fetch dispatch data (dispatched quantities)
+        const dispatchData = await mongoose.model('ironDispatch')
+            .find({ 
+                work_order: workOrderId,
+                'products.shape_id': { $in: shapeIds }
+            })
+            .select('products.shape_id products.dispatch_quantity')
+            .lean();
+
+        // Process dispatch data
+        dispatchData.forEach((dispatch) => {
+            (dispatch.products || []).forEach((product) => {
+                const shapeId = product.shape_id?.toString();
+                if (shapeId && shapeIdStrings.includes(shapeId)) {
+                    quantitiesByShape[shapeId].dispatched += product.dispatch_quantity || 0;
+                }
+            });
+        });
+
+        // Fetch QC data (recycled quantities)
+        const qcData = await mongoose.model('ironQCCheck')
+            .find({ 
+                work_order: workOrderId,
+                shape_id: { $in: shapeIds }
+            })
+            .select('shape_id recycled_quantity')
+            .lean();
+
+        // Process QC data
+        qcData.forEach((qc) => {
+            const shapeId = qc.shape_id?.toString();
+            if (shapeId && shapeIdStrings.includes(shapeId)) {
+                quantitiesByShape[shapeId].recycled += qc.recycled_quantity || 0;
+            }
+        });
+    } catch (error) {
+        console.error('Error fetching quantities:', error);
+        // Continue with zero quantities if there's an error
+    }
+
     if (!workOrder) {
         throw new ApiError(404, `Work order not found with ID: ${workOrderId}`);
     }
@@ -2064,25 +2154,36 @@ const getIronWorkOrderById = asyncHandler(async (req, res) => {
             globalMemberDetails: workOrder.globalMemberDetails || '',
             status: workOrder.status,
         },
-        products: workOrder.products.map((product) => ({
-            shapeId: product.shapeId
-                ? {
-                    _id: product.shapeId._id,
-                    shape_code: product.shapeId.shape_code,
-                    description: product.shapeId.description,
-                }
-                : null,
-            barMark: product.barMark || '',
-            uom: product.uom,
-            quantity: product.quantity,
-            memberDetails: product.memberDetails || '',
-            memberQuantity: product.memberQuantity,
-            diameter: product.diameter || null,
-            weight: product.weight || '',
-            cuttingLength: product.cuttingLength || null,
-            dimensions: product.dimensions || [],
-            _id: product._id,
-        })),
+        products: workOrder.products.map((product) => {
+            const shapeId = product.shapeId?._id?.toString();
+            const quantities = quantitiesByShape[shapeId] || { achieved: 0, packed: 0, dispatched: 0, recycled: 0 };
+            const netPacked = Math.max(0, (quantities.packed || 0) - (quantities.dispatched || 0));
+            
+            return {
+                shapeId: product.shapeId
+                    ? {
+                        _id: product.shapeId._id,
+                        shape_code: product.shapeId.shape_code,
+                        description: product.shapeId.description,
+                    }
+                    : null,
+                barMark: product.barMark || '',
+                uom: product.uom,
+                quantity: product.quantity,
+                memberDetails: product.memberDetails || '',
+                memberQuantity: product.memberQuantity,
+                diameter: product.diameter || null,
+                weight: product.weight || '',
+                cuttingLength: product.cuttingLength || null,
+                dimensions: product.dimensions || [],
+                _id: product._id,
+                // Add dynamic quantities
+                achieved_quantity: quantities.achieved,
+                packed_quantity: netPacked,
+                dispatched_quantity: quantities.dispatched,
+                recycled_quantity: quantities.recycled,
+            };
+        }),
         files: workOrder.files || [], // Add files array to the response
     };
 
