@@ -37,6 +37,7 @@ const createIronJobOrder_24_07_2025 = asyncHandler(async (req, res) => {
       'number.base': 'Diameter must be a number',
       'number.min': 'Diameter must be non-negative',
     }),
+    barMark: Joi.string().optional().allow(''),
     selected_machines: Joi.array()
       .items(
         Joi.string().custom((value, helpers) => {
@@ -517,7 +518,7 @@ const createIronJobOrder = asyncHandler(async (req, res) => {
         )
         .optional()
         .default([]),
-  });
+  }).unknown(true);
 
   const jobOrderSchema = Joi.object({
     work_order: Joi.string()
@@ -758,20 +759,21 @@ const createIronJobOrder = asyncHandler(async (req, res) => {
 
 // Inside createIronJobOrder, after validating workOrder and shapes
 for (const product of value.products) {
-  const { shape, dia, planned_quantity } = product;
+  const { shape, dia, planned_quantity, barMark } = product;
 
   // Fetch all existing Job Orders for this Work Order, Shape, and Diameter
   const existingJobOrders = await ironJobOrder.find({
     work_order: value.work_order,
     'products.shape': shape,
     'products.dia': dia,
+    ...(barMark ? { 'products.barMark': barMark } : { 'products.barMark': { $in: [barMark || null, undefined, ''] } }),
   });
 
   // Sum the planned quantities of all existing Job Orders for this shape and diameter
   let allocatedQuantity = 0;
   existingJobOrders.forEach((jo) => {
     jo.products.forEach((p) => {
-      if (p.shape.toString() === shape.toString() && p.dia === dia) {
+      if (p.shape.toString() === shape.toString() && p.dia === dia && String(p.barMark || '') === String(barMark || '')) {
         allocatedQuantity += p.planned_quantity;
       }
     });
@@ -779,7 +781,7 @@ for (const product of value.products) {
 
   // Find the Work Order's quantity for this shape and diameter
   const workOrderProduct = workOrder.products.find(
-    (p) => p.shapeId.toString() === shape.toString() && p.diameter === dia
+    (p) => p.shapeId.toString() === shape.toString() && p.diameter === dia && String(p.barMark || '') === String(barMark || '')
   );
 
   if (!workOrderProduct) {
@@ -793,7 +795,7 @@ for (const product of value.products) {
   if (planned_quantity > remainingQuantity) {
     throw new ApiError(
       400,
-      `Planned quantity (${planned_quantity}) exceeds remaining allowable quantity (${remainingQuantity}) for shape ${shape} and diameter ${dia}`
+      `Planned quantity (${planned_quantity}) exceeds remaining allowable quantity (${remainingQuantity}) for shape ${shape}, diameter ${dia}${barMark ? ` and bar mark ${barMark}` : ''}`
     );
   }
 }
@@ -3332,8 +3334,9 @@ const workOrderData = asyncHandler(async (req, res) => {
           // Match by both shape ID AND diameter
           const shapeMatch = jobProductShapeId === workProduct.shapeId.toString();
           const diameterMatch = jobProduct.dia === workProduct.diameter;
+          const barMarkMatch = (jobProduct.barMark || null) === (workProduct.barMark || null);
           
-          return shapeMatch && diameterMatch;
+          return shapeMatch && diameterMatch && barMarkMatch;
         })
       );
 
@@ -3368,6 +3371,7 @@ const workOrderData = asyncHandler(async (req, res) => {
         memberDetails: workProduct.memberDetails,
         memberQuantity: workProduct.memberQuantity,
         diameter: workProduct.diameter,
+        barMark: workProduct.barMark,
         weight: workProduct.weight,
         dimensions: workProduct.dimensions,
       };

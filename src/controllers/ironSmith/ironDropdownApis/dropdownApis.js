@@ -264,6 +264,14 @@ const getWorkOrderProductByJobOrder = async (req, res) => {
           job_order: joId,
         }).lean();
 
+        // Find matching work order product to pull barMark (if present)
+        const matchingWOProduct = Array.isArray(jobOrder.work_order?.products)
+          ? jobOrder.work_order.products.find((p) =>
+              (p.shapeId?.toString?.() || String(p.shapeId)) === (product.shape?._id?.toString?.() || String(product.shape))
+            )
+          : null;
+        const barMark = matchingWOProduct?.barMark || null;
+
         return {
           objectId: product._id.toString(),
           shapeId: product.shape._id.toString(),
@@ -271,6 +279,7 @@ const getWorkOrderProductByJobOrder = async (req, res) => {
           plannedQuantity: product.planned_quantity,
           scheduleDate: product.schedule_date,
           dia: product.dia,
+          barMark,
           achievedQuantity: productionEntry?.products[0]?.achieved_quantity || 0, // From production
           rejectedQuantity: productionEntry?.products[0]?.rejected_quantity || 0, // From production
           recycledQuantity: productionEntry?.products[0]?.recycled_quantity || 0, // From production

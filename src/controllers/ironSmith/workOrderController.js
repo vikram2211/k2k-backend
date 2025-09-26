@@ -2131,6 +2131,34 @@ const updateIronWorkOrder_04_08_2025 = asyncHandler(async (req, res) => {
         }
     }
 
+    // Normalize date inputs (accepts ISO, YYYY-MM-DD, or DD-MM-YYYY)
+    const normalizeDateInput = (val) => {
+        if (!val) return val;
+        if (val instanceof Date) return val;
+        if (typeof val === 'string') {
+            // ISO or YYYY-MM-DD
+            if (/^\d{4}-\d{2}-\d{2}/.test(val)) {
+                const d = new Date(val);
+                return isNaN(d.getTime()) ? null : d;
+            }
+            // DD-MM-YYYY
+            const m = val.match(/^(\d{1,2})-(\d{1,2})-(\d{4})$/);
+            if (m) {
+                const day = m[1].padStart(2, '0');
+                const month = m[2].padStart(2, '0');
+                const year = m[3];
+                const d = new Date(`${year}-${month}-${day}`);
+                return isNaN(d.getTime()) ? null : d;
+            }
+            const d = new Date(val);
+            return isNaN(d.getTime()) ? null : d;
+        }
+        return null;
+    };
+
+    bodyData.workOrderDate = normalizeDateInput(bodyData.workOrderDate);
+    bodyData.deliveryDate = normalizeDateInput(bodyData.deliveryDate);
+
     // Fetch existing work order
     const existingWorkOrder = await ironWorkOrder.findById(workOrderId);
     if (!existingWorkOrder) {

@@ -61,6 +61,11 @@ const ironJobOrderSchema = new mongoose.Schema(
           required: [true, 'Diameter is required'],
           min: [0, 'Diameter must be non-negative'],
         },
+        barMark: {
+          type: String,
+          required: false,
+          trim: true,
+        },
         // color: {
         //   type: mongoose.Schema.Types.ObjectId,
         //   ref: 'Color',
