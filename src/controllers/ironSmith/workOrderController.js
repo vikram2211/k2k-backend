@@ -2007,7 +2007,7 @@ const getIronWorkOrderById = asyncHandler(async (req, res) => {
     // Initialize quantities object
     const quantitiesByShape = {};
     shapeIds.forEach(shapeId => {
-        quantitiesByShape[shapeId.toString()] = { achieved: 0, packed: 0, dispatched: 0, recycled: 0 };
+        quantitiesByShape[shapeId.toString()] = { achieved: 0, packed: 0, dispatched: 0, recycled: 0, rejected: 0 };
     });
 
     try {
@@ -2068,13 +2068,13 @@ const getIronWorkOrderById = asyncHandler(async (req, res) => {
             });
         });
 
-        // Fetch QC data (recycled quantities)
+        // Fetch QC data (recycled and rejected quantities)
         const qcData = await mongoose.model('ironQCCheck')
             .find({ 
                 work_order: workOrderId,
                 shape_id: { $in: shapeIds }
             })
-            .select('shape_id recycled_quantity')
+            .select('shape_id recycled_quantity rejected_quantity')
             .lean();
 
         // Process QC data
@@ -2082,6 +2082,7 @@ const getIronWorkOrderById = asyncHandler(async (req, res) => {
             const shapeId = qc.shape_id?.toString();
             if (shapeId && shapeIdStrings.includes(shapeId)) {
                 quantitiesByShape[shapeId].recycled += qc.recycled_quantity || 0;
+                quantitiesByShape[shapeId].rejected += qc.rejected_quantity || 0;
             }
         });
     } catch (error) {
@@ -2156,7 +2157,7 @@ const getIronWorkOrderById = asyncHandler(async (req, res) => {
         },
         products: workOrder.products.map((product) => {
             const shapeId = product.shapeId?._id?.toString();
-            const quantities = quantitiesByShape[shapeId] || { achieved: 0, packed: 0, dispatched: 0, recycled: 0 };
+            const quantities = quantitiesByShape[shapeId] || { achieved: 0, packed: 0, dispatched: 0, recycled: 0, rejected: 0 };
             const netPacked = Math.max(0, (quantities.packed || 0) - (quantities.dispatched || 0));
             
             return {
@@ -2182,6 +2183,7 @@ const getIronWorkOrderById = asyncHandler(async (req, res) => {
                 packed_quantity: netPacked,
                 dispatched_quantity: quantities.dispatched,
                 recycled_quantity: quantities.recycled,
+                rejected_quantity: quantities.rejected,
             };
         }),
         files: workOrder.files || [], // Add files array to the response
