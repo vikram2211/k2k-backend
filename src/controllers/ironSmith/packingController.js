@@ -296,8 +296,11 @@ const createPackingBundle = async (req, res) => {
   try {
     const { work_order, shape_id, object_id, product_quantity, bundle_size, weight, qr_codes, bundle_quantities } = req.body;
 
-    // Update packed_quantity in job order
-    const jobOrder = await ironJobOrder.findOne({ work_order: work_order });
+    // Find the specific job order that contains the product being packed.
+    // This is more precise than finding by just work_order, which might not be unique.
+    const jobOrder = await ironJobOrder.findOne({ "products._id": object_id });
+    console.log("jobOrder",jobOrder);
+    
     if (!jobOrder) {
       throw new ApiError(404, "Job order not found");
     }
