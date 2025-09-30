@@ -254,7 +254,7 @@ const getWorkOrderProductByJobOrder = async (req, res) => {
       });
     }
 
-    const jobOrder = jobOrders[0];
+    const jobOrder = jobOrders[0]; 
 
     // 2. For each product, fetch the latest production entry
     const productsWithProductionData = await Promise.all(

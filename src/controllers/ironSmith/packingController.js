@@ -739,6 +739,32 @@ const getAllPackingDetails2 = async (req, res) => {
       },
       {
         $lookup: {
+          from: 'ironjoborders',
+          let: { workOrderId: '$work_order', shapeId: '$shape_id', objectId: '$object_id' },
+          pipeline: [
+            { $match: { $expr: { $eq: ['$work_order', '$$workOrderId'] } } },
+            { $unwind: '$products' },
+            {
+              $match: {
+                $expr: {
+                  $and: [
+                    { $or: [
+                      { $eq: ['$products._id', '$$objectId'] },
+                      { $eq: ['$products.shape', '$$shapeId'] },
+                      { $eq: ['$products.shape_id', '$$shapeId'] }
+                    ] }
+                  ]
+                }
+              }
+            },
+            { $project: { _id: 0, barMark: '$products.barMark', dia: '$products.dia', member: '$products.member', description: '$products.description', weight_kgs: '$products.weight', dimensions: '$products.dimensions' } }
+          ],
+          as: 'productDetails'
+        }
+      },
+      { $unwind: { path: '$productDetails', preserveNullAndEmptyArrays: true } },
+      {
+        $lookup: {
           from: 'ironshapes',
           localField: 'shape_id',
           foreignField: '_id',
@@ -1217,6 +1243,28 @@ const getPackingDetailsById = async (req, res) => {
         },
       },
       {
+        $addFields: {
+          cutting_length: {
+            $cond: [
+              { $gt: [{ $size: { $ifNull: ['$productDetails.dimensions', []] } }, 0] },
+              {
+                $reduce: {
+                  input: '$productDetails.dimensions',
+                  initialValue: '',
+                  in: {
+                    $concat: [
+                      { $cond: [{ $eq: ['$$value', ''] }, '', { $concat: ['$$value', ', '] }] },
+                      { $concat: ['$$this.name', ': ', { $ifNull: ['$$this.value', '-'] }] }
+                    ]
+                  }
+                }
+              },
+              null
+            ]
+          }
+        }
+      },
+      {
         $project: {
           wo_id: '$work_order',
           wo: '$workOrderDetails.workOrderNumber',
@@ -1231,6 +1279,12 @@ const getPackingDetailsById = async (req, res) => {
           qr_code: '$qr_code',
           qr_code_url: '$qr_code_url',
           product_quantity: '$product_quantity',
+          member: { $ifNull: ['$productDetails.member', 'N/A'] },
+          description: { $ifNull: ['$productDetails.description', '$shapeDetails.description'] },
+          barMark: { $ifNull: ['$productDetails.barMark', 'N/A'] },
+          dia: { $ifNull: ['$productDetails.dia', 'N/A'] },
+          cutting_length: { $ifNull: ['$cutting_length', 'N/A'] },
+          weight_kgs: { $ifNull: ['$productDetails.weight_kgs', '$shapeDetails.weight'] }
         },
       },
     ]);
