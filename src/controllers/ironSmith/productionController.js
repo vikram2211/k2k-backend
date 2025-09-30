@@ -425,7 +425,7 @@ const getProductionData = asyncHandler(async (req, res) => {
     todayDPR: [],
     futureDPR: [],
   };
-  console.log("productions",productions);
+  // console.log("productions",productions);
 
   productions.forEach((production) => {
     const { date_range } = production.job_order;
@@ -1520,7 +1520,10 @@ const getProductionLog1 = async (req, res, next) => {
   }
 };
 
-const getProductionLog = async (req, res, next) => {
+
+
+
+const getProductionLog_30_09_2025 = async (req, res, next) => {
   try {
     const { job_order, shape_id, object_id } = req.query;
     console.log("job_order",job_order);
@@ -1551,6 +1554,10 @@ const getProductionLog = async (req, res, next) => {
 
     
     console.log("dailyProduction",dailyProduction);
+    dailyProduction.products.map((p)=>
+    console.log("p",p)
+    )
+    
 
     // If no DailyProduction document found
     if (!dailyProduction) {
@@ -1585,6 +1592,87 @@ const getProductionLog = async (req, res, next) => {
     return res.status(500).json({ success: false, message: 'Internal Server Error' });
   }
 };
+
+
+
+
+
+
+
+const getProductionLog = async (req, res, next) => {
+  try {
+    const { job_order, shape_id, object_id } = req.query;
+    console.log("job_order", job_order);
+    console.log("shape_id", shape_id);
+    console.log("object_id", object_id);
+
+    // Validate query parameters
+    if (!job_order || !mongoose.isValidObjectId(job_order)) {
+      return res.status(400).json({ success: false, message: 'Valid job_order is required' });
+    }
+    if (!shape_id || !mongoose.isValidObjectId(shape_id)) {
+      return res.status(400).json({ success: false, message: 'Valid shape_id is required' });
+    }
+    if (!object_id || !mongoose.isValidObjectId(object_id)) {
+      return res.status(400).json({ success: false, message: 'Valid object_id is required' });
+    }
+
+    // Fetch the DailyProduction document for the specified job_order, shape_id, and object_id
+    const dailyProduction = await ironDailyProduction.findOne({
+      job_order: job_order,
+      'products.shape_id': shape_id,
+      'products.object_id': object_id,
+    })
+      .populate({
+        path: 'production_logs.user',
+        model: 'User',
+        select: 'username',
+      })
+      .lean();
+
+    console.log("dailyProduction", dailyProduction);
+
+    // If no DailyProduction document found
+    if (!dailyProduction) {
+      return res.status(200).json({
+        success: true,
+        message: 'No production log records found for the specified job order, shape, and object_id',
+        data: [],
+        object_id: object_id,
+      });
+    }
+
+    // Prepare the response with production log entries
+    const productionLogRecords = dailyProduction.production_logs && dailyProduction.production_logs.length > 0
+      ? dailyProduction.production_logs.map((log) => ({
+          action: log.action,
+          timestamp: log.timestamp,
+          user: log.user._id,
+          username: log.user.username,
+          description: log.description || 'N/A',
+          achieved_quantity: log.achieved_quantity || null,
+          rejected_quantity: log.rejected_quantity || null, // This will now show the incremental rejected quantity
+        }))
+      : [];
+
+    return res.status(200).json({
+      success: true,
+      message: 'Production log records fetched successfully',
+      data: productionLogRecords,
+      object_id: object_id,
+    });
+  } catch (error) {
+    console.error('Error fetching production log records:', error);
+    return res.status(500).json({ success: false, message: 'Internal Server Error' });
+  }
+};
+
+
+
+
+
+
+
 
 const addQcCheck1 = asyncHandler(async (req, res) => {
   try {
@@ -1943,7 +2031,7 @@ const addQcCheck_25_09_2025 = asyncHandler(async (req, res) => {
     );
   }
 });
-const addQcCheck = asyncHandler(async (req, res) => {
+const addQcCheck_30_09_2025 = asyncHandler(async (req, res) => {
   try {
     const { job_order, shape_id, object_id, rejected_quantity, remarks } = req.body;
 
@@ -2055,6 +2143,119 @@ const addQcCheck = asyncHandler(async (req, res) => {
     );
   }
 });
+
+
+
+const addQcCheck = asyncHandler(async (req, res) => {
+  try {
+    const { job_order, shape_id, object_id, rejected_quantity, remarks } = req.body;
+    if (!job_order || !shape_id || !object_id || rejected_quantity === undefined) {
+      return res.status(400).json(
+        new ApiResponse(400, null, 'Missing required fields: job_order, shape_id, object_id, rejected_quantity.')
+      );
+    }
+    if (!req.user || !req.user._id) {
+      return res.status(401).json(
+        new ApiResponse(401, null, 'Unauthorized: User not authenticated.')
+      );
+    }
+    if (isNaN(rejected_quantity) || rejected_quantity < 0) {
+      return res.status(400).json(
+        new ApiResponse(400, null, 'Rejected quantity must be a non-negative number.')
+      );
+    }
+
+    const dailyProduction = await ironDailyProduction.findOne({
+      job_order,
+      'products.shape_id': shape_id,
+      'products.object_id': object_id,
+    });
+
+    if (!dailyProduction) {
+      return res.status(404).json(
+        new ApiResponse(404, null, 'Daily production document not found for this job order and shape.')
+      );
+    }
+
+    const productIndex = dailyProduction.products.findIndex((p) => p.object_id.equals(object_id));
+    if (productIndex === -1) {
+      return res.status(404).json(
+        new ApiResponse(404, null, 'object_id not found in the products array.')
+      );
+    }
+
+    const currentAchievedQuantity = dailyProduction.products[productIndex].achieved_quantity || 0;
+    const currentRejectedQuantity = dailyProduction.products[productIndex].rejected_quantity || 0;
+
+    // Corrected validation: the incremental rejected_quantity cannot exceed the current achieved_quantity
+    if (rejected_quantity > currentAchievedQuantity) {
+      return res.status(400).json(
+        new ApiResponse(
+          400,
+          null,
+          `Rejected quantity (${rejected_quantity}) cannot exceed current achieved quantity (${currentAchievedQuantity}) for this product.`
+        )
+      );
+    }
+
+    // Check if a QC check already exists for the shape_id and object_id
+    let qcCheck = await ironQCCheck.findOne({ shape_id, object_id, status: 'Active' });
+
+    if (qcCheck) {
+      // Increment existing record
+      qcCheck.rejected_quantity += rejected_quantity;
+      if (remarks) {
+        qcCheck.remarks = remarks; // Update remarks if provided
+      }
+      qcCheck.updated_by = req.user._id;
+      await qcCheck.save();
+    } else {
+      // Create new QC check record
+      const qcCheckData = {
+        work_order: dailyProduction.work_order,
+        job_order: dailyProduction.job_order,
+        shape_id: shape_id,
+        object_id: object_id,
+        rejected_quantity: rejected_quantity,
+        recycled_quantity: 0,
+        remarks: remarks || '',
+        created_by: req.user._id,
+        status: 'Active',
+      };
+      qcCheck = new ironQCCheck(qcCheckData);
+      await qcCheck.save();
+    }
+
+    // Update quantities in dailyProduction
+    dailyProduction.products[productIndex].rejected_quantity = qcCheck.rejected_quantity;
+    dailyProduction.products[productIndex].achieved_quantity = currentAchievedQuantity - rejected_quantity;
+    dailyProduction.qc_checked_by = req.user._id;
+
+    // Add a new log entry with the incremental rejected_quantity
+    dailyProduction.production_logs.push({
+      action: 'QCCheck',
+      user: req.user._id,
+      description: remarks || 'N/A',
+      rejected_quantity: rejected_quantity, // Store the incremental rejected_quantity
+    });
+
+    dailyProduction.updated_by = req.user._id;
+    const updatedProduction = await dailyProduction.save();
+
+    return res.status(200).json(
+      new ApiResponse(200, {
+        production: updatedProduction,
+        qcCheck: qcCheck,
+      }, 'QC check added/updated and production record updated successfully.')
+    );
+  } catch (error) {
+    console.error('Error adding QC check:', error);
+    return res.status(500).json(
+      new ApiResponse(500, null, 'Internal Server Error', error.message)
+    );
+  }
+});
+
 
 const addMachineToProduction = asyncHandler(async (req, res) => {
   try {
