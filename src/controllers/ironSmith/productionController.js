@@ -428,7 +428,11 @@ const getProductionData = asyncHandler(async (req, res) => {
   // console.log("productions",productions);
 
   productions.forEach((production) => {
+    console.log("production",production);
+    
     const { date_range } = production.job_order;
+    // console.log("date_range",date_range);
+    
     const fromDate = new Date(date_range.from);
     const toDate = new Date(date_range.to);
 

@@ -207,6 +207,21 @@ const getProductionsByProcess = asyncHandler(async (req, res) => {
                     'product.product_id': { $exists: true, $ne: null } // Ensure product_id exists
                 }
             },
+            // Step : Lookup internal work order details
+            {
+                $lookup: {
+                    from: 'falconinternalworkorders',
+                    localField: 'internal_work_order',
+                    foreignField: '_id',
+                    as: 'internalWorkOrderDetails'
+                }
+            },
+            {
+                $unwind: {
+                    path: '$internalWorkOrderDetails',
+                    preserveNullAndEmptyArrays: true
+                }
+            },
             // Step 2: Lookup job order details
             {
                 $lookup: {
@@ -294,7 +309,8 @@ const getProductionsByProcess = asyncHandler(async (req, res) => {
                     updated_by: 1,
                     createdAt: 1,
                     updatedAt: 1,
-                    __v: 1
+                    __v: 1,
+                    int_work_order_id: '$internalWorkOrderDetails.int_work_order_id',
                 }
             }
         ]);

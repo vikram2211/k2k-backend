@@ -20,6 +20,7 @@ import { falconQCCheck } from '../../models/falconFacade/falconQcCheck.model.js'
 import { falconSystem } from '../../models/falconFacade/helpers/falconSystem.model.js';
 import { falconProductSystem } from '../../models/falconFacade/helpers/falconProductSystem.model.js';
 import { z } from 'zod';
+import { log } from 'console';
 
 
 
@@ -1992,6 +1993,7 @@ const getFalconJobOrderById = asyncHandler(async (req, res) => {
         .populate('created_by', 'username email')
         .populate('updated_by', 'username email')
         .lean();
+        console.log("jobOrder", jobOrder);
 
     if (!jobOrder) {
         throw new ApiError(404, `Job order not found with ID: ${id}`);
@@ -1999,7 +2001,7 @@ const getFalconJobOrderById = asyncHandler(async (req, res) => {
 
     // Fetch ALL internal work orders by job_order_id
     const internalWorkOrders = await falconInternalWorkOrder.find({ job_order_id: id }).lean();
-    console.log("internalWorkOrders", internalWorkOrders);
+    // console.log("internalWorkOrders", internalWorkOrders);
 
     const formattedProductsDetails = await Promise.all(
         jobOrder.products.map(async (product) => {
@@ -2083,137 +2085,295 @@ const getFalconJobOrderById = asyncHandler(async (req, res) => {
     );
 
     // Job order details with semi-finished
-    const jobOrderDetailsWithSemiFinished = [];
-    if (internalWorkOrders.length > 0) {
-        for (const internalWorkOrder of internalWorkOrders) {
-            for (const prod of internalWorkOrder.products) {
-                const productId = prod.product.toString();
-                let achievedQty = 0;
-                const semiFinishedDetails = [];
-                let semiResults = [];
+    // const jobOrderDetailsWithSemiFinished = [];
+    // if (internalWorkOrders.length > 0) {
+    //     for (const internalWorkOrder of internalWorkOrders) {
+    //         for (const prod of internalWorkOrder.products) {
+    //             const productId = prod.product.toString();
+    //             console.log("productId", productId);
+                
 
-                if (prod.semifinished_details && prod.semifinished_details.length > 0) {
-                    for (const semi of prod.semifinished_details) {
-                        const lastProcess = semi.processes?.[semi.processes.length - 1];
-                        let semiAchieved = 0;
-                        let isComplete = false;
 
-                        if (lastProcess) {
-                            const productionDoc = await falconProduction.findOne({
-                                job_order: id,
-                                'product.product_id': productId,
-                                semifinished_id: semi.semifinished_id,
-                                process_name: { $regex: `^${lastProcess.name}$`, $options: 'i' },
-                            }).lean();
+    //             // Find the corresponding product in the job order to get jo_po_quantity
+    //             const jobOrderProduct = jobOrder.products.find(p => p.product.toString() === productId);
+    //             console.log("jobOrderProduct", jobOrderProduct);
+                
+    //             const jo_po_quantity = jobOrderProduct ? jobOrderProduct.po_quantity : 0;
+    //             console.log("jo_po_quantity", jo_po_quantity);
+                
 
-                            if (productionDoc) {
-                                semiAchieved = productionDoc.product.achieved_quantity || 0;
-                                isComplete = semiAchieved >= prod.po_quantity;
-                            }
-                        }
 
-                        semiResults.push({ achievedQty: semiAchieved, isComplete });
+    //             let achievedQty = 0;
+    //             const semiFinishedDetails = [];
+    //             let semiResults = [];
 
-                        // Packing
-                        const packingDocs = await falconPacking.find({
-                            job_order_id: jobOrder._id,
-                            product: prod.product,
-                            semi_finished_id: semi.semifinished_id,
-                        }).lean();
+    //             if (prod.semifinished_details && prod.semifinished_details.length > 0) {
+    //                 for (const semi of prod.semifinished_details) {
+    //                     const lastProcess = semi.processes?.[semi.processes.length - 1];
+    //                     let semiAchieved = 0;
+    //                     let isComplete = false;
 
-                        const packed_qty = packingDocs.reduce((sum, doc) => sum + (doc.semi_finished_quantity || 0), 0);
-                        const packingIds = packingDocs.map((doc) => doc._id);
+    //                     if (lastProcess) {
+    //                         const productionDoc = await falconProduction.findOne({
+    //                             job_order: id,
+    //                             'product.product_id': productId,
+    //                             semifinished_id: semi.semifinished_id,
+    //                             process_name: { $regex: `^${lastProcess.name}$`, $options: 'i' },
+    //                         }).lean();
 
-                        // Dispatch
-                        const dispatchDocs = await falocnDispatch.find({
-                            job_order: jobOrder._id,
-                            packing_ids: { $in: packingIds },
-                        }).lean();
+    //                         if (productionDoc) {
+    //                             semiAchieved = productionDoc.product.achieved_quantity || 0;
+    //                             isComplete = semiAchieved >= prod.po_quantity;
+    //                         }
+    //                     }
 
-                        let dispatch_qty = 0;
-                        dispatchDocs.forEach((dispatch) => {
-                            dispatch.products.forEach((product) => {
-                                if (
-                                    product.product_id?.toString() === prod.product?.toString() &&
-                                    product.semi_finished_id === semi.semifinished_id
-                                ) {
-                                    dispatch_qty += product.dispatch_quantity || 0;
-                                }
-                            });
-                        });
+    //                     semiResults.push({ achievedQty: semiAchieved, isComplete });
 
-                        semiFinishedDetails.push({
+    //                     // Packing
+    //                     const packingDocs = await falconPacking.find({
+    //                         job_order_id: jobOrder._id,
+    //                         product: prod.product,
+    //                         semi_finished_id: semi.semifinished_id,
+    //                     }).lean();
+
+    //                     const packed_qty = packingDocs.reduce((sum, doc) => sum + (doc.semi_finished_quantity || 0), 0);
+    //                     const packingIds = packingDocs.map((doc) => doc._id);
+
+    //                     // Dispatch
+    //                     const dispatchDocs = await falocnDispatch.find({
+    //                         job_order: jobOrder._id,
+    //                         packing_ids: { $in: packingIds },
+    //                     }).lean();
+
+    //                     let dispatch_qty = 0;
+    //                     dispatchDocs.forEach((dispatch) => {
+    //                         dispatch.products.forEach((product) => {
+    //                             if (
+    //                                 product.product_id?.toString() === prod.product?.toString() &&
+    //                                 product.semi_finished_id === semi.semifinished_id
+    //                             ) {
+    //                                 dispatch_qty += product.dispatch_quantity || 0;
+    //                             }
+    //                         });
+    //                     });
+
+    //                     semiFinishedDetails.push({
+    //                         semifinished_id: semi.semifinished_id,
+    //                         file_url: semi.file_url,
+    //                         remarks: semi.remarks,
+    //                         packed_qty,
+    //                         dispatch_qty,
+    //                         processes: await Promise.all(
+    //                             semi.processes.map(async (proc) => {
+    //                                 const production = await falconProduction.findOne({
+    //                                     job_order: jobOrder._id,
+    //                                     'product.product_id': prod.product,
+    //                                     semifinished_id: semi.semifinished_id,
+    //                                     process_name: { $regex: `^${proc.name}$`, $options: 'i' },
+    //                                 }).lean();
+
+    //                                 return {
+    //                                     name: proc.name,
+    //                                     file_url: proc.file_url,
+    //                                     remarks: proc.remarks,
+    //                                     achievedQty: production?.product?.achieved_quantity || 0,
+    //                                 };
+    //                             })
+    //                         ),
+    //                     });
+    //                 }
+
+    //                 // ✅ Only count once per IWO if ALL semi-finished are complete
+    //                 const allComplete = semiResults.every(s => s.isComplete);
+    //                 if (allComplete) {
+    //                     achievedQty += prod.po_quantity;
+    //                 }
+    //             }
+
+    //             // QC Check
+    //             const qcDocs = await falconQCCheck.find({
+    //                 job_order: jobOrder._id,
+    //                 product_id: prod.product,
+    //             }).lean();
+
+    //             let rejectedQty = qcDocs?.reduce((sum, doc) => sum + (doc.rejected_quantity || 0), 0) || 0;
+
+    //             // System and product system
+    //             let systemName = 'N/A';
+    //             if (prod.system) {
+    //                 const systemDoc = await falconSystem.findById(prod.system).select('name').lean();
+    //                 if (systemDoc) systemName = systemDoc.name;
+    //             }
+
+    //             let productSystemName = 'N/A';
+    //             if (prod.product_system) {
+    //                 const productSystemDoc = await falconProductSystem.findById(prod.product_system).select('name').lean();
+    //                 if (productSystemDoc) productSystemName = productSystemDoc.name;
+    //             }
+
+    //             jobOrderDetailsWithSemiFinished.push({
+    //                 int_work_order_id: internalWorkOrder.int_work_order_id,
+    //                 job_order_id: jobOrder.job_order_id,
+    //                 product_id: prod.product?.toString(),
+    //                 sales_order_no: internalWorkOrder.sales_order_no,
+    //                 job_order_db_id: jobOrder._id,
+    //                 date: internalWorkOrder.date,
+    //                 system: prod.system,
+    //                 system_name: systemName,
+    //                 product_system: prod.product_system,
+    //                 product_system_name: productSystemName,
+    //                 po_quantity: prod.po_quantity,
+    //                 jo_po_quantity: jo_po_quantity,
+    //                 achievedQty,
+    //                 rejectedQty,
+    //                 semiFinishedDetails,
+    //             });
+    //         }
+    //     }
+    // }
+
+
+
+
+
+
+
+
+
+
+
+    // Job order details with semi-finished
+const jobOrderDetailsWithSemiFinished = [];
+if (internalWorkOrders.length > 0) {
+    for (const internalWorkOrder of internalWorkOrders) {
+        for (const prod of internalWorkOrder.products) {
+            const productId = prod.product.toString();
+            console.log("productId", productId);
+
+            // Find the corresponding product in the job order to get jo_po_quantity
+            const jobOrderProduct = jobOrder.products.find(p => p.product._id.toString() === productId);
+            const jo_po_quantity = jobOrderProduct ? jobOrderProduct.po_quantity : 0;
+
+            let achievedQty = 0;
+            const semiFinishedDetails = [];
+            let semiResults = [];
+
+            if (prod.semifinished_details && prod.semifinished_details.length > 0) {
+                for (const semi of prod.semifinished_details) {
+                    const lastProcess = semi.processes?.[semi.processes.length - 1];
+                    let semiAchieved = 0;
+                    let isComplete = false;
+                    if (lastProcess) {
+                        const productionDoc = await falconProduction.findOne({
+                            job_order: id,
+                            'product.product_id': productId,
                             semifinished_id: semi.semifinished_id,
-                            file_url: semi.file_url,
-                            remarks: semi.remarks,
-                            packed_qty,
-                            dispatch_qty,
-                            processes: await Promise.all(
-                                semi.processes.map(async (proc) => {
-                                    const production = await falconProduction.findOne({
-                                        job_order: jobOrder._id,
-                                        'product.product_id': prod.product,
-                                        semifinished_id: semi.semifinished_id,
-                                        process_name: { $regex: `^${proc.name}$`, $options: 'i' },
-                                    }).lean();
+                            process_name: { $regex: `^${lastProcess.name}$`, $options: 'i' },
+                        }).lean();
+                        if (productionDoc) {
+                            semiAchieved = productionDoc.product.achieved_quantity || 0;
+                            isComplete = semiAchieved >= prod.po_quantity;
+                        }
+                    }
+                    semiResults.push({ achievedQty: semiAchieved, isComplete });
 
-                                    return {
-                                        name: proc.name,
-                                        file_url: proc.file_url,
-                                        remarks: proc.remarks,
-                                        achievedQty: production?.product?.achieved_quantity || 0,
-                                    };
-                                })
-                            ),
+                    // Packing
+                    const packingDocs = await falconPacking.find({
+                        job_order_id: jobOrder._id,
+                        product: prod.product,
+                        semi_finished_id: semi.semifinished_id,
+                    }).lean();
+                    const packed_qty = packingDocs.reduce((sum, doc) => sum + (doc.semi_finished_quantity || 0), 0);
+                    const packingIds = packingDocs.map((doc) => doc._id);
+
+                    // Dispatch
+                    const dispatchDocs = await falocnDispatch.find({
+                        job_order: jobOrder._id,
+                        packing_ids: { $in: packingIds },
+                    }).lean();
+                    let dispatch_qty = 0;
+                    dispatchDocs.forEach((dispatch) => {
+                        dispatch.products.forEach((product) => {
+                            if (
+                                product.product_id?.toString() === prod.product?.toString() &&
+                                product.semi_finished_id === semi.semifinished_id
+                            ) {
+                                dispatch_qty += product.dispatch_quantity || 0;
+                            }
                         });
-                    }
+                    });
 
-                    // ✅ Only count once per IWO if ALL semi-finished are complete
-                    const allComplete = semiResults.every(s => s.isComplete);
-                    if (allComplete) {
-                        achievedQty += prod.po_quantity;
-                    }
+                    semiFinishedDetails.push({
+                        semifinished_id: semi.semifinished_id,
+                        file_url: semi.file_url,
+                        remarks: semi.remarks,
+                        packed_qty,
+                        dispatch_qty,
+                        processes: await Promise.all(
+                            semi.processes.map(async (proc) => {
+                                const production = await falconProduction.findOne({
+                                    job_order: jobOrder._id,
+                                    'product.product_id': prod.product,
+                                    semifinished_id: semi.semifinished_id,
+                                    process_name: { $regex: `^${proc.name}$`, $options: 'i' },
+                                }).lean();
+                                return {
+                                    name: proc.name,
+                                    file_url: proc.file_url,
+                                    remarks: proc.remarks,
+                                    achievedQty: production?.product?.achieved_quantity || 0,
+                                };
+                            })
+                        ),
+                    });
                 }
-
-                // QC Check
-                const qcDocs = await falconQCCheck.find({
-                    job_order: jobOrder._id,
-                    product_id: prod.product,
-                }).lean();
-
-                let rejectedQty = qcDocs?.reduce((sum, doc) => sum + (doc.rejected_quantity || 0), 0) || 0;
-
-                // System and product system
-                let systemName = 'N/A';
-                if (prod.system) {
-                    const systemDoc = await falconSystem.findById(prod.system).select('name').lean();
-                    if (systemDoc) systemName = systemDoc.name;
+                // Only count once per IWO if ALL semi-finished are complete
+                const allComplete = semiResults.every(s => s.isComplete);
+                if (allComplete) {
+                    achievedQty += prod.po_quantity;
                 }
-
-                let productSystemName = 'N/A';
-                if (prod.product_system) {
-                    const productSystemDoc = await falconProductSystem.findById(prod.product_system).select('name').lean();
-                    if (productSystemDoc) productSystemName = productSystemDoc.name;
-                }
-
-                jobOrderDetailsWithSemiFinished.push({
-                    job_order_id: jobOrder.job_order_id,
-                    product_id: prod.product?.toString(),
-                    sales_order_no: internalWorkOrder.sales_order_no,
-                    job_order_db_id: jobOrder._id,
-                    date: internalWorkOrder.date,
-                    system: prod.system,
-                    system_name: systemName,
-                    product_system: prod.product_system,
-                    product_system_name: productSystemName,
-                    po_quantity: prod.po_quantity,
-                    achievedQty,
-                    rejectedQty,
-                    semiFinishedDetails,
-                });
             }
+
+            // QC Check
+            const qcDocs = await falconQCCheck.find({
+                job_order: jobOrder._id,
+                product_id: prod.product,
+            }).lean();
+            let rejectedQty = qcDocs?.reduce((sum, doc) => sum + (doc.rejected_quantity || 0), 0) || 0;
+
+            // System and product system
+            let systemName = 'N/A';
+            if (prod.system) {
+                const systemDoc = await falconSystem.findById(prod.system).select('name').lean();
+                if (systemDoc) systemName = systemDoc.name;
+            }
+            let productSystemName = 'N/A';
+            if (prod.product_system) {
+                const productSystemDoc = await falconProductSystem.findById(prod.product_system).select('name').lean();
+                if (productSystemDoc) productSystemName = productSystemDoc.name;
+            }
+
+            jobOrderDetailsWithSemiFinished.push({
+                int_work_order_id: internalWorkOrder.int_work_order_id,
+                job_order_id: jobOrder.job_order_id,
+                product_id: prod.product?.toString(),
+                sales_order_no: internalWorkOrder.sales_order_no,
+                job_order_db_id: jobOrder._id,
+                date: internalWorkOrder.date,
+                system: prod.system,
+                system_name: systemName,
+                product_system: prod.product_system,
+                product_system_name: productSystemName,
+                po_quantity: prod.po_quantity,
+                jo_po_quantity: jo_po_quantity, // Add jo_po_quantity here
+                achievedQty,
+                rejectedQty,
+                semiFinishedDetails,
+            });
         }
     }
+}
+
 
     // Packing
     const rawPackingDocs = await falconPacking

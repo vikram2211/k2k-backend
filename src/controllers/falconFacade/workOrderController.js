@@ -1735,7 +1735,7 @@ const getFalconWorkOrderById = asyncHandler(async (req, res) => {
 
     // Fetch work order (without products)
     const workOrder = await falconWorkOrder.findById(id)
-        .select('work_order_number client_id project_id files date remarks createdAt updatedAt')
+        .select('work_order_number client_id project_id files date remarks createdAt updatedAt products')
         .populate({ path: 'client_id', select: 'name address', match: { isDeleted: false } })
         .populate({ path: 'project_id', select: 'name address', match: { isDeleted: false } })
         .lean();
@@ -1743,6 +1743,14 @@ const getFalconWorkOrderById = asyncHandler(async (req, res) => {
     if (!workOrder) {
         throw new ApiError(404, `Work order with ID ${id} not found`);
     }
+
+    // Extract work_product_details
+    const work_product_details = workOrder.products.map(product => ({
+        product_name: product.product_name,
+        sac_code: product.sac_code,
+        uom: product.uom,
+        po_quantity: product.po_quantity,
+    }));
 
     // Fetch all job orders linked to this work order
     const jobOrders = await falconJobOrder.find({ work_order_number: id })
@@ -2076,6 +2084,7 @@ const getFalconWorkOrderById = asyncHandler(async (req, res) => {
     // Format the work order and retain original structure
     const formattedWorkOrder = formatDateToIST(workOrder);
     formattedWorkOrder.products = productsWithNames;
+    formattedWorkOrder.work_product_details = work_product_details;
     formattedWorkOrder.internal_work_order_details = internalDetails;
     formattedWorkOrder.job_order_semi_details = jobOrderSemiDetails;
     formattedWorkOrder.jobOrderDetailsWithSemiFinished = jobOrderDetailsWithSemiFinished;

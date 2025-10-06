@@ -75,6 +75,11 @@ const dateRangeSchema = new mongoose.Schema({
 
 const falconInternalWorkOrderSchema = new mongoose.Schema(
     {
+        int_work_order_id: {
+                type: String,
+                required: true,
+                unique: true,
+            },
         job_order_id: {
             type: mongoose.Schema.Types.ObjectId,
             ref: "falconJobOrder",
