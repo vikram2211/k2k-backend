@@ -3172,6 +3172,7 @@ const getJobOrderById = asyncHandler(async (req, res) => {
   // 4. Map PO quantity and dimensions to products based on shape relationship
   const formattedJobOrder = {
     ...jobOrder,
+    color: jobOrder.color || null,
     workOrderId: jobOrder.work_order._id,
     workOrderNumber: jobOrder.work_order.workOrderNumber,
     client: jobOrder.work_order.clientId
