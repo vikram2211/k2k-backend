@@ -456,6 +456,7 @@ const updateFalconWorkOrder = asyncHandler(async (req, res) => {
         products: Joi.array().items(productSchema).min(1).messages({
             'array.min': 'At least one product is required',
         }),
+        work_product_details: Joi.array().items(productSchema).optional(),
         files: Joi.array().items(fileSchema).optional(),
         existing_files: Joi.array().items(Joi.string()).optional(), // Added to allow existing file IDs
         status: Joi.string()
@@ -488,6 +489,14 @@ const updateFalconWorkOrder = asyncHandler(async (req, res) => {
             bodyData.products = JSON.parse(bodyData.products);
         } catch (e) {
             throw new ApiError(400, 'Invalid products JSON format');
+        }
+    }
+
+    if (typeof bodyData.work_product_details === 'string') {
+        try {
+            bodyData.work_product_details = JSON.parse(bodyData.work_product_details);
+        } catch (e) {
+            throw new ApiError(400, 'Invalid work_product_details JSON format');
         }
     }
 
@@ -580,7 +589,10 @@ if (req.files && req.files.length > 0) {
     // 5. Prepare work order data
     const workOrderData = {
         ...bodyData,
-        products: bodyData.products,
+        // Prefer work_product_details over products if provided
+        products: Array.isArray(bodyData.work_product_details) && bodyData.work_product_details.length
+            ? bodyData.work_product_details
+            : bodyData.products,
         files: uploadedFiles.length ? uploadedFiles : undefined,
         date: bodyData.date ? new Date(bodyData.date) : undefined,
         updated_by: userId,
