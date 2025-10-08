@@ -9,6 +9,7 @@ import { ironWorkOrder } from '../../models/ironSmith/workOrder.model.js';
 import { ironShape } from '../../models/ironSmith/helpers/ironShape.model.js';
 import { ironClient } from '../../models/ironSmith/helpers/ironClient.model.js';
 import { ironProject } from '../../models/ironSmith/helpers/ironProject.model.js';
+import {ironDailyProduction} from '../../models/ironSmith/dailyProductionPlanning.js';
 import { User } from '../../models/user.model.js';
 import Joi from 'joi';
 import { putObject } from '../../../util/putObject.js';
@@ -502,7 +503,7 @@ const dispatchSchema = Joi.object({
 
 
 // controller: ironSmith/dispatchController.js
-const createDispatch = asyncHandler(async (req, res, next) => {
+const createDispatch_07_10_2025 = asyncHandler(async (req, res, next) => {
   let body = { ...req.body };
 
   if (typeof body.qr_code_urls === 'string') {
@@ -689,6 +690,137 @@ const createDispatch = asyncHandler(async (req, res, next) => {
 
 
 
+
+const createDispatch = asyncHandler(async (req, res, next) => {
+  try {
+    const { products, invoice_or_sto, gate_pass_no, vehicle_number, ticket_number, date } = req.body;
+
+    if (!products || !products.length) {
+      return res.status(400).json(new ApiResponse(400, null, "Products are required"));
+    }
+
+    // Validate each product
+    let workOrderId = null; // ensure we capture the related job order id
+    for (const { object_id, dispatch_quantity, qr_code_id } of products) {
+      if (!object_id || !dispatch_quantity || !qr_code_id) {
+        return res.status(400).json(new ApiResponse(400, null, "Missing required fields for product"));
+      }
+
+      // Fetch the Job Order product
+      const jobOrderProduct = await ironJobOrder.findOne(
+        { "products._id": object_id },
+        { "products.$": 1, work_order: 1 }
+      );
+
+      if (!jobOrderProduct) {
+        return res.status(404).json(new ApiResponse(404, null, `Job Order product not found for object_id: ${object_id}`));
+      }
+
+      const product = jobOrderProduct.products[0];
+
+      // Set and ensure consistent work order across all products
+      if (!workOrderId) {
+        workOrderId = jobOrderProduct.work_order; // use ironWorkOrder id
+      } else if (String(workOrderId) !== String(jobOrderProduct.work_order)) {
+        return res.status(400).json(new ApiResponse(400, null, `All products must belong to the same work order`));
+      }
+
+      // Check if the QR code matches
+      if (product.qr_code_id !== qr_code_id) {
+        return res.status(400).json(new ApiResponse(400, null, `QR code mismatch for object_id: ${object_id}`));
+      }
+
+      // Check if the product is already dispatched
+      const dailyProduction = await ironDailyProduction.findOne({
+        job_order: jobOrderProduct._id,
+        'products.object_id': object_id,
+      });
+
+      if (!dailyProduction) {
+        return res.status(404).json(new ApiResponse(404, null, `Production record not found for object_id: ${object_id}`));
+      }
+
+      const productionProduct = dailyProduction.products.find(
+        (p) => p.object_id.toString() === object_id.toString()
+      );
+
+      if (productionProduct.delivery_stage === 'Dispatched') {
+        return res.status(400).json(new ApiResponse(400, null, `Product with object_id: ${object_id} is already dispatched`));
+      }
+
+      // Check if packed_quantity is sufficient
+      if (product.packed_quantity < dispatch_quantity) {
+        return res.status(400).json(new ApiResponse(400, null, `Insufficient packed quantity for object_id: ${object_id}`));
+      }
+    }
+
+    // Process dispatch
+    const dispatchProducts = [];
+    for (const { object_id, dispatch_quantity, qr_code_id } of products) {
+      // Update Job Order: deduct from packed_quantity, add to dispatched_quantity
+      await ironJobOrder.findOneAndUpdate(
+        { "products._id": object_id },
+        {
+          $inc: {
+            "products.$.packed_quantity": -dispatch_quantity,
+            "products.$.dispatched_quantity": dispatch_quantity,
+          },
+        }
+      );
+
+      // Update Daily Production: set delivery_stage to "Dispatched"
+      await ironDailyProduction.findOneAndUpdate(
+        { "products.object_id": object_id },
+        { $set: { "products.$.delivery_stage": "Dispatched" } }
+      );
+
+      // Fetch product details again to enrich dispatch product (shape, etc.)
+      const jobOrderProductForItem = await ironJobOrder.findOne(
+        { "products._id": object_id },
+        { "products.$": 1, work_order: 1 }
+      );
+      const joProduct = jobOrderProductForItem?.products?.[0];
+
+      // Add to dispatch products with required fields in schema
+      dispatchProducts.push({
+        shape_id: joProduct?.shape,
+        object_id,
+        product_name: undefined,
+        dispatch_quantity,
+        bundle_size: dispatch_quantity, // fallback allocation
+        weight: 0, // fallback; update when actual weight is available
+        qr_code: qr_code_id,
+        uom: 'Nos',
+      });
+    }
+
+    // Create dispatch record
+    const dispatch = await ironDispatch.create({
+      work_order: workOrderId,
+      products: dispatchProducts,
+      invoice_or_sto,
+      gate_pass_no,
+      vehicle_number,
+      ticket_number,
+      created_by: req.user?.id || req.user?._id,
+      date: new Date(date),
+    });
+
+    res.status(201).json(new ApiResponse(201, dispatch, "Dispatch created successfully"));
+  } catch (error) {
+    console.error('Error creating dispatch:', error);
+    res.status(500).json(new ApiResponse(500, null, "Internal Server Error", error.message));
+  }
+});
+
+
+
+
+
+
+
+
+
 const getScannedProducts_26_09_2025 = asyncHandler(async (req, res, next) => {
     try {
         console.log("inside backend qr scan");
@@ -752,7 +884,7 @@ const getScannedProducts_26_09_2025 = asyncHandler(async (req, res, next) => {
 
 
 
-const getScannedProducts = asyncHandler(async (req, res, next) => {
+const getScannedProducts_07_10_2025 = asyncHandler(async (req, res, next) => {
   try {
     const qrCode = req.query.qr_code;
     if (!qrCode) {
@@ -822,6 +954,82 @@ const getScannedProducts = asyncHandler(async (req, res, next) => {
     });
   }
 });
+
+
+const getScannedProducts = asyncHandler(async (req, res, next) => {
+  try {
+    const qrCode = req.query.qr_code;
+    if (!qrCode) {
+      return res.status(400).json({ success: false, message: "Please provide a QR code" });
+    }
+
+    // Find the product in Job Order using the QR code
+    const jobOrderProduct = await ironJobOrder.findOne(
+      { "products.qr_code_id": qrCode },
+      { "products.$": 1, work_order: 1, job_order_number: 1 }
+    ).populate('products.shape', 'shape_code')
+     .populate('work_order', 'workOrderNumber');
+    console.log("jobOrderProduct",jobOrderProduct);
+    
+
+    if (!jobOrderProduct) {
+      return res.status(404).json({
+        success: false,
+        message: `No product found for QR code ${qrCode}`,
+      });
+    }
+
+    const product = jobOrderProduct.products[0];
+
+    // Check if the product is already dispatched
+    const dailyProduction = await ironDailyProduction.findOne({
+      job_order: jobOrderProduct._id,
+      'products.object_id': product._id,
+    });
+
+    if (!dailyProduction) {
+      return res.status(404).json({
+        success: false,
+        message: `No production record found for QR code ${qrCode}`,
+      });
+    }
+
+    const productionProduct = dailyProduction.products.find(
+      (p) => p.object_id.toString() === product._id.toString()
+    );
+
+    if (productionProduct.delivery_stage === 'Dispatched') {
+      return res.status(400).json({
+        success: false,
+        message: `QR code ${qrCode} has already been scanned and dispatched.`,
+      });
+    }
+
+    // Return product details
+    res.status(200).json({
+      success: true,
+      data: {
+        work_order: jobOrderProduct._id,
+        job_order_number: jobOrderProduct.job_order_number,
+        work_order_number: jobOrderProduct.work_order?.workOrderNumber || null,
+        object_id: product._id,
+        shape_id: product.shape,
+        shape_code: product.shape.shape_code,
+        barMark: product.barMark,
+        packed_quantity: product.packed_quantity,
+        qr_code_id: product.qr_code_id,
+        qr_code_url: product.qr_code_url,
+      },
+    });
+  } catch (error) {
+    console.error('Error scanning QR code:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message || 'Internal Server Error',
+    });
+  }
+});
+
 
 
 
