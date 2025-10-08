@@ -1159,6 +1159,12 @@ const updateIronProductionQuantities = asyncHandler(async (req, res) => {
         new ApiResponse(400, null, 'Achieved quantity is required for update.')
       );
     }
+    await ironJobOrder.findOneAndUpdate(
+          { _id: job_order, 'products._id': object_id },
+          { $inc: { 'products.$.packed_quantity': achieved_quantity } }
+        );
+      
+    
 
     dailyProduction.updated_by = req.user._id;
     const updatedProduction = await dailyProduction.save();
@@ -2149,7 +2155,7 @@ const addQcCheck_30_09_2025 = asyncHandler(async (req, res) => {
 });
 
 
-
+////////WAS WORKING PERFECTLY BUT COMMENTED FOR NEW SINGLE QR CODE FLOW //////////
 const addQcCheck = asyncHandler(async (req, res) => {
   try {
     const { job_order, shape_id, object_id, rejected_quantity, remarks } = req.body;
@@ -2233,7 +2239,8 @@ const addQcCheck = asyncHandler(async (req, res) => {
     // Update quantities in dailyProduction
     dailyProduction.products[productIndex].rejected_quantity = qcCheck.rejected_quantity;
     dailyProduction.products[productIndex].achieved_quantity = currentAchievedQuantity - rejected_quantity;
-    dailyProduction.qc_checked_by = req.user._id;
+    dailyProduction.qc_checked_by = req.user._id; 
+    let packedQuantity = currentAchievedQuantity - rejected_quantity;
 
     // Add a new log entry with the incremental rejected_quantity
     dailyProduction.production_logs.push({
@@ -2245,6 +2252,12 @@ const addQcCheck = asyncHandler(async (req, res) => {
 
     dailyProduction.updated_by = req.user._id;
     const updatedProduction = await dailyProduction.save();
+
+
+    await ironJobOrder.findOneAndUpdate(
+      { _id: job_order, 'products._id': object_id },
+      { $set: { 'products.$.packed_quantity': packedQuantity } }
+    );
 
     return res.status(200).json(
       new ApiResponse(200, {
@@ -2259,6 +2272,119 @@ const addQcCheck = asyncHandler(async (req, res) => {
     );
   }
 });
+
+
+
+const addQcCheck_07_10_2025 = asyncHandler(async (req, res) => {
+  try {
+    const { job_order, shape_id, object_id, rejected_quantity, remarks } = req.body;
+    if (!job_order || !shape_id || !object_id || rejected_quantity === undefined) {
+      return res.status(400).json(
+        new ApiResponse(400, null, 'Missing required fields: job_order, shape_id, object_id, rejected_quantity.')
+      );
+    }
+    if (!req.user || !req.user._id) {
+      return res.status(401).json(
+        new ApiResponse(401, null, 'Unauthorized: User not authenticated.')
+      );
+    }
+    if (isNaN(rejected_quantity) || rejected_quantity < 0) {
+      return res.status(400).json(
+        new ApiResponse(400, null, 'Rejected quantity must be a non-negative number.')
+      );
+    }
+
+    const dailyProduction = await ironDailyProduction.findOne({
+      job_order,
+      'products.shape_id': shape_id,
+      'products.object_id': object_id,
+    });
+    if (!dailyProduction) {
+      return res.status(404).json(
+        new ApiResponse(404, null, 'Daily production document not found for this job order and shape.')
+      );
+    }
+
+    const productIndex = dailyProduction.products.findIndex((p) => p.object_id.equals(object_id));
+    if (productIndex === -1) {
+      return res.status(404).json(
+        new ApiResponse(404, null, 'object_id not found in the products array.')
+      );
+    }
+
+    const currentAchievedQuantity = dailyProduction.products[productIndex].achieved_quantity || 0;
+    const currentRejectedQuantity = dailyProduction.products[productIndex].rejected_quantity || 0;
+
+    if (rejected_quantity > currentAchievedQuantity) {
+      return res.status(400).json(
+        new ApiResponse(
+          400,
+          null,
+          `Rejected quantity (${rejected_quantity}) cannot exceed current achieved quantity (${currentAchievedQuantity}) for this product.`
+        )
+      );
+    }
+
+    // Update QC check
+    let qcCheck = await ironQCCheck.findOne({ shape_id, object_id, status: 'Active' });
+    if (qcCheck) {
+      qcCheck.rejected_quantity += rejected_quantity;
+      if (remarks) {
+        qcCheck.remarks = remarks;
+      }
+      qcCheck.updated_by = req.user._id;
+      await qcCheck.save();
+    } else {
+      const qcCheckData = {
+        work_order: dailyProduction.work_order,
+        job_order: dailyProduction.job_order,
+        shape_id: shape_id,
+        object_id: object_id,
+        rejected_quantity: rejected_quantity,
+        recycled_quantity: 0,
+        remarks: remarks || '',
+        created_by: req.user._id,
+        status: 'Active',
+      };
+      qcCheck = new ironQCCheck(qcCheckData);
+      await qcCheck.save();
+    }
+
+    // Update daily production
+    const updatedAchievedQuantity = currentAchievedQuantity - rejected_quantity;
+    dailyProduction.products[productIndex].achieved_quantity = updatedAchievedQuantity;
+    dailyProduction.products[productIndex].rejected_quantity = currentRejectedQuantity + rejected_quantity;
+    dailyProduction.products[productIndex].delivery_stage = "Packed";
+    dailyProduction.qc_checked_by = req.user._id;
+    dailyProduction.production_logs.push({
+      action: 'QCCheck',
+      user: req.user._id,
+      description: remarks || 'N/A',
+      rejected_quantity: rejected_quantity,
+    });
+    dailyProduction.updated_by = req.user._id;
+    await dailyProduction.save();
+
+    // Update job order's packed_quantity
+    await ironJobOrder.findOneAndUpdate(
+      { _id: job_order, "products._id": object_id },
+      { $inc: { "products.$.packed_quantity": updatedAchievedQuantity } }
+    );
+
+    return res.status(200).json(
+      new ApiResponse(200, {
+        production: dailyProduction,
+        qcCheck: qcCheck,
+      }, 'QC check added/updated and production record updated successfully.')
+    );
+  } catch (error) {
+    console.error('Error adding QC check:', error);
+    return res.status(500).json(
+      new ApiResponse(500, null, 'Internal Server Error', error.message)
+    );
+  }
+});
+
 
 
 const addMachineToProduction = asyncHandler(async (req, res) => {
