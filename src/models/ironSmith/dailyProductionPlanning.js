@@ -71,7 +71,7 @@ const ironDailyProductionSchema = new mongoose.Schema(
 
     status: {
       type: String,
-      enum: ['Pending', 'Pending QC', 'Approved', 'Rejected', 'In Progress', 'Paused'],
+      enum: ['Pending', 'Pending QC', 'Approved', 'Rejected', 'In Progress', 'Paused','Packed'],
       default: 'Pending',
     },
     submitted_by: {
