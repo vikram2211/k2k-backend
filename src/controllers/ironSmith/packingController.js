@@ -312,7 +312,24 @@ const createPackingBundle = async (req, res) => {
       throw new ApiError(404, "Product not found in job order");
     }
 
-    jobOrder.products[productIndex].packed_quantity += product_quantity;
+    // Enforce validations: must not pack more than achieved, and cannot pack if nothing achieved
+    const achieved = Number(jobOrder.products[productIndex].achieved_quantity || 0);
+    const alreadyPacked = Number(jobOrder.products[productIndex].packed_quantity || 0);
+    const poQty = Number(jobOrder.products[productIndex].po_quantity || 0);
+
+    if (achieved <= 0) {
+      throw new ApiError(400, 'Cannot create packing because no quantity has been achieved in production.');
+    }
+
+    if (alreadyPacked + product_quantity > achieved) {
+      throw new ApiError(400, `Packing quantity exceeds achieved quantity. Achieved: ${achieved}, Already packed: ${alreadyPacked}, Requested: ${product_quantity}`);
+    }
+
+    if (alreadyPacked + product_quantity > poQty) {
+      throw new ApiError(400, `Packing quantity exceeds PO quantity. PO: ${poQty}, Already packed: ${alreadyPacked}, Requested: ${product_quantity}`);
+    }
+
+    jobOrder.products[productIndex].packed_quantity = alreadyPacked + product_quantity;
     await jobOrder.save();
 
     // Create packing records for each QR code with the correct bundle quantity
@@ -737,32 +754,6 @@ const getAllPackingDetails2 = async (req, res) => {
           preserveNullAndEmptyArrays: true,
         },
       },
-      {
-        $lookup: {
-          from: 'ironjoborders',
-          let: { workOrderId: '$work_order', shapeId: '$shape_id', objectId: '$object_id' },
-          pipeline: [
-            { $match: { $expr: { $eq: ['$work_order', '$$workOrderId'] } } },
-            { $unwind: '$products' },
-            {
-              $match: {
-                $expr: {
-                  $and: [
-                    { $or: [
-                      { $eq: ['$products._id', '$$objectId'] },
-                      { $eq: ['$products.shape', '$$shapeId'] },
-                      { $eq: ['$products.shape_id', '$$shapeId'] }
-                    ] }
-                  ]
-                }
-              }
-            },
-            { $project: { _id: 0, barMark: '$products.barMark', dia: '$products.dia', member: '$products.member', description: '$products.description', weight_kgs: '$products.weight', dimensions: '$products.dimensions' } }
-          ],
-          as: 'productDetails'
-        }
-      },
-      { $unwind: { path: '$productDetails', preserveNullAndEmptyArrays: true } },
       {
         $lookup: {
           from: 'ironshapes',
@@ -1243,28 +1234,6 @@ const getPackingDetailsById = async (req, res) => {
         },
       },
       {
-        $addFields: {
-          cutting_length: {
-            $cond: [
-              { $gt: [{ $size: { $ifNull: ['$productDetails.dimensions', []] } }, 0] },
-              {
-                $reduce: {
-                  input: '$productDetails.dimensions',
-                  initialValue: '',
-                  in: {
-                    $concat: [
-                      { $cond: [{ $eq: ['$$value', ''] }, '', { $concat: ['$$value', ', '] }] },
-                      { $concat: ['$$this.name', ': ', { $ifNull: ['$$this.value', '-'] }] }
-                    ]
-                  }
-                }
-              },
-              null
-            ]
-          }
-        }
-      },
-      {
         $project: {
           wo_id: '$work_order',
           wo: '$workOrderDetails.workOrderNumber',
@@ -1279,12 +1248,6 @@ const getPackingDetailsById = async (req, res) => {
           qr_code: '$qr_code',
           qr_code_url: '$qr_code_url',
           product_quantity: '$product_quantity',
-          member: { $ifNull: ['$productDetails.member', 'N/A'] },
-          description: { $ifNull: ['$productDetails.description', '$shapeDetails.description'] },
-          barMark: { $ifNull: ['$productDetails.barMark', 'N/A'] },
-          dia: { $ifNull: ['$productDetails.dia', 'N/A'] },
-          cutting_length: { $ifNull: ['$cutting_length', 'N/A'] },
-          weight_kgs: { $ifNull: ['$productDetails.weight_kgs', '$shapeDetails.weight'] }
         },
       },
     ]);

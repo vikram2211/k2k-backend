@@ -2234,6 +2234,11 @@ const updateIronWorkOrder_04_08_2025 = asyncHandler(async (req, res) => {
         }
     }
 
+    // Tolerate no-files submissions: sometimes empty string gets posted by FormData/middleware
+    if (bodyData.files === '' || (Array.isArray(bodyData.files) && bodyData.files.length === 0)) {
+        delete bodyData.files;
+    }
+
     // Normalize date inputs (accepts ISO, YYYY-MM-DD, or DD-MM-YYYY)
     const normalizeDateInput = (val) => {
         if (!val) return val;
@@ -2692,7 +2697,17 @@ const updateIronWorkOrder_23_09_2025_WORKING = asyncHandler(async (req, res) => 
         products: Joi.array().items(productSchema).min(1).required().messages({
             'array.min': 'At least one product is required',
         }),
-        files: Joi.array()
+        files: Joi.alternatives()
+            .try(
+                Joi.array().items(
+                    Joi.object({
+                        file_name: Joi.string().required().messages({ 'string.empty': 'File name is required' }),
+                        file_url: Joi.string().uri().required().messages({ 'string.uri': 'File URL must be a valid URL' }),
+                        uploaded_at: Joi.date().optional(),
+                    })
+                ),
+                Joi.string().allow('')
+            )
             .items(
                 Joi.object({
                     file_name: Joi.string().required().messages({ 'string.empty': 'File name is required' }),
@@ -2994,6 +3009,16 @@ const updateIronWorkOrder = asyncHandler(async (req, res) => {
         ...(product._id && mongoose.Types.ObjectId.isValid(product._id) ? { _id: product._id } : {}),
     }));
 
+    // Normalize workOrderDate
+    const normalizedWorkOrderDate = bodyData.workOrderDate
+        ? moment(bodyData.workOrderDate, ['DD-MM-YYYY', 'YYYY-MM-DD']).toDate()
+        : null;
+
+    // Normalize deliveryDate
+    const normalizedDeliveryDate = bodyData.deliveryDate
+        ? moment(bodyData.deliveryDate, ['DD-MM-YYYY', 'YYYY-MM-DD']).toDate()
+        : null;
+
     // Validate normalized products with Joi
     const productSchema = Joi.object({
         shapeId: Joi.string()
@@ -3095,6 +3120,8 @@ const updateIronWorkOrder = asyncHandler(async (req, res) => {
         {
             ...bodyData,
             products: normalizedProducts,
+            workOrderDate: normalizedWorkOrderDate,
+            deliveryDate: normalizedDeliveryDate,
             updated_by: userId,
         },
         { abortEarly: false }
@@ -3234,8 +3261,8 @@ const updateIronWorkOrder = asyncHandler(async (req, res) => {
     const updateFields = {
         ...bodyData,
         products: normalizedProducts,
-        workOrderDate: bodyData.workOrderDate || existingWorkOrder.workOrderDate,
-        deliveryDate: bodyData.deliveryDate || existingWorkOrder.deliveryDate,
+        workOrderDate: normalizedWorkOrderDate || existingWorkOrder.workOrderDate,
+        deliveryDate: normalizedDeliveryDate || existingWorkOrder.deliveryDate,
         updated_by: userId,
         ...(files.length > 0 && { files }),
     };
@@ -3311,10 +3338,39 @@ const deleteIronWorkOrder = asyncHandler(async (req, res) => {
         }
     }
 
-    // 3. Delete the document from MongoDB
+    // 3. Restore reserved raw material quantities (consumptionHistory)
+    // Find all raw materials that have a consumption entry for this work order
+    const materialsWithConsumption = await RawMaterial.find({
+        'consumptionHistory.workOrderId': new mongoose.Types.ObjectId(workOrderId),
+        isDeleted: false,
+    });
+
+    if (materialsWithConsumption && materialsWithConsumption.length > 0) {
+        const ops = materialsWithConsumption.map((rm) => {
+            // Sum all quantities reserved for this work order (should typically be single entry)
+            const consumed = (rm.consumptionHistory || [])
+                .filter((ch) => ch.workOrderId.equals(workOrderId))
+                .reduce((sum, ch) => sum + (parseFloat(ch.quantity) || 0), 0);
+            const update = {
+                $inc: { qty: consumed },
+                $pull: { consumptionHistory: { workOrderId: new mongoose.Types.ObjectId(workOrderId) } },
+            };
+            return {
+                updateOne: {
+                    filter: { _id: rm._id, isDeleted: false },
+                    update,
+                },
+            };
+        });
+        if (ops.length) {
+            await RawMaterial.bulkWrite(ops);
+        }
+    }
+
+    // 4. Delete the document from MongoDB
     await ironWorkOrder.findByIdAndDelete(workOrderId);
 
-    return res.status(200).json(new ApiResponse(200, null, 'Work order and files deleted successfully'));
+    return res.status(200).json(new ApiResponse(200, null, 'Work order deleted and diameters restored successfully'));
 });
 
 

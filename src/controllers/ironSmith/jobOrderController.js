@@ -3148,6 +3148,27 @@ const getJobOrderById = asyncHandler(async (req, res) => {
     return new Date(date).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
   };
 
+  // 3.1 Compute dynamic achieved quantities from Daily Production for this job order
+  const jobOrderProductIds = (jobOrder.products || []).map((p) => p._id?.toString());
+  let achievedByProductId = {};
+  let rejectedByProductId = {};
+  try {
+    const prodDocs = await ironDailyProduction
+      .find({ job_order: id, 'products.object_id': { $in: jobOrderProductIds } })
+      .select('products.object_id products.achieved_quantity products.rejected_quantity')
+      .lean();
+    prodDocs.forEach((doc) => {
+      (doc.products || []).forEach((pr) => {
+        const key = pr.object_id?.toString();
+        if (!key) return;
+        achievedByProductId[key] = (achievedByProductId[key] || 0) + (pr.achieved_quantity || 0);
+        rejectedByProductId[key] = (rejectedByProductId[key] || 0) + (pr.rejected_quantity || 0);
+      });
+    });
+  } catch (e) {
+    console.error('Failed aggregating achieved quantities for job order:', e.message);
+  }
+
   // 4. Map PO quantity and dimensions to products based on shape relationship
   const formattedJobOrder = {
     ...jobOrder,
@@ -3189,8 +3210,8 @@ const getJobOrderById = asyncHandler(async (req, res) => {
         planned_quantity: product.planned_quantity,
         schedule_date: convertToIST(product.schedule_date),
         dia: product.dia,
-        achieved_quantity: product.achieved_quantity,
-        rejected_quantity: product.rejected_quantity,
+        achieved_quantity: achievedByProductId[product._id?.toString()] || 0,
+        rejected_quantity: rejectedByProductId[product._id?.toString()] || 0,
         selected_machines: product.selected_machines.map((machine) => ({
           _id: machine._id,
           name: machine.name,
@@ -3302,7 +3323,8 @@ const workOrderData = asyncHandler(async (req, res) => {
     // 4. Fetch job orders related to this work order
     const jobOrders = await ironJobOrder
       .find({ work_order: workOrderId })
-      .populate('products.shape', 'name') // Populate shape details if needed
+      .populate('products.shape', 'name shape_code uom description') // Populate shape details
+      .populate('created_by', 'username email') // Populate created by user
       .lean();
     
 
@@ -3377,15 +3399,50 @@ const workOrderData = asyncHandler(async (req, res) => {
       };
     });
 
-    // 7. Prepare the response
+    // 7. Format job orders for response
+    const formattedJobOrders = jobOrders.map((jobOrder, index) => ({
+      id: index + 1,
+      jobOrderId: jobOrder._id,
+      jobOrderNumber: jobOrder.job_order_number,
+      salesOrderNumber: jobOrder.sales_order_number || 'N/A',
+      dateRange: {
+        from: jobOrder.date_range?.from,
+        to: jobOrder.date_range?.to
+      },
+      status: jobOrder.status,
+      createdAt: jobOrder.createdAt,
+      createdBy: jobOrder.created_by,
+      products: jobOrder.products.map(product => ({
+        shape: product.shape,
+        planned_quantity: product.planned_quantity || 0,
+        achieved_quantity: product.achieved_quantity || 0,
+        rejected_quantity: product.rejected_quantity || 0,
+        dia: product.dia,
+        schedule_date: product.schedule_date,
+        selected_machines: product.selected_machines || []
+      }))
+    }));
+
+    // 8. Prepare the response
+    // Helper function to format date without timezone shift
+    const formatDateWithoutTimezone = (date) => {
+      if (!date) return date;
+      const d = new Date(date);
+      const year = d.getFullYear();
+      const month = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    };
+
     const responseData = {
       workOrderId: workOrder._id,
       workOrderNumber: workOrder.workOrderNumber,
-      workOrderDate: workOrder.workOrderDate,
-      workOrderDeliveryDate: workOrder.deliveryDate,
+      workOrderDate: formatDateWithoutTimezone(workOrder.workOrderDate),
+      workOrderDeliveryDate: formatDateWithoutTimezone(workOrder.deliveryDate),
       client: workOrder.clientId,
       project: workOrder.projectId,
       products: enrichedProducts,
+      jobOrders: formattedJobOrders,
       status: workOrder.status,
       files: workOrder.files,
     };

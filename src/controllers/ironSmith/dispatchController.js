@@ -1318,5 +1318,62 @@ const getDispatchById = asyncHandler(async (req, res, next) => {
     }
 });
 
+const getDispatchByWorkOrderId = asyncHandler(async (req, res, next) => {
+    try {
+        const { workOrderId } = req.params;
+        
+        // Validate work order ID
+        if (!workOrderId || !mongoose.Types.ObjectId.isValid(workOrderId)) {
+            return next(new ApiError(400, 'Invalid or missing work order ID'));
+        }
 
-export {createDispatch, getScannedProducts, updateDispatch, getAllDispatches,getDispatchById}
+        // Fetch dispatch records for the specific work order
+        const dispatches = await ironDispatch
+            .find({ work_order: workOrderId })
+            .populate({
+                path: 'work_order',
+                select: 'workOrderNumber clientId projectId',
+                populate: [
+                    { path: 'clientId', model: 'ironClient', select: 'name' },
+                    { path: 'projectId', model: 'ironProject', select: 'name' },
+                ],
+            })
+            .populate('created_by', 'username')
+            .populate('products.shape_id', 'shape_code name')
+            .lean();
+
+        if (!dispatches || dispatches.length === 0) {
+            return res.status(200).json(new ApiResponse(200, [], 'No dispatch records found for this work order'));
+        }
+
+        // Format the response data
+        const formattedDispatches = dispatches.map(dispatch => ({
+            dispatchId: dispatch._id,
+            dispatchNumber: dispatch.dispatch_number || `D${dispatch._id.toString().slice(-6)}`,
+            workOrderNumber: dispatch.work_order?.workOrderNumber || 'N/A',
+            clientName: dispatch.work_order?.clientId?.name || 'Unknown Client',
+            projectName: dispatch.work_order?.projectId?.name || 'Unknown Project',
+            vehicleNumber: dispatch.vehicle_number || 'N/A',
+            docketNumber: dispatch.ticket_number || 'N/A',
+            gatePassNumber: dispatch.gate_pass_no || 'N/A',
+            invoiceOrSTO: dispatch.invoice_or_sto || 'N/A',
+            createdBy: dispatch.created_by?.username || 'N/A',
+            createdAt: dispatch.createdAt,
+            status: dispatch.status || 'Active',
+            products: dispatch.products.map(product => ({
+                shapeCode: product.shape_id?.shape_code || 'N/A',
+                shapeName: product.shape_id?.name || 'N/A',
+                quantity: product.dispatch_quantity || 0,
+                bundleSize: product.bundle_size || 0,
+                weight: product.weight || 0,
+            })),
+        }));
+
+        return res.status(200).json(new ApiResponse(200, formattedDispatches, 'Dispatch data retrieved successfully'));
+    } catch (error) {
+        console.error('Error fetching dispatch by work order ID:', error);
+        return next(new ApiError(500, `Failed to fetch dispatch data: ${error.message}`));
+    }
+});
+
+export {createDispatch, getScannedProducts, updateDispatch, getAllDispatches, getDispatchById, getDispatchByWorkOrderId}
