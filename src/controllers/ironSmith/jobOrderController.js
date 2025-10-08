@@ -574,6 +574,15 @@ const createIronJobOrder = asyncHandler(async (req, res) => {
     throw new ApiError(400, 'Validation failed for job order creation', error.details);
   }
 
+  // 4.1 Guard: prevent duplicate color for the same work order
+  const duplicateExists = await ironJobOrder.exists({
+    work_order: value.work_order,
+    color: value.color,
+  });
+  if (duplicateExists) {
+    throw new ApiError(400, `A job order for this work order already uses the selected color.`);
+  }
+
   
   // 5. Generate job order number
   const counter = await ironCounter.findOneAndUpdate(
@@ -3485,10 +3494,20 @@ const workOrderData = asyncHandler(async (req, res) => {
 
 
 const getAllColors = asyncHandler(async (req, res) => {
-  console.log("inside color route");
-  const colors = await Color.find().select('name code');
-  return res.status(200).json(new ApiResponse(200, colors, 'Colors fetched successfully'));
+  // Optional filter: exclude colors already used by job orders of a specific work order
+  const { work_order } = req.query || {};
+  let filter = {};
 
+  if (work_order && mongoose.Types.ObjectId.isValid(String(work_order))) {
+    // Find colors already used in job orders for this work order
+    const usedColorIds = await ironJobOrder.distinct('color', { work_order: work_order });
+    if (usedColorIds?.length) {
+      filter = { _id: { $nin: usedColorIds } };
+    }
+  }
+
+  const colors = await Color.find(filter).select('name code');
+  return res.status(200).json(new ApiResponse(200, colors, 'Colors fetched successfully'));
 });
 
 
