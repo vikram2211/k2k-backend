@@ -375,6 +375,14 @@ const createQCCheck2 = asyncHandler(async (req, res) => {
     });
     await dailyProduction.save({ session });
 
+    // Update job order's packed_quantity - decrement by rejected_quantity
+    const { ironJobOrder } = await import('../../models/ironSmith/jobOrders.model.js');
+    await ironJobOrder.findOneAndUpdate(
+      { _id: job_order, "products._id": object_id },
+      { $inc: { "products.$.packed_quantity": -incrementRejected } },
+      { session }
+    );
+
     // Populate references for response
     const populatedQCCheck = await ironQCCheck
       .findById(qcCheck._id)

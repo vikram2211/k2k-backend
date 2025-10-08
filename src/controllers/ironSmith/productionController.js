@@ -2254,9 +2254,10 @@ const addQcCheck = asyncHandler(async (req, res) => {
     const updatedProduction = await dailyProduction.save();
 
 
+    // Update job order's packed_quantity - decrement by rejected_quantity
     await ironJobOrder.findOneAndUpdate(
       { _id: job_order, 'products._id': object_id },
-      { $set: { 'products.$.packed_quantity': packedQuantity } }
+      { $inc: { 'products.$.packed_quantity': -rejected_quantity } }
     );
 
     return res.status(200).json(
@@ -2365,10 +2366,10 @@ const addQcCheck_07_10_2025 = asyncHandler(async (req, res) => {
     dailyProduction.updated_by = req.user._id;
     await dailyProduction.save();
 
-    // Update job order's packed_quantity
+    // Update job order's packed_quantity - decrement by rejected_quantity
     await ironJobOrder.findOneAndUpdate(
       { _id: job_order, "products._id": object_id },
-      { $inc: { "products.$.packed_quantity": updatedAchievedQuantity } }
+      { $inc: { "products.$.packed_quantity": -rejected_quantity } }
     );
 
     return res.status(200).json(

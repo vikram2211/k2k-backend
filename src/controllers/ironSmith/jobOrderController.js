@@ -3212,6 +3212,8 @@ const getJobOrderById = asyncHandler(async (req, res) => {
         dia: product.dia,
         achieved_quantity: achievedByProductId[product._id?.toString()] || 0,
         rejected_quantity: rejectedByProductId[product._id?.toString()] || 0,
+        packed_quantity: product.packed_quantity,
+        dispatched_quantity: product.dispatched_quantity,
         selected_machines: product.selected_machines.map((machine) => ({
           _id: machine._id,
           name: machine.name,
@@ -3227,6 +3229,29 @@ const getJobOrderById = asyncHandler(async (req, res) => {
           : [],
       };
     }),
+  };
+  console.log("formattedJobOrder",formattedJobOrder);
+  
+
+  // Calculate total quantities
+  const totalPlanned = formattedJobOrder.products.reduce((sum, product) => sum + (product.planned_quantity || 0), 0);
+  console.log("totalPlanned",totalPlanned);
+  
+  const totalPacked = formattedJobOrder.products.reduce((sum, product) => sum + (product.packed_quantity || 0), 0);
+  console.log("totalPacked",totalPacked);
+  
+  const totalDispatched = formattedJobOrder.products.reduce((sum, product) => sum + (product.dispatched_quantity || 0), 0);
+  console.log("totalDispatched",totalDispatched);
+  
+  const totalRemaining = totalPlanned - (totalPacked + totalDispatched);
+  console.log("totalRemaining",totalRemaining);
+  
+  // Add quantity totals to the response
+  formattedJobOrder.quantity_totals = {
+    total_planned: totalPlanned,
+    total_packed: totalPacked,
+    total_dispatched: totalDispatched,
+    total_remaining: totalRemaining
   };
 
   // Remove unnecessary nested fields

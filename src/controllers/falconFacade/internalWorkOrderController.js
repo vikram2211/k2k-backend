@@ -3329,6 +3329,7 @@ const getInternalWorkOrderById_was_working_perfectly_06_10_2025 = asyncHandler(a
 
 
 const getInternalWorkOrderById = asyncHandler(async (req, res) => {
+    console.log("came here in internal get by id");
     try {
         const { id } = req.params;
         // Step 1: Fetch the internal work order by ID with populated system and product_system
@@ -3447,10 +3448,22 @@ const getInternalWorkOrderById = asyncHandler(async (req, res) => {
                             .select('product.achieved_quantity product.rejected_quantity')
                             .lean();
 
+                        const semiLevelAchieved = lastProcessRecord?.product?.achieved_quantity || 0;
+                        const semiLevelRejected = lastProcessRecord?.product?.rejected_quantity || 0;
+
+                        // If only one process exists for this semi-finished item, mirror semi-level values into the process
+                        if (Array.isArray(processesWithDetails) && processesWithDetails.length === 1) {
+                            processesWithDetails[0] = {
+                                ...processesWithDetails[0],
+                                achieved_qty: semiLevelAchieved,
+                                rejected_qty: processesWithDetails[0].rejected_qty || semiLevelRejected,
+                            };
+                        }
+
                         return {
                             ...semi,
-                            achieved_qty: lastProcessRecord?.product?.achieved_quantity || 0,
-                            rejected_qty: lastProcessRecord?.product?.rejected_quantity || 0,
+                            achieved_qty: semiLevelAchieved,
+                            rejected_qty: semiLevelRejected,
                             processes: processesWithDetails,
                         };
                     })
@@ -5065,7 +5078,9 @@ const updateInternalWorkOrder_08_09_2025 = asyncHandler(async (req, res) => {
 
 
 
-            internalWorkOrder.products = await Promise.all(bodyData.products.map(async (product, productIndex) => {
+            // Merge incoming products into existing, preserving existing semifinished and adding new ones
+            for (let productIndex = 0; productIndex < bodyData.products.length; productIndex++) {
+                const product = bodyData.products[productIndex];
                 console.log("product", product);
                 if (!product.product) throw new ApiError(400, `Product ID is required for product at index ${productIndex}`);
                 if (!product.system) throw new ApiError(400, `System is required for product at index ${productIndex}`);
@@ -5075,7 +5090,6 @@ const updateInternalWorkOrder_08_09_2025 = asyncHandler(async (req, res) => {
                 validateObjectId(product.product, `product at index ${productIndex}`);
                 validateObjectId(product.system, `system at index ${productIndex}`);
                 validateObjectId(product.product_system, `product_system at index ${productIndex}`);
-                // Validate po_quantity against job order
                 const productKey = `${product.product}-${product.code}`;
                 const jobOrderPoQuantity = jobOrderProductsMap[productKey];
                 if (jobOrderPoQuantity === undefined) {
@@ -5085,94 +5099,99 @@ const updateInternalWorkOrder_08_09_2025 = asyncHandler(async (req, res) => {
                 if (parsedPoQuantity > jobOrderPoQuantity) {
                     throw new ApiError(400, `Quantity exceeds job order PO quantity (${jobOrderPoQuantity})`);
                 }
-                return {
-                    product: product.product,
-                    system: product.system,
-                    product_system: product.product_system,
-                    code: product.code,
-                    po_quantity: parsedPoQuantity,
-                    semifinished_details: await Promise.all(product.semifinished_details.map(async (sfDetail, sfIndex) => {
-                        if (!sfDetail.semifinished_id) throw new ApiError(400, `Semifinished ID is required for semifinished_details at index ${sfIndex} in product ${productIndex}`);
-                        const sfFileField = `products[${productIndex}][semifinished_details][${sfIndex}][file]`;
-                        const sfFile = filesMap[sfFileField];
-                        let sfFileUrl = sfDetail.file_url !== undefined ? sfDetail.file_url : internalWorkOrder.products[productIndex]?.semifinished_details[sfIndex]?.file_url;
-                        const sfRemoveFileField = `products[${productIndex}][semifinished_details][${sfIndex}][remove_file]`;
-                        const sfRemoveFile = bodyData[sfRemoveFileField] === 'true';
-                        if (sfRemoveFile && sfFileUrl) {
+                // Find existing product entry
+                let existingProd = internalWorkOrder.products.find(p => p.product.toString() === product.product && p.code === product.code);
+                if (!existingProd) {
+                    existingProd = {
+                        product: product.product,
+                        system: product.system,
+                        product_system: product.product_system,
+                        code: product.code,
+                        po_quantity: parsedPoQuantity,
+                        semifinished_details: [],
+                    };
+                    internalWorkOrder.products.push(existingProd);
+                } else {
+                    existingProd.system = product.system;
+                    existingProd.product_system = product.product_system;
+                    existingProd.po_quantity = parsedPoQuantity;
+                }
+                // Build map for existing semifinished by id
+                const existingSfMap = new Map(
+                    (existingProd.semifinished_details || []).map(sf => [sf.semifinished_id.toString(), sf])
+                );
+                // Merge semifinished_details: update existing, append new, preserve others
+                for (let sfIndex = 0; sfIndex < product.semifinished_details.length; sfIndex++) {
+                    const sfDetail = product.semifinished_details[sfIndex];
+                    if (!sfDetail.semifinished_id) throw new ApiError(400, `Semifinished ID is required for semifinished_details at index ${sfIndex} in product ${productIndex}`);
+                    const sfFileField = `products[${productIndex}][semifinished_details][${sfIndex}][file]`;
+                    const sfFile = filesMap[sfFileField];
+                    const existingSf = existingSfMap.get(sfDetail.semifinished_id.toString());
+                    let sfFileUrl = sfDetail.file_url !== undefined ? sfDetail.file_url : existingSf?.file_url;
+                    const sfRemoveFileField = `products[${productIndex}][semifinished_details][${sfIndex}][remove_file]`;
+                    const sfRemoveFile = bodyData[sfRemoveFileField] === 'true';
+                    if (sfRemoveFile && sfFileUrl) {
+                        const oldFileKey = sfFileUrl.split('/').slice(3).join('/');
+                        await deleteObject(oldFileKey);
+                        sfFileUrl = undefined;
+                    } else if (sfFile) {
+                        if (sfFileUrl) {
                             const oldFileKey = sfFileUrl.split('/').slice(3).join('/');
                             await deleteObject(oldFileKey);
-                            sfFileUrl = undefined;
                         }
-                        else if (sfFile) {
-                            if (sfFileUrl) {
-                                const oldFileKey = sfFileUrl.split('/').slice(3).join('/');
+                        const sfFileName = `internal-work-orders/semifinished/${Date.now()}-${sanitizeFilename(sfFile.originalname)}`;
+                        const sfUploadResult = await putObject(
+                            { data: sfFile.buffer, mimetype: sfFile.mimetype },
+                            sfFileName
+                        );
+                        sfFileUrl = sfUploadResult.url;
+                    }
+                    // Processes merge: map provided processes, defaulting to existing by index if present
+                    const processes = await Promise.all(sfDetail.processes.map(async (process, processIndex) => {
+                        if (!process.name) throw new ApiError(400, `Process name is required for process at index ${processIndex} in semifinished_details ${sfIndex}, product ${productIndex}`);
+                        const processFileField = `products[${productIndex}][semifinished_details][${sfIndex}][processes][${processIndex}][file]`;
+                        const processFile = filesMap[processFileField];
+                        const existingProc = existingSf?.processes?.[processIndex];
+                        let processFileUrl = process.file_url !== undefined ? process.file_url : existingProc?.file_url;
+                        const processRemoveFileField = `products[${productIndex}][semifinished_details][${sfIndex}][processes][${processIndex}][remove_file]`;
+                        const processRemoveFile = bodyData[processRemoveFileField] === 'true';
+                        if (processRemoveFile && processFileUrl) {
+                            const oldFileKey = processFileUrl.split('/').slice(3).join('/');
+                            await deleteObject(oldFileKey);
+                            processFileUrl = undefined;
+                        } else if (processFile) {
+                            if (processFileUrl) {
+                                const oldFileKey = processFileUrl.split('/').slice(3).join('/');
                                 await deleteObject(oldFileKey);
                             }
-                            const sfFileName = `internal-work-orders/semifinished/${Date.now()}-${sanitizeFilename(sfFile.originalname)}`;
-                            const sfUploadResult = await putObject(
-                                { data: sfFile.buffer, mimetype: sfFile.mimetype },
-                                sfFileName
+                            const processFileName = `internal-work-orders/processes/${Date.now()}-${sanitizeFilename(processFile.originalname)}`;
+                            const processUploadResult = await putObject(
+                                { data: processFile.buffer, mimetype: processFile.mimetype },
+                                processFileName
                             );
-                            sfFileUrl = sfUploadResult.url;
+                            processFileUrl = processUploadResult.url;
                         }
                         return {
-                            semifinished_id: sfDetail.semifinished_id,
-                            file_url: sfFileUrl,
-                            remarks: sfDetail.remarks !== undefined ? sfDetail.remarks : internalWorkOrder.products[productIndex]?.semifinished_details[sfIndex]?.remarks,
-                            processes: await Promise.all(sfDetail.processes.map(async (process, processIndex) => {
-                                if (!process.name) throw new ApiError(400, `Process name is required for process at index ${processIndex} in semifinished_details ${sfIndex}, product ${productIndex}`);
-                                const processFileField = `products[${productIndex}][semifinished_details][${sfIndex}][processes][${processIndex}][file]`;
-                                const processFile = filesMap[processFileField];
-                                let processFileUrl = process.file_url !== undefined ? process.file_url : internalWorkOrder.products[productIndex]?.semifinished_details[sfIndex]?.processes[processIndex]?.file_url;
-                                const processRemoveFileField = `products[${productIndex}][semifinished_details][${sfIndex}][processes][${processIndex}][remove_file]`;
-                                const processRemoveFile = bodyData[processRemoveFileField] === 'true';
-                                if (processRemoveFile && processFileUrl) {
-                                    const oldFileKey = processFileUrl.split('/').slice(3).join('/');
-                                    await deleteObject(oldFileKey);
-                                    processFileUrl = undefined;
-                                }
-                                else if (processFile) {
-                                    if (processFileUrl) {
-                                        const oldFileKey = processFileUrl.split('/').slice(3).join('/');
-                                        await deleteObject(oldFileKey);
-                                    }
-                                    const processFileName = `internal-work-orders/processes/${Date.now()}-${sanitizeFilename(processFile.originalname)}`;
-                                    const processUploadResult = await putObject(
-                                        { data: processFile.buffer, mimetype: processFile.mimetype },
-                                        processFileName
-                                    );
-                                    processFileUrl = processUploadResult.url;
-                                }
-                                return {
-                                    name: process.name,
-                                    file_url: processFileUrl,
-                                    remarks: process.remarks !== undefined ? process.remarks : internalWorkOrder.products[productIndex]?.semifinished_details[sfIndex]?.processes[processIndex]?.remarks,
-                                };
-                            })),
+                            name: process.name,
+                            file_url: processFileUrl,
+                            remarks: process.remarks !== undefined ? process.remarks : existingProc?.remarks,
                         };
-                    })),
-                };
-            }));
-            // Identify products to remove
-            const productsToRemove = [];
-            for (const key in existingProducts) {
-                if (!newProducts[key]) {
-                    const existingProd = existingProducts[key];
-                    productsToRemove.push({
-                        product_id: existingProd.product.toString(),
-                        code: existingProd.code
-                    });
+                    }));
+                    const mergedSf = {
+                        semifinished_id: sfDetail.semifinished_id,
+                        file_url: sfFileUrl,
+                        remarks: sfDetail.remarks !== undefined ? sfDetail.remarks : existingSf?.remarks,
+                        processes,
+                    };
+                    if (existingSf) {
+                        Object.assign(existingSf, mergedSf);
+                    } else {
+                        existingProd.semifinished_details.push(mergedSf);
+                    }
                 }
+                // Preserve any existing semifinished not included in request (no action needed)
             }
-            // Delete production records for removed products
-            if (productsToRemove.length > 0) {
-                console.log('Removing production for:', productsToRemove); // Debug log
-                await falconProduction.deleteMany({
-                    internal_work_order: id,
-                    'product.product_id': { $in: productsToRemove.map(p => p.product_id) },
-                    'product.code': { $in: productsToRemove.map(p => p.code) }
-                }).session(session);
-            }
+            // Do NOT remove products that are not present in the request; preserve existing
         }
         // Save the updated internal work order
         await internalWorkOrder.save({ session });
