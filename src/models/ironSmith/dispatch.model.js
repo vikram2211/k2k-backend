@@ -1,16 +1,16 @@
 // import mongoose from 'mongoose';
 
-// const dispatchSchema = new mongoose.Schema(
+// const ironDispatchSchema = new mongoose.Schema(
 //   {
 //     work_order: {
 //       type: mongoose.Schema.Types.ObjectId,
-//       ref: 'WorkOrder',
-//       required: true, // Ensures all packing entries belong to the same Work Order
+//       ref: 'ironWorkOrder',
+//       required: true,
 //     },
 //     packing_ids: [
 //       {
 //         type: mongoose.Schema.Types.ObjectId,
-//         ref: 'Packing', // Multiple packing batches linked to the dispatch
+//         ref: 'ironPacking',
 //         required: true,
 //       },
 //     ],
@@ -18,21 +18,28 @@
 //       {
 //         shape_id: {
 //           type: mongoose.Schema.Types.ObjectId,
-//           ref: 'Product',
+//           ref: 'ironShape',
 //           required: true,
 //         },
 //         product_name: {
-//           type: String, // Stored from `Product` schema
-//           required: true,
+//           type: String, // Optional, can be derived from ironShape
+//           required: false,
 //         },
-       
 //         dispatch_quantity: {
-//           type: Number, // Derived from `Packing.product_quantity`
+//           type: Number,
 //           required: true,
 //         },
 //         bundle_size: {
-//           type: Number, // Stored from `Packing`
+//           type: Number,
 //           required: true,
+//         },
+//         weight: {
+//           type: Number,
+//           required: true,
+//         },
+//         uom: {
+//           type: String,
+//           required: false, // Add if UOM is tracked in ironPacking
 //         },
 //       },
 //     ],
@@ -40,14 +47,30 @@
 //       type: String,
 //       required: true,
 //     },
+//     gate_pass_no: {
+//       type: String,
+//       required: true,
+//     },
 //     qr_codes: [
 //       {
-//         type: String, // Stores scanned QR codes from Packing
+//         type: String,
 //         required: true,
-//         unique: true, // Ensures unique scans
+//         // unique: true,
+//       },
+//     ],
+//     qr_code_urls: [
+//       {
+//         type: String,
+//         required: false,
+//         // unique: true,
+//         // sparse: true,
 //       },
 //     ],
 //     vehicle_number: {
+//       type: String,
+//       required: true,
+//     },
+//     ticket_number: {
 //       type: String,
 //       required: true,
 //     },
@@ -61,10 +84,13 @@
 //       ref: 'User',
 //     },
 //     invoice_file: {
-//       type: String, // URL of the uploaded invoice file (stored in AWS S3 or similar storage)
+//       type: [String], // Array to store multiple invoice file URLs
+//       default: [],
+//     },
+//     date: {
+//       type: Date,
 //       required: true,
 //     },
-
 //     status: {
 //       type: String,
 //       enum: ['Approved', 'Rejected'],
@@ -74,7 +100,21 @@
 //   { timestamps: true }
 // );
 
-// export const Dispatch = mongoose.model('Dispatch', dispatchSchema);
+// export const ironDispatch = mongoose.model('ironDispatch', ironDispatchSchema);
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -87,13 +127,6 @@ const ironDispatchSchema = new mongoose.Schema(
       ref: 'ironWorkOrder',
       required: true,
     },
-    packing_ids: [
-      {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: 'ironPacking',
-        required: true,
-      },
-    ],
     products: [
       {
         shape_id: {
@@ -101,8 +134,12 @@ const ironDispatchSchema = new mongoose.Schema(
           ref: 'ironShape',
           required: true,
         },
+        object_id: {
+          type: mongoose.Schema.Types.ObjectId,
+          required: true,
+        },
         product_name: {
-          type: String, // Optional, can be derived from ironShape
+          type: String,
           required: false,
         },
         dispatch_quantity: {
@@ -117,9 +154,13 @@ const ironDispatchSchema = new mongoose.Schema(
           type: Number,
           required: true,
         },
+        qr_code: {
+          type: String,
+          required: true,
+        },
         uom: {
           type: String,
-          required: false, // Add if UOM is tracked in ironPacking
+          required: false,
         },
       },
     ],
@@ -131,21 +172,6 @@ const ironDispatchSchema = new mongoose.Schema(
       type: String,
       required: true,
     },
-    qr_codes: [
-      {
-        type: String,
-        required: true,
-        // unique: true,
-      },
-    ],
-    qr_code_urls: [
-      {
-        type: String,
-        required: false,
-        // unique: true,
-        // sparse: true,
-      },
-    ],
     vehicle_number: {
       type: String,
       required: true,
@@ -164,7 +190,7 @@ const ironDispatchSchema = new mongoose.Schema(
       ref: 'User',
     },
     invoice_file: {
-      type: [String], // Array to store multiple invoice file URLs
+      type: [String],
       default: [],
     },
     date: {
