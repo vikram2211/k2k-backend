@@ -3,7 +3,7 @@ import { verifyJWT } from '../../middlewares/auth.middleware.js';
 
 import {
     getProductionData,manageIronProductionActions,updateIronProductionQuantities, addIronDowntime, getIronDowntime,getProductionLog
-,addQcCheck,addMachineToProduction} from '../../controllers/ironSmith/productionController.js';
+,addQcCheck,addMachineToProduction,getUpdatedProductionByObjectId} from '../../controllers/ironSmith/productionController.js';
 
 const router = Router();
 router.use(verifyJWT);
@@ -15,5 +15,6 @@ router.route('/production/downtime').post( addIronDowntime).get( getIronDowntime
 router.route('/production/production-log').get( getProductionLog);
 router.route('/production/qc').post( addQcCheck);
 router.route('/production/add-machine').post( addMachineToProduction);
+router.route('/production/updated-production').get( getUpdatedProductionByObjectId);
 
 export default router;

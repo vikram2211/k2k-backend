@@ -2435,4 +2435,99 @@ const addMachineToProduction = asyncHandler(async (req, res) => {
 
 
 
-export {getProductionData,manageIronProductionActions,updateIronProductionQuantities, addIronDowntime, getIronDowntime, getProductionLog, addQcCheck, addMachineToProduction};
+const getUpdatedProductionByObjectId = asyncHandler(async (req, res) => {
+  try {
+    const { object_id } = req.query;
+
+    if (!object_id) {
+      return res.status(400).json(
+        new ApiResponse(400, null, 'object_id is required')
+      );
+    }
+
+    // Find the production record by object_id
+    const production = await ironDailyProduction.findOne({
+      'products.object_id': object_id
+    })
+    .populate({
+      path: 'work_order',
+      select: '_id workOrderNumber',
+      populate: [
+        {
+          path: 'clientId',
+          model: 'ironClient',
+          select: 'name -_id',
+          options: { lean: true },
+          transform: (doc) => doc.name,
+        },
+        {
+          path: 'projectId',
+          model: 'ironProject',
+          select: 'name -_id',
+          options: { lean: true },
+          transform: (doc) => doc.name,
+        },
+      ],
+    })
+    .populate({
+      path: 'job_order',
+      select: 'job_order_number date_range',
+    })
+    .populate({
+      path: 'products.shape_id',
+      select: 'shape_code name',
+    })
+    .populate({
+      path: 'products.machines',
+      select: 'name',
+    })
+    .populate({
+      path: 'submitted_by created_by updated_by qc_checked_by production_logs.user',
+      select: 'username email',
+    })
+    .lean();
+
+    if (!production) {
+      return res.status(404).json(
+        new ApiResponse(404, null, 'Production record not found')
+      );
+    }
+
+    // Find the specific product by object_id
+    const product = production.products.find(p => p.object_id.toString() === object_id);
+    
+    if (!product) {
+      return res.status(404).json(
+        new ApiResponse(404, null, 'Product not found in production record')
+      );
+    }
+
+    // Return the updated production data
+    return res.status(200).json(
+      new ApiResponse(200, {
+        _id: production._id,
+        work_order: production.work_order,
+        job_order: production.job_order,
+        products: [product],
+        status: production.status,
+        started_at: production.started_at,
+        stopped_at: production.stopped_at,
+        submitted_by: production.submitted_by,
+        created_by: production.created_by,
+        updated_by: production.updated_by,
+        qc_checked_by: production.qc_checked_by,
+        production_logs: production.production_logs,
+        createdAt: production.createdAt,
+        updatedAt: production.updatedAt,
+        date: production.date
+      }, 'Updated production data fetched successfully')
+    );
+  } catch (error) {
+    console.error('Error fetching updated production data:', error);
+    return res.status(500).json(
+      new ApiResponse(500, null, 'Internal Server Error', error.message)
+    );
+  }
+});
+
+export {getProductionData,manageIronProductionActions,updateIronProductionQuantities, addIronDowntime, getIronDowntime, getProductionLog, addQcCheck, addMachineToProduction, getUpdatedProductionByObjectId};
