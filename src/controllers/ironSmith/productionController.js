@@ -430,6 +430,14 @@ const getProductionData = asyncHandler(async (req, res) => {
   productions.forEach((production) => {
     console.log("production",production);
     
+    // Check if job_order exists and has date_range before destructuring
+    if (!production.job_order || !production.job_order.date_range) {
+      console.log("Skipping production with missing job_order or date_range:", production._id);
+      // Skip this production or add to a default category
+      categorizedProductions.pastDPR.push(production);
+      return;
+    }
+    
     const { date_range } = production.job_order;
     // console.log("date_range",date_range);
     

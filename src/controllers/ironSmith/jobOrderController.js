@@ -2858,10 +2858,10 @@ const getJobOrderById_27_07_2025 = asyncHandler(async (req, res) => {
 
   const formattedJobOrder = {
     ...jobOrder,
-    date_range: {
+    date_range: jobOrder.date_range ? {
       from: convertToIST(jobOrder.date_range.from),
       to: convertToIST(jobOrder.date_range.to),
-    },
+    } : null,
     createdAt: convertToIST(jobOrder.createdAt),
     updatedAt: convertToIST(jobOrder.updatedAt),
     products: jobOrder.products.map((product) => ({
@@ -2926,16 +2926,16 @@ const getJobOrderById1 = asyncHandler(async (req, res) => {
   // 4. Map PO quantity to products based on shape relationship
   const formattedJobOrder = {
     ...jobOrder,
-    workOrderId: jobOrder.work_order._id,
-    workOrderNumber: jobOrder.work_order.workOrderNumber,
-    date_range: {
+    workOrderId: jobOrder.work_order?._id || null,
+    workOrderNumber: jobOrder.work_order?.workOrderNumber || null,
+    date_range: jobOrder.date_range ? {
       from: convertToIST(jobOrder.date_range.from),
       to: convertToIST(jobOrder.date_range.to),
-    },
+    } : null,
     createdAt: convertToIST(jobOrder.createdAt),
     updatedAt: convertToIST(jobOrder.updatedAt),
     products: jobOrder.products.map((product) => {
-      const workOrderProduct = jobOrder.work_order.products.find(
+      const workOrderProduct = jobOrder.work_order?.products?.find(
         (wp) => wp.shapeId && wp.shapeId._id && product.shape._id && wp.shapeId._id.toString() === product.shape._id.toString()
       );
       console.log("workOrderProduct", workOrderProduct);
@@ -3030,31 +3030,31 @@ const getJobOrderById_07_08_2025 = asyncHandler(async (req, res) => {
   // 4. Map PO quantity and uom to products based on shape relationship
   const formattedJobOrder = {
     ...jobOrder,
-    workOrderId: jobOrder.work_order._id,
-    workOrderNumber: jobOrder.work_order.workOrderNumber,
+    workOrderId: jobOrder.work_order?._id || null,
+    workOrderNumber: jobOrder.work_order?.workOrderNumber || null,
     color: jobOrder.color || null,
-    client: jobOrder.work_order.clientId
+    client: jobOrder.work_order?.clientId
       ? {
         _id: jobOrder.work_order.clientId._id,
         name: jobOrder.work_order.clientId.name,
         address: jobOrder.work_order.clientId.address,
       }
       : null,
-    project: jobOrder.work_order.projectId
+    project: jobOrder.work_order?.projectId
       ? {
         _id: jobOrder.work_order.projectId._id,
         name: jobOrder.work_order.projectId.name,
         address: jobOrder.work_order.projectId.address,
       }
       : null,
-    date_range: {
+    date_range: jobOrder.date_range ? {
       from: convertToIST(jobOrder.date_range.from),
       to: convertToIST(jobOrder.date_range.to),
-    },
+    } : null,
     createdAt: convertToIST(jobOrder.createdAt),
     updatedAt: convertToIST(jobOrder.updatedAt),
     products: jobOrder.products.map((product) => {
-      const workOrderProduct = jobOrder.work_order.products.find(
+      const workOrderProduct = jobOrder.work_order?.products?.find(
         (wp) => wp.shapeId && wp.shapeId._id && product.shape._id && wp.shapeId._id.toString() === product.shape._id.toString()
       );
       console.log("workOrderProduct", workOrderProduct); // Debug log
@@ -3182,30 +3182,30 @@ const getJobOrderById = asyncHandler(async (req, res) => {
   const formattedJobOrder = {
     ...jobOrder,
     color: jobOrder.color || null,
-    workOrderId: jobOrder.work_order._id,
-    workOrderNumber: jobOrder.work_order.workOrderNumber,
-    client: jobOrder.work_order.clientId
+    workOrderId: jobOrder.work_order?._id || null,
+    workOrderNumber: jobOrder.work_order?.workOrderNumber || null,
+    client: jobOrder.work_order?.clientId
       ? {
         _id: jobOrder.work_order.clientId._id,
         name: jobOrder.work_order.clientId.name,
         address: jobOrder.work_order.clientId.address,
       }
       : null,
-    project: jobOrder.work_order.projectId
+    project: jobOrder.work_order?.projectId
       ? {
         _id: jobOrder.work_order.projectId._id,
         name: jobOrder.work_order.projectId.name,
         address: jobOrder.work_order.projectId.address,
       }
       : null,
-    date_range: {
+    date_range: jobOrder.date_range ? {
       from: convertToIST(jobOrder.date_range.from),
       to: convertToIST(jobOrder.date_range.to),
-    },
+    } : null,
     createdAt: convertToIST(jobOrder.createdAt),
     updatedAt: convertToIST(jobOrder.updatedAt),
     products: jobOrder.products.map((product) => {
-      const workOrderProduct = jobOrder.work_order.products.find(
+      const workOrderProduct = jobOrder.work_order?.products?.find(
         (wp) => wp.shapeId && wp.shapeId._id && product.shape._id && wp.shapeId._id.toString() === product.shape._id.toString() && wp.diameter === product.dia
       );
       return {
