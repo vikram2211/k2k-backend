@@ -1198,31 +1198,85 @@ const getAllDispatches = asyncHandler(async (req, res, next) => {
           return res.status(200).json(new ApiResponse(200, [], 'No dispatch records found'));
       }
 
-      // Process each dispatch to aggregate shape-wise data
+      // Process each dispatch to aggregate shape-wise data and include planned quantities by matching QR codes
       const result = await Promise.all(dispatches.map(async (dispatch) => {
-          // Aggregate total dispatched quantity per shape
+          // Aggregate total dispatched quantity per shape for this dispatch
           const shapeQuantities = dispatch.products.reduce((acc, product) => {
-              const shapeId = product.shape_id.toString();
+              const shapeId = product.shape_id?.toString();
+              if (!shapeId) return acc;
               if (!acc[shapeId]) {
-                  acc[shapeId] = {
-                      shape_id: product.shape_id,
-                      total_quantity: 0,
-                  };
+                  acc[shapeId] = { shape_id: product.shape_id, total_quantity: 0 };
               }
-              acc[shapeId].total_quantity += product.dispatch_quantity;
+              acc[shapeId].total_quantity += Number(product.dispatch_quantity || 0);
               return acc;
           }, {});
+          console.log("shapeQuantities",shapeQuantities);
+          
+
+          // Compute planned quantities per shape by comparing QR IDs
+          const qrCodes = Array.from(new Set((dispatch.products || []).map((p) => p.qr_code).filter(Boolean)));
+          let plannedByShape = {};
+          let combos = [];// [{shapeId, dia, barMark}]
+          const normalizeBarMark = (bm) => {
+            if (bm === null || bm === undefined) return '';
+            return String(bm).trim().replace(/,+$/g, '');
+          };
+          if (qrCodes.length > 0) {
+              const relatedJobOrders = await ironJobOrder
+                  .find({ 'products.qr_code_id': { $in: qrCodes } }, { products: 1 })
+                  .lean();
+              plannedByShape = relatedJobOrders.reduce((acc, jo) => {
+                  (jo.products || []).forEach((prod) => {
+                      if (!prod?.qr_code_id || !qrCodes.includes(prod.qr_code_id)) return;
+                      const sid = prod.shape?.toString();
+                      if (!sid) return;
+                      acc[sid] = (acc[sid] || 0) + Number(prod.planned_quantity || 0);
+                      combos.push({ shapeId: sid, dia: Number(prod.dia || 0), barMark: normalizeBarMark(prod.barMark) });
+                  });
+                  return acc;
+              }, {});
+          }
+
+          // Compute total PO quantity per shape by matching shape+dia+barMark in related work order products
+          let poByShape = {};
+          try {
+            const woId = dispatch.work_order?._id || dispatch.work_order;
+            if (woId && combos.length) {
+              const woDoc = await ironWorkOrder.findById(woId).select('products').lean();
+              if (woDoc?.products?.length) {
+                for (const combo of combos) {
+                  const match = woDoc.products.find((wp) => {
+                    const sid = (wp.shapeId || wp.shape_id || wp.shape || (wp.shape?._id) || '').toString();
+                    const dia = Number(wp.diameter || wp.dia || 0);
+                    const bm = normalizeBarMark(wp.barMark);
+                    return sid === combo.shapeId && dia === combo.dia && bm === combo.barMark;
+                  });
+                  if (match) {
+                    const sid = combo.shapeId;
+                    const poQty = Number(match.quantity || match.poQuantity || 0);
+                    poByShape[sid] = (poByShape[sid] || 0) + poQty;
+                  }
+                }
+              }
+            }
+          } catch (e) {
+            // swallow PO aggregation errors to avoid breaking listing
+          }
 
           // Fetch shape names for each shape_id
           const shapeIds = Object.keys(shapeQuantities);
           const shapes = await ironShape.find({ _id: { $in: shapeIds }, isDeleted: false }).select('description');
 
-          // Map shape names to quantities
+          // Map shape names to quantities and planned quantities
           const shapeData = Object.values(shapeQuantities).map((item) => {
               const shape = shapes.find(s => s._id.toString() === item.shape_id.toString());
+              const plannedQty = plannedByShape[item.shape_id.toString()] || 0;
+              const poQty = poByShape[item.shape_id.toString()] || 0;
               return {
                   shape_name: shape ? shape.description : 'N/A',
                   total_dispatched_qty: item.total_quantity,
+                  planned_quantity: plannedQty,
+                  po_quantity: poQty,
               };
           });
 
