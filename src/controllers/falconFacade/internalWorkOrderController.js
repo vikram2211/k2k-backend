@@ -2082,7 +2082,7 @@ const createInternalWorkOrder = asyncHandler(async (req, res) => {
 
         // Define valid process transitions
         const validTransitions = {
-            '': ['cutting', 'machining', 'assembling'], // Initial processes
+            '': ['cutting', 'machining', 'assembling', 'glass fixing / glazing'], // Initial processes - any can be first
             'cutting': ['machining', 'assembling', 'glass fixing / glazing'],
             'machining': ['assembling', 'glass fixing / glazing'],
             'assembling': ['glass fixing / glazing'],
@@ -2227,6 +2227,16 @@ const createInternalWorkOrder = asyncHandler(async (req, res) => {
                                 const sfFileField = `products[${productIndex}][semifinished_details][${sfIndex}][file]`;
                                 const sfFile = filesMap[sfFileField];
                                 let sfFileUrl = undefined;
+
+                                // Upload semi-finished file if provided
+                                if (sfFile) {
+                                    const sfFileName = `internal-work-orders/semi-finished/${Date.now()}-${sanitizeFilename(sfFile.originalname)}`;
+                                    const sfUploadResult = await putObject(
+                                        { data: sfFile.buffer, mimetype: sfFile.mimetype },
+                                        sfFileName
+                                    );
+                                    sfFileUrl = sfUploadResult.url;
+                                }
 
                                 // Validate process sequence
                                 let lastProcess = '';
