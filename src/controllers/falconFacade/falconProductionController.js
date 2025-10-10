@@ -312,6 +312,12 @@ const getProductionsByProcess = asyncHandler(async (req, res) => {
                     __v: 1,
                     int_work_order_id: '$internalWorkOrderDetails.int_work_order_id',
                 }
+            },
+            // Step 7: Sort by createdAt in descending order to show latest data first
+            {
+                $sort: {
+                    createdAt: -1
+                }
             }
         ]);
 
@@ -1909,6 +1915,7 @@ const productionQCCheck_08_08_2025 = asyncHandler(async (req, res) => {
             rejected_quantity,
             recycled_quantity: 0, // Not provided in Production module, default to 0
             process_name,
+            from_process_name: production.process_name, // From which process the rejection is coming
             remarks,
             checked_by: userId,
             updated_by: userId,
@@ -2036,7 +2043,8 @@ const productionQCCheck1 = asyncHandler(async (req, res) => {
             semifinished_id: production.semifinished_id,
             rejected_quantity,
             recycled_quantity: 0,
-            process_name: effectiveProcessName,
+            process_name: effectiveProcessName, // To which process we're sending back
+            from_process_name: production.process_name, // From which process the rejection is coming
             remarks,
             checked_by: userId,
             updated_by: userId,
@@ -2218,7 +2226,8 @@ const productionQCCheck_09_09_2025 = asyncHandler(async (req, res) => {
             semifinished_id: production.semifinished_id,
             rejected_quantity,
             recycled_quantity: 0,
-            process_name: effectiveProcessName,
+            process_name: effectiveProcessName, // To which process we're sending back
+            from_process_name: production.process_name, // From which process the rejection is coming
             remarks,
             checked_by: userId,
             updated_by: userId,
@@ -2378,7 +2387,8 @@ const productionQCCheck = asyncHandler(async (req, res) => {
             semifinished_id: currentProduction.semifinished_id,
             rejected_quantity,
             recycled_quantity: 0,
-            process_name: effectiveProcessName,
+            process_name: effectiveProcessName, // To which process we're sending back
+            from_process_name: currentProduction.process_name, // From which process the rejection is coming
             remarks,
             checked_by: userId,
             updated_by: userId,
@@ -2789,6 +2799,8 @@ const getProductionById = asyncHandler(async (req, res) => {
                 remarks: qc.remarks || 'N/A',
                 created_by: qc.checked_by?.username || 'admin',
                 timestamp: formatTimestamp(qc.createdAt) || 'N/A',
+                process_name: qc.process_name || 'N/A',
+                from_process_name: qc.from_process_name || 'N/A',
             };
         });
 

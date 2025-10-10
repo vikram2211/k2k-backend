@@ -2303,12 +2303,21 @@ if (internalWorkOrders.length > 0) {
                         });
                     });
 
+                    // Calculate rejected quantity for this specific semi-finished item
+                    const qcDocsForSemi = await falconQCCheck.find({
+                        job_order: jobOrder._id,
+                        product_id: prod.product,
+                        semifinished_id: semi.semifinished_id,
+                    }).lean();
+                    const rejectedQtyForSemi = qcDocsForSemi?.reduce((sum, doc) => sum + (doc.rejected_quantity || 0), 0) || 0;
+
                     semiFinishedDetails.push({
                         semifinished_id: semi.semifinished_id,
                         file_url: semi.file_url,
                         remarks: semi.remarks,
                         packed_qty,
                         dispatch_qty,
+                        rejectedQty: rejectedQtyForSemi,
                         processes: await Promise.all(
                             semi.processes.map(async (proc) => {
                                 const production = await falconProduction.findOne({
@@ -2317,11 +2326,36 @@ if (internalWorkOrders.length > 0) {
                                     semifinished_id: semi.semifinished_id,
                                     process_name: { $regex: `^${proc.name}$`, $options: 'i' },
                                 }).lean();
+
+                                // Get QC rejection details for this specific process (only FROM this process)
+                                const qcRejections = await falconQCCheck.find({
+                                    job_order: jobOrder._id,
+                                    product_id: prod.product,
+                                    semifinished_id: semi.semifinished_id,
+                                    from_process_name: { $regex: `^${proc.name}$`, $options: 'i' } // Only rejections FROM this process
+                                }).lean();
+
+                                // Calculate total rejected quantity for this process
+                                const totalRejectedQty = qcRejections.reduce((sum, qc) => sum + (qc.rejected_quantity || 0), 0);
+
+                                // Get rejection details with from/to process information
+                                const rejectionDetails = qcRejections.map(qc => ({
+                                    qc_number: `QC-${qc._id}`,
+                                    rejected_qty: qc.rejected_quantity || 0,
+                                    from_process_name: qc.from_process_name || 'N/A',
+                                    process_name: qc.process_name || 'N/A',
+                                    remarks: qc.remarks || 'N/A',
+                                    created_by: qc.checked_by?.username || 'admin',
+                                    timestamp: qc.createdAt ? new Date(qc.createdAt).toLocaleString() : 'N/A'
+                                }));
+
                                 return {
                                     name: proc.name,
                                     file_url: proc.file_url,
                                     remarks: proc.remarks,
                                     achievedQty: production?.product?.achieved_quantity || 0,
+                                    totalRejectedQty,
+                                    rejectionDetails,
                                 };
                             })
                         ),
@@ -3283,6 +3317,8 @@ const deleteFalconJobOrder = asyncHandler(async (req, res) => {
 const getWorkOrderClientProjectDetails = asyncHandler(async (req, res) => {
     // 1. Get work order ID from params
     const { id } = req.params;
+    console.log("id new 123489", id);
+    
 
     // 2. Validate the ID
     if (!mongoose.Types.ObjectId.isValid(id)) {

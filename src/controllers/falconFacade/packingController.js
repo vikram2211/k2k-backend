@@ -1196,6 +1196,10 @@ const getAllFalconPackings = asyncHandler(async (req, res) => {
 const getFalconPackingById = asyncHandler(async (req, res) => {
     try {
         const { workOrderId } = req.params;
+        const { productId } = req.query; // Optional productId parameter
+        console.log("workOrderId new 123489", workOrderId);
+        console.log("productId", productId);
+        
 
         const workOrderDetails = await falconWorkOrder.aggregate([
             { $match: { _id: new mongoose.Types.ObjectId(workOrderId) } },
@@ -1239,7 +1243,10 @@ const getFalconPackingById = asyncHandler(async (req, res) => {
                         {
                             $match: {
                                 $expr: {
-                                    $eq: ['$work_order', '$$workOrderId']
+                                    $and: [
+                                        { $eq: ['$work_order', '$$workOrderId'] },
+                                        ...(productId ? [{ $eq: ['$product', new mongoose.Types.ObjectId(productId)] }] : [])
+                                    ]
                                 }
                             }
                         },

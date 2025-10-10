@@ -37,6 +37,10 @@ const qcCheckSchema = new mongoose.Schema(
             type: String,
             required: false,
         },
+        from_process_name: {
+            type: String,
+            required: false,
+        },
         remarks: {
             type: String,
             required: false,

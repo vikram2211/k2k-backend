@@ -16,6 +16,7 @@ import { falconProduction } from '../../models/falconFacade/falconProduction.mod
 import { ApiResponse } from '../../utils/ApiResponse.js';
 import { ApiError } from '../../utils/ApiError.js';
 import { falconInternalWorkOrderCounter } from '../../models/falconFacade/falconIWOcounter.model.js';
+import {falconQCCheck} from '../../models/falconFacade/falconQcCheck.model.js';
 
 
 // Helper function to format date to DD-MM-YYYY
@@ -3430,10 +3431,51 @@ const getInternalWorkOrderById = asyncHandler(async (req, res) => {
                                     .select('product.achieved_quantity product.rejected_quantity')
                                     .lean();
 
+                                // Get QC rejection details for this specific process (only FROM this process)
+                                // Filter by internal_work_order to get rejections specific to this IWO
+                                const qcRejections = await falconQCCheck.find({
+                                    job_order: jobOrder._id,
+                                    product_id: internalProduct.product,
+                                    semifinished_id: semi.semifinished_id,
+                                    from_process_name: { $regex: `^${process.name}$`, $options: 'i' } // Only FROM this process
+                                }).lean();
+
+                                // Filter QC rejections by internal work order
+                                // We need to check if the production record associated with the QC check belongs to this IWO
+                                const qcRejectionsForIWO = await Promise.all(
+                                    qcRejections.map(async (qc) => {
+                                        if (qc.production) {
+                                            const prod = await falconProduction.findById(qc.production).select('internal_work_order').lean();
+                                            if (prod && prod.internal_work_order?.toString() === id) {
+                                                return qc;
+                                            }
+                                        }
+                                        return null;
+                                    })
+                                );
+
+                                const filteredQcRejections = qcRejectionsForIWO.filter(qc => qc !== null);
+
+                                // Calculate total rejected quantity for this process
+                                const totalRejectedQty = filteredQcRejections.reduce((sum, qc) => sum + (qc.rejected_quantity || 0), 0);
+
+                                // Get rejection details with from/to process information
+                                const rejectionDetails = filteredQcRejections.map(qc => ({
+                                    qc_number: `QC-${qc._id}`,
+                                    rejected_qty: qc.rejected_quantity || 0,
+                                    from_process_name: qc.from_process_name || 'N/A',
+                                    process_name: qc.process_name || 'N/A',
+                                    remarks: qc.remarks || 'N/A',
+                                    created_by: qc.checked_by?.username || 'admin',
+                                    timestamp: qc.createdAt ? new Date(qc.createdAt).toLocaleString() : 'N/A'
+                                }));
+
                                 return {
                                     ...process,
                                     achieved_qty: productionRecord?.product?.achieved_quantity || 0,
                                     rejected_qty: productionRecord?.product?.rejected_quantity || 0,
+                                    totalRejectedQty,
+                                    rejectionDetails,
                                 };
                             })
                         );
@@ -4321,10 +4363,10 @@ const updateInternalWorkOrder___WORKING = asyncHandler(async (req, res) => {
         // Fetch existing production records for this internal work order
         const existingProductions = await falconProduction.find({ internal_work_order: id }).session(session);
 
-        // Map existing production records by product and process
+        // Map existing production records by product, semifinished and process
         const existingProdMap = {};
         existingProductions.forEach(prod => {
-            const key = `${prod.product.product_id.toString()}-${prod.product.code}-${prod.process_name}`;
+            const key = `${prod.product.product_id.toString()}-${prod.product.code}-${prod.semifinished_id}-${prod.process_name}`;
             existingProdMap[key] = prod;
         });
 
@@ -5603,7 +5645,7 @@ const updateInternalWorkOrder = asyncHandler(async (req, res) => {
     for (const process of sfDetail.processes) {
                     console.log("process", process);
       const index = sfDetail.processes.indexOf(process);
-      const key = `${product.product.toString()}-${product.code}-${process.name.toLowerCase()}`;
+      const key = `${product.product.toString()}-${product.code}-${sfDetail.semifinished_id}-${process.name.toLowerCase()}`;
       const existingProd = existingProdMap[key];
 
       const productionData = {
@@ -5633,7 +5675,17 @@ const updateInternalWorkOrder = asyncHandler(async (req, res) => {
       };
 
       if (existingProd) {
-        Object.assign(existingProd, productionData);
+        // Always refresh product.po_quantity for all related records
+        existingProd.product.po_quantity = product.po_quantity;
+        // Reset available_quantity for first process of each semifinished chain
+        if (index === 0) {
+          existingProd.available_quantity = product.po_quantity;
+          existingProd.status = 'Pending';
+        }
+        // Keep achieved/rejected/recycled as already tracked; update other mutable fields
+        existingProd.process_sequence = productionData.process_sequence;
+        existingProd.date = productionData.date;
+        existingProd.updated_by = productionData.updated_by;
         await existingProd.save({ session });
       } else {
         productionDocs.push(productionData);

@@ -389,7 +389,7 @@ const getFalconWorkOrders = asyncHandler(async (req, res) => {
             match: { isDeleted: false },
         })
         .lean()
-        .sort({ createdA: -1 });
+        .sort({ createdAt: -1 });
 
     if (!workOrders?.length) {
         return sendResponse(
@@ -1977,11 +1977,36 @@ const getFalconWorkOrderById = asyncHandler(async (req, res) => {
                                 semifinished_id: semi.semifinished_id,
                                 process_name: { $regex: `^${proc.name}$`, $options: 'i' },
                             }).lean();
+
+                            // Get QC rejection details for this specific process (only FROM this process)
+                            const qcRejections = await falconQCCheck.find({
+                                job_order: iwo.job_order_id,
+                                product_id: prod.product,
+                                semifinished_id: semi.semifinished_id,
+                                from_process_name: { $regex: `^${proc.name}$`, $options: 'i' } // Only rejections FROM this process
+                            }).lean();
+
+                            // Calculate total rejected quantity for this process
+                            const totalRejectedQty = qcRejections.reduce((sum, qc) => sum + (qc.rejected_quantity || 0), 0);
+
+                            // Get rejection details with from/to process information
+                            const rejectionDetails = qcRejections.map(qc => ({
+                                qc_number: `QC-${qc._id}`,
+                                rejected_qty: qc.rejected_quantity || 0,
+                                from_process_name: qc.from_process_name || 'N/A',
+                                process_name: qc.process_name || 'N/A',
+                                remarks: qc.remarks || 'N/A',
+                                created_by: qc.checked_by?.username || 'admin',
+                                timestamp: qc.createdAt ? new Date(qc.createdAt).toLocaleString() : 'N/A'
+                            }));
+
                             return {
                                 name: proc.name,
                                 file_url: proc.file_url || '',
                                 remarks: proc.remarks || '',
                                 achievedQty: processProduction?.product?.achieved_quantity || 0,
+                                totalRejectedQty,
+                                rejectionDetails,
                             };
                         }),
                     });
