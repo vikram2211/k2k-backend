@@ -52,7 +52,7 @@ const getScannedProductsData = asyncHandler(async (req, res) => {
         console.log("packingEntry", packingEntry);
 
         if (packingEntry.delivery_stage !== 'Packed') {
-            return res.status(400).json({ success: false, message: "This product has already been dispatched or delivered" });
+            return res.status(400).json({ success: false, message: `Given QR ID '${qrId}' has already been dispatched or delivered` });
         }
 
         // Fetch job order details using job_order_id from packingEntry
@@ -396,12 +396,16 @@ const dispatchSchema = Joi.object({
             'date.base': 'Date must be a valid ISO date',
             'any.required': 'Date is required',
         }),
-    dispatch_quantity: Joi.number().required().messages({ 'number.base': 'Dispatch quantity is required' }),
-    hsn_code: Joi.string().required().messages({ 'string.empty': 'HSN code is required' }),
-    boq: Joi.string().required().messages({ 'string.empty': 'BOQ is required' }),
-    rate: Joi.number().required().messages({ 'number.base': 'Rate is required' }),
-    amount: Joi.number().required().messages({ 'number.base': 'Amount is required' }),
+    dispatch_quantity: Joi.number().optional().messages({ 'number.base': 'Dispatch quantity must be a number' }),
+    // Old format fields (optional for backward compatibility)
+    hsn_code: Joi.string().optional().allow('').messages({ 'string.empty': 'HSN code must be a string' }),
+    boq: Joi.string().optional().allow('').messages({ 'string.empty': 'BOQ must be a string' }),
+    rate: Joi.number().optional().messages({ 'number.base': 'Rate must be a number' }),
+    amount: Joi.number().optional().messages({ 'number.base': 'Amount must be a number' }),
     hardware_included: Joi.string().optional().allow('').messages({ 'string.empty': 'Hardware included must be a string' }),
+    // New format: products array and hardware
+    products: Joi.string().optional().allow(''),
+    hardware: Joi.string().optional().allow(''),
 });
 
 const createDispatch = async (req, res, next) => {
@@ -416,6 +420,29 @@ const createDispatch = async (req, res, next) => {
             return next(new ApiError(400, 'Invalid QR codes format: must be a valid JSON array'));
         }
     }
+    
+    // Parse products array if sent from frontend
+    let frontendProducts = null;
+    if (body.products && typeof body.products === 'string') {
+        try {
+            frontendProducts = JSON.parse(body.products);
+        } catch (e) {
+            return next(new ApiError(400, 'Invalid products format: must be a valid JSON array'));
+        }
+    }
+    
+    // Parse hardware data if sent from frontend (now an array)
+    let hardwareData = [];
+    if (body.hardware && typeof body.hardware === 'string') {
+        try {
+            hardwareData = JSON.parse(body.hardware);
+            if (!Array.isArray(hardwareData)) {
+                hardwareData = [hardwareData]; // Convert single object to array for backward compatibility
+            }
+        } catch (e) {
+            return next(new ApiError(400, 'Invalid hardware format: must be a valid JSON array'));
+        }
+    }
 
     // Validate request body (without gate_pass_no and dc_no)
     const { error, value } = dispatchSchema.validate(body, { abortEarly: false });
@@ -425,6 +452,8 @@ const createDispatch = async (req, res, next) => {
 
     const { job_order, invoice_or_sto, vehicle_number, contact_person_detail, qr_codes, date, dispatch_quantity, hsn_code, boq, rate, amount, hardware_included } = value;
     const userId = req.user.id;
+    
+    console.log("frontendProducts parsed:", frontendProducts);
 
     if (!mongoose.Types.ObjectId.isValid(job_order)) {
         return next(new ApiError(400, `Invalid Job Order ID: ${job_order}`));
@@ -474,21 +503,72 @@ const createDispatch = async (req, res, next) => {
         return acc;
     }, {});
 
-    // Construct a single products array with aggregated dispatch_quantity
-    const firstPackingEntry = packingEntries[0];
-    const totalDispatchQuantity = packingEntries.reduce((sum, packing) => sum + packing.semi_finished_quantity, 0);
-    console.log("totalDispatchQuantity", totalDispatchQuantity);
-    const products = [{
-        product_id: firstPackingEntry.product._id,
-        product_name: productMap[firstPackingEntry.product._id.toString()],
-        semi_finished_id: firstPackingEntry.semi_finished_id,
-        dispatch_quantity: totalDispatchQuantity,
-        hsn_code: hsn_code,
-        boq: boq,
-        rate: rate,
-        amount: amount,
-        hardware_included: hardware_included,
-    }];
+    // Use frontend products data if available, otherwise group from packing entries
+    let products;
+    
+    if (frontendProducts && Array.isArray(frontendProducts) && frontendProducts.length > 0) {
+        // Use product-specific data from frontend
+        products = frontendProducts.map(fp => {
+            // Find all packing entries for this product + semi-finished combination
+            const relatedPackings = packingEntries.filter(
+                p => p.product._id.toString() === fp.productId && p.semi_finished_id === fp.semiFinishedId
+            );
+            const dispatchQty = relatedPackings.reduce((sum, p) => sum + (p.semi_finished_quantity || 0), 0);
+            
+            return {
+                product_id: fp.productId,
+                product_name: productMap[fp.productId],
+                semi_finished_id: fp.semiFinishedId,
+                dispatch_quantity: dispatchQty,
+                hsn_code: fp.hsnCode || '',
+                boq: fp.boq || '',
+                rate: fp.rate || 0,
+                amount: fp.amount || 0,
+            };
+        });
+        console.log("products from frontend:", products);
+    } else {
+        // Fallback: Group packing entries by product_id + semi_finished_id combination
+        const productGroupMap = {};
+        packingEntries.forEach(packing => {
+            const productId = packing.product._id.toString();
+            const semiFinishedId = packing.semi_finished_id;
+            const key = `${productId}_${semiFinishedId}`;
+            
+            if (!productGroupMap[key]) {
+                productGroupMap[key] = {
+                    product_id: packing.product._id,
+                    product_name: productMap[productId],
+                    semi_finished_id: semiFinishedId,
+                    dispatch_quantity: 0,
+                    hsn_code: hsn_code || '',
+                    boq: boq || '',
+                    rate: rate || 0,
+                    amount: 0,
+                };
+            }
+            productGroupMap[key].dispatch_quantity += packing.semi_finished_quantity || 0;
+        });
+
+        // Convert grouped map to array and calculate amounts
+        products = Object.values(productGroupMap).map((product) => ({
+            ...product,
+            amount: product.dispatch_quantity * (rate || 0),
+        }));
+        console.log("products grouped by product + semi-finished (fallback):", products);
+    }
+    
+    // Prepare hardware data array
+    const hardware = hardwareData && Array.isArray(hardwareData) && hardwareData.length > 0 
+        ? hardwareData.map(hw => ({
+            description: hw.description || '',
+            quantity: hw.quantity || 0,
+            hsn_code: hw.hsnCode || '',
+            uom: hw.uom || '',
+            rate: hw.rate || 0,
+            amount: hw.amount || 0,
+        }))
+        : [];
 
     // const files = req.files || [];
     // let invoiceFileUrls = [];
@@ -529,6 +609,7 @@ const createDispatch = async (req, res, next) => {
         job_order,
         packing_ids: packingEntries.map((p) => p._id),
         products,
+        hardware,
         invoice_or_sto,
         qr_codes,
         vehicle_number,
@@ -832,7 +913,6 @@ const getDispatchById = asyncHandler(async (req, res, next) => {
             boq: product.boq || 'N/A',
             rate: product.rate != null ? product.rate : 'N/A',
             amount: product.amount != null ? product.amount : 'N/A',
-            hardwareIncluded: product.hardware_included || 'N/A',
             invoiceOrOrder: dispatch.invoice_or_sto || 'N/A',
             vehicleNumber: dispatch.vehicle_number || 'N/A',
             gatePass: dispatch.gate_pass_no != null ? dispatch.gate_pass_no : 'N/A',
@@ -842,7 +922,7 @@ const getDispatchById = asyncHandler(async (req, res, next) => {
             createdBy: dispatch.created_by?.username || 'N/A',
             createdAt: dispatch.createdAt,
         })),
-
+        hardware: dispatch.hardware || [],
     };
 
     return res.status(200).json({
@@ -945,6 +1025,9 @@ const updateFalconDispatch = asyncHandler(async (req, res, next) => {
 
     // 5. Update dispatch with transaction
     try {
+        console.log(`Updating dispatch with ID: ${id}`);
+        console.log('Update fields:', updateFields);
+        
         const updatedDispatch = await falocnDispatch.findByIdAndUpdate(
             id,
             { $set: updateFields },
@@ -955,6 +1038,8 @@ const updateFalconDispatch = asyncHandler(async (req, res, next) => {
             return next(new ApiError(404, 'Dispatch not found'));
         }
 
+        console.log(`Dispatch ${id} updated successfully`);
+        
         return res.status(200).json(
             new ApiResponse(200, updatedDispatch, 'Dispatch updated successfully')
         );

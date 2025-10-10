@@ -55,16 +55,41 @@ const falconDispatchSchema = new mongoose.Schema(
                     type: Number,
                     required: true,
                 },
-                hardware_included: {
-                    type: String,
-                    required: false,
-                    trim: true,
-                    // unique: true, 
-                },
                 // bundle_size: {
                 //   type: Number, // Stored from `Packing`
                 //   required: true,
                 // },
+            },
+        ],
+        hardware: [
+            {
+                description: {
+                    type: String,
+                    trim: true,
+                    default: '',
+                },
+                quantity: {
+                    type: Number,
+                    default: 0,
+                },
+                hsn_code: {
+                    type: String,
+                    trim: true,
+                    default: '',
+                },
+                uom: {
+                    type: String,
+                    trim: true,
+                    default: '',
+                },
+                rate: {
+                    type: Number,
+                    default: 0,
+                },
+                amount: {
+                    type: Number,
+                    default: 0,
+                },
             },
         ],
         invoice_or_sto: {
