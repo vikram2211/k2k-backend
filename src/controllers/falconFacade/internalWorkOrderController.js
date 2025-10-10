@@ -2451,7 +2451,8 @@ const getInternalWorkOrderDetails = asyncHandler(async (req, res) => {
         // Step 1: Fetch all internal work orders with minimal fields
         const internalWorkOrders = await falconInternalWorkOrder
             .find()
-            .select('int_work_order_id job_order_id date _id')
+            .select('int_work_order_id job_order_id date _id createdAt updatedAt')
+            .sort({ createdAt: -1 })  // Sort by creation date, newest first
             .lean();
             
 
@@ -2502,6 +2503,8 @@ const getInternalWorkOrderDetails = asyncHandler(async (req, res) => {
                 project_name: project?.name || null,
                 from_date: internalOrder.date?.from ? formatDateOnly(internalOrder.date.from) : null,
                 to_date: internalOrder.date?.to ? formatDateOnly(internalOrder.date.to) : null,
+                createdAt: internalOrder.createdAt,
+                updatedAt: internalOrder.updatedAt,
             };
         });
 

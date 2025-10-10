@@ -2030,6 +2030,7 @@ const getFalconWorkOrderById = asyncHandler(async (req, res) => {
             const rejectedQty = qcDocs.reduce((sum, doc) => sum + (doc.rejected_quantity || 0), 0);
 
             jobOrderDetailsWithSemiFinished.push({
+                int_work_order_id: iwo.int_work_order_id || 'N/A',
                 job_order_id: relatedJobOrder?.job_order_id || 'N/A',
                 product_id: prod.product?.toString(),
                 sales_order_no: iwo.sales_order_no || 'N/A',
