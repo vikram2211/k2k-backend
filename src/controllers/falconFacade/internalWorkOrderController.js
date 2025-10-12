@@ -2298,11 +2298,27 @@ const createInternalWorkOrder = asyncHandler(async (req, res) => {
 
         const internalWorkOrder = await falconInternalWorkOrder.create([jobOrderData], { session });
 
+        // Define the correct process order
+        const processOrder = ['cutting', 'machining', 'assembling', 'glass fixing / glazing'];
+        const getProcessIndex = (processName) => {
+            const normalized = processName.toLowerCase();
+            return processOrder.indexOf(normalized);
+        };
+
         // Create production records
         const productionDocs = [];
         for (const product of internalWorkOrder[0].products) {
             for (const sfDetail of product.semifinished_details) {
-                sfDetail.processes.forEach((process, index) => {
+                // Sort processes according to the correct order (in case they're not already sorted)
+                const sortedProcesses = [...sfDetail.processes].sort((a, b) => {
+                    return getProcessIndex(a.name) - getProcessIndex(b.name);
+                });
+                
+                sortedProcesses.forEach((process, i) => {
+                    const index = getProcessIndex(process.name);
+                    const previousProcess = i > 0 ? sortedProcesses[i - 1] : null;
+                    const nextProcess = i < sortedProcesses.length - 1 ? sortedProcesses[i + 1] : null;
+                    
                     const productionData = {
                         job_order: internalWorkOrder[0].job_order_id,
                         internal_work_order: internalWorkOrder[0]._id,
@@ -2315,10 +2331,10 @@ const createInternalWorkOrder = asyncHandler(async (req, res) => {
                         process_name: process.name,
                         process_sequence: {
                             current: { name: process.name, index },
-                            previous: index > 0 ? { name: sfDetail.processes[index - 1].name, index: index - 1 } : null,
-                            next: index < sfDetail.processes.length - 1 ? { name: sfDetail.processes[index + 1].name, index: index + 1 } : null,
+                            previous: previousProcess ? { name: previousProcess.name, index: getProcessIndex(previousProcess.name) } : null,
+                            next: nextProcess ? { name: nextProcess.name, index: getProcessIndex(nextProcess.name) } : null,
                         },
-                        available_quantity: index === 0 ? product.po_quantity : 0,
+                        available_quantity: i === 0 ? product.po_quantity : 0,
                         status: 'Pending',
                         date: dateFrom,
                         created_by: req.user._id,
@@ -5592,10 +5608,10 @@ const updateInternalWorkOrder = asyncHandler(async (req, res) => {
         const dateFrom = internalWorkOrder.date.from;
         // Fetch existing production records for this internal work order
         const existingProductions = await falconProduction.find({ internal_work_order: id }).session(session);
-        // Map existing production records by product and process
+        // Map existing production records by product, code, semifinished_id, and process
         const existingProdMap = {};
         existingProductions.forEach(prod => {
-            const key = `${prod.product.product_id.toString()}-${prod.product.code}-${prod.process_name}`;
+            const key = `${prod.product.product_id.toString()}-${prod.product.code}-${prod.semifinished_id}-${prod.process_name}`;
             existingProdMap[key] = prod;
         });
         // Generate and update production records for remaining products
@@ -5651,15 +5667,33 @@ const updateInternalWorkOrder = asyncHandler(async (req, res) => {
 
 
 
+        // Define the correct process order
+        const processOrder = ['cutting', 'machining', 'assembling', 'glass fixing / glazing'];
+        const getProcessIndex = (processName) => {
+            const normalized = processName.toLowerCase();
+            return processOrder.indexOf(normalized);
+        };
+
         for (const product of internalWorkOrder.products) {
                 console.log("product", product);
   for (const sfDetail of product.semifinished_details) {
             console.log("sfDetail", sfDetail);
-    for (const process of sfDetail.processes) {
+            
+            // Sort processes according to the correct order
+            const sortedProcesses = [...sfDetail.processes].sort((a, b) => {
+                return getProcessIndex(a.name) - getProcessIndex(b.name);
+            });
+            
+    for (let i = 0; i < sortedProcesses.length; i++) {
+      const process = sortedProcesses[i];
                     console.log("process", process);
-      const index = sfDetail.processes.indexOf(process);
+      const index = getProcessIndex(process.name); // Use correct order index, not array index
       const key = `${product.product.toString()}-${product.code}-${sfDetail.semifinished_id}-${process.name.toLowerCase()}`;
       const existingProd = existingProdMap[key];
+      
+      // Calculate previous and next based on sorted array
+      const previousProcess = i > 0 ? sortedProcesses[i - 1] : null;
+      const nextProcess = i < sortedProcesses.length - 1 ? sortedProcesses[i + 1] : null;
 
       const productionData = {
         job_order: jobOrderId,
@@ -5676,12 +5710,12 @@ const updateInternalWorkOrder = asyncHandler(async (req, res) => {
         process_name: process.name.toLowerCase(),
         process_sequence: {
           current: { name: process.name.toLowerCase(), index },
-          previous: index > 0 ? { name: sfDetail.processes[index - 1].name.toLowerCase(), index: index - 1 } : null,
-          next: index < sfDetail.processes.length - 1 ? { name: sfDetail.processes[index + 1].name.toLowerCase(), index: index + 1 } : null,
+          previous: previousProcess ? { name: previousProcess.name.toLowerCase(), index: getProcessIndex(previousProcess.name) } : null,
+          next: nextProcess ? { name: nextProcess.name.toLowerCase(), index: getProcessIndex(nextProcess.name) } : null,
         },
-        // 🔑 FIX: For every semifinished’s first process, reset available_quantity to updated product qty
-        available_quantity: index === 0 ? product.po_quantity : (existingProd?.available_quantity || 0),
-        status: index === 0 ? 'Pending' : (existingProd?.status || 'Pending'),
+        // 🔑 FIX: For first process in sequence (cutting if present, otherwise first in sorted order), reset available_quantity
+        available_quantity: i === 0 ? product.po_quantity : (existingProd?.available_quantity || 0),
+        status: i === 0 ? 'Pending' : (existingProd?.status || 'Pending'),
         date: dateFrom,
         created_by: req.user._id,
         updated_by: req.user._id,
@@ -5690,8 +5724,8 @@ const updateInternalWorkOrder = asyncHandler(async (req, res) => {
       if (existingProd) {
         // Always refresh product.po_quantity for all related records
         existingProd.product.po_quantity = product.po_quantity;
-        // Reset available_quantity for first process of each semifinished chain
-        if (index === 0) {
+        // Reset available_quantity for first process in the sorted sequence
+        if (i === 0) {
           existingProd.available_quantity = product.po_quantity;
           existingProd.status = 'Pending';
         }
