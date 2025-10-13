@@ -3173,6 +3173,7 @@ const getProductionsWithInviteQC = asyncHandler(async (req, res) => {
                     achieved_quantity: '$product.achieved_quantity',
                     rejected_quantity: '$product.rejected_quantity',
                     recycled_quantity: '$product.recycled_quantity',
+                    
                     process_name: 1,
                     invite_qc: 1, // include invite_qc flag
                     date: 1,
