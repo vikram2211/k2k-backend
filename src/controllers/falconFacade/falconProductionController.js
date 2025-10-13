@@ -1384,25 +1384,36 @@ const startProduction = asyncHandler(async (req, res) => {
         }
 
         // Check previous process completion - find the actual previous process that exists
+        // IMPORTANT: User can select any processes in sequence (e.g., Machining → Assembling → Glass Fixing)
+        // They don't have to start from Cutting. So we only validate if there IS an actual previous process.
         let previousProcessAchievedQuantity = null;
         let previousProduction = null;
-        if (currentIndex > 0 && production.process_sequence.previous) {
-            // Find the actual previous process that exists for this semi-finished product
-            const allProductionsForSemi = await falconProduction.find({
-                job_order: production.job_order,
-                semifinished_id: production.semifinished_id,
-            }).sort({ 'process_sequence.current.index': 1 });
+        
+        // Find all productions for this semi-finished product to check if there's a previous process
+        const allProductionsForSemi = await falconProduction.find({
+            job_order: production.job_order,
+            semifinished_id: production.semifinished_id,
+        }).sort({ 'process_sequence.current.index': 1 });
 
-            // Find the previous process that actually exists (not just by index)
-            previousProduction = allProductionsForSemi.find(p => 
-                p.process_sequence.current.index < currentIndex && 
-                p._id.toString() !== production._id.toString()
-            );
+        // Find the IMMEDIATE previous process (the one directly before the current process)
+        // We need the CLOSEST process before current, not just ANY process before it
+        const previousProcesses = allProductionsForSemi.filter(p => 
+            p.process_sequence.current.index < currentIndex && 
+            p._id.toString() !== production._id.toString()
+        );
+        
+        // Get the last one (highest index) = immediate previous
+        previousProduction = previousProcesses.length > 0 
+            ? previousProcesses[previousProcesses.length - 1] 
+            : null;
 
-            if (!previousProduction || previousProduction.product.achieved_quantity === 0) {
+        // Only validate if there IS a previous process
+        if (previousProduction) {
+            // Previous process exists - check if it has non-zero achieved quantity
+            if (previousProduction.product.achieved_quantity === 0) {
                 return res.status(400).json({
                     success: false,
-                    message: `Cannot update ${currentProcess} until the previous process (${previousProduction?.process_name || 'unknown'}) has non-zero achieved quantity.`,
+                    message: `Cannot update ${currentProcess} until the previous process (${previousProduction.process_name}) has non-zero achieved quantity.`,
                 });
             }
             previousProcessAchievedQuantity = previousProduction.product.achieved_quantity;
@@ -1414,19 +1425,28 @@ const startProduction = asyncHandler(async (req, res) => {
             // - REJECTED items (rejected_quantity): Items that are DISCARDED - no reprocessing needed
             // 
             // This validation ONLY applies to recycled_quantity, not rejected_quantity
-            // If current process has recycled items, ensure previous process has NO recycled items
-            // This enforces sequential flow: recycled items must be processed in order
+            // INCREMENTAL FLOW: Items can flow through processes incrementally
+            // Example: If Machining processes 5 items (10→5 recycled), those 5 can flow to Assembling
+            // Rule: Current process's remaining recycled CANNOT be LESS than previous process's recycled
             if (production.product.recycled_quantity > 0) {
                 const previousRecycledQty = previousProduction.product.recycled_quantity || 0;
+                const currentRecycledQty = production.product.recycled_quantity;
                 
-                if (previousRecycledQty > 0) {
+                // Calculate what the recycled quantity would be after this update
+                const recycledAfterUpdate = achieved_quantity >= currentRecycledQty 
+                    ? 0 
+                    : currentRecycledQty - achieved_quantity;
+                
+                // Current process cannot have LESS recycled than previous process
+                // This ensures items flow sequentially: previous must process first
+                if (recycledAfterUpdate < previousRecycledQty) {
                     return res.status(400).json({
                         success: false,
-                        message: `Cannot update ${currentProcess}. Recycled items must be processed sequentially. Please update ${previousProduction.process_name} first (${previousRecycledQty} items pending).`,
+                        message: `Cannot update ${currentProcess} by ${achieved_quantity}. This would leave ${recycledAfterUpdate} recycled items, but previous process (${previousProduction.process_name}) still has ${previousRecycledQty} pending. You can update by at most ${currentRecycledQty - previousRecycledQty} to maintain sequential flow.`,
                     });
                 }
                 
-                console.log(`Sequential recycling check passed: Previous process (${previousProduction.process_name}) has no pending recycled items.`);
+                console.log(`Sequential recycling check passed: After update, ${currentProcess} will have ${recycledAfterUpdate} recycled (previous has ${previousRecycledQty}).`);
             }
             // Note: rejected_quantity is NOT checked here because rejected items are discarded, not reprocessed
         }
@@ -1450,14 +1470,17 @@ const startProduction = asyncHandler(async (req, res) => {
                 });
             }
 
-            // Validate against previous process quantity
-            if (currentIndex > 0 && production.process_sequence.previous && previousProcessAchievedQuantity !== null) {
+            // Validate against previous process quantity (only if a previous process exists)
+            if (previousProduction && previousProcessAchievedQuantity !== null) {
                 if (newAchieved > previousProcessAchievedQuantity) {
                     return res.status(400).json({
                         success: false,
-                        message: `Achieved quantity (${newAchieved}) cannot exceed ${previousProcessAchievedQuantity} of the previous process (index ${currentIndex - 1}, ${production.process_sequence.previous.name}).`,
+                        message: `Achieved quantity (${newAchieved}) cannot exceed ${previousProcessAchievedQuantity} of the previous process (${previousProduction.process_name}).`,
                     });
                 }
+            } else if (!previousProduction) {
+                // No previous process exists - this is the first selected process in the sequence
+                console.log(`No previous process found - ${currentProcess} is the first process in this sequence. Update allowed.`);
             }
 
             production.product.achieved_quantity = newAchieved;
