@@ -1385,6 +1385,7 @@ const startProduction = asyncHandler(async (req, res) => {
 
         // Check previous process completion - find the actual previous process that exists
         let previousProcessAchievedQuantity = null;
+        let previousProduction = null;
         if (currentIndex > 0 && production.process_sequence.previous) {
             // Find the actual previous process that exists for this semi-finished product
             const allProductionsForSemi = await falconProduction.find({
@@ -1393,7 +1394,7 @@ const startProduction = asyncHandler(async (req, res) => {
             }).sort({ 'process_sequence.current.index': 1 });
 
             // Find the previous process that actually exists (not just by index)
-            const previousProduction = allProductionsForSemi.find(p => 
+            previousProduction = allProductionsForSemi.find(p => 
                 p.process_sequence.current.index < currentIndex && 
                 p._id.toString() !== production._id.toString()
             );
@@ -1406,6 +1407,28 @@ const startProduction = asyncHandler(async (req, res) => {
             }
             previousProcessAchievedQuantity = previousProduction.product.achieved_quantity;
             console.log(`Previous process found: ${previousProduction.process_name} with quantity: ${previousProcessAchievedQuantity}`);
+            
+            // SEQUENTIAL RECYCLING VALIDATION
+            // IMPORTANT DISTINCTION:
+            // - RECYCLED items (recycled_quantity): Items that will be REPROCESSED - must flow sequentially
+            // - REJECTED items (rejected_quantity): Items that are DISCARDED - no reprocessing needed
+            // 
+            // This validation ONLY applies to recycled_quantity, not rejected_quantity
+            // If current process has recycled items, ensure previous process has NO recycled items
+            // This enforces sequential flow: recycled items must be processed in order
+            if (production.product.recycled_quantity > 0) {
+                const previousRecycledQty = previousProduction.product.recycled_quantity || 0;
+                
+                if (previousRecycledQty > 0) {
+                    return res.status(400).json({
+                        success: false,
+                        message: `Cannot update ${currentProcess}. Recycled items must be processed sequentially. Please update ${previousProduction.process_name} first (${previousRecycledQty} items pending).`,
+                    });
+                }
+                
+                console.log(`Sequential recycling check passed: Previous process (${previousProduction.process_name}) has no pending recycled items.`);
+            }
+            // Note: rejected_quantity is NOT checked here because rejected items are discarded, not reprocessed
         }
 
         // If production is "Pending", change status to "In Progress" and update quantity
@@ -1440,17 +1463,19 @@ const startProduction = asyncHandler(async (req, res) => {
             production.product.achieved_quantity = newAchieved;
             production.updated_by = userId;
             
-            // Clear recycled quantities if the added quantity is greater than or equal to recycled quantity
-            if (achieved_quantity >= production.product.recycled_quantity) {
-                production.product.recycled_quantity = 0;
-                
-                // For recycle operations, we should only clear recycled quantities from the current process
-                // NOT from subsequent processes, as they might have their own recycled quantities from other operations
-                console.log(`Clearing recycled quantity for current process only: ${production.process_name}`);
-            } else {
-                // Reduce recycled quantity by the amount added
-                production.product.recycled_quantity -= achieved_quantity;
-                console.log(`Reducing recycled quantity for ${production.process_name}: ${production.product.recycled_quantity}`);
+            // Update recycled quantities tracking
+            // When items are recycled back to an earlier process, they create a "debt" that must be processed sequentially
+            // As items flow through each process again, we reduce the recycled_quantity accordingly
+            if (production.product.recycled_quantity > 0) {
+                if (achieved_quantity >= production.product.recycled_quantity) {
+                    // All recycled items for this process have been reprocessed
+                    production.product.recycled_quantity = 0;
+                    console.log(`Cleared all recycled quantity for ${production.process_name}`);
+                } else {
+                    // Partially processed recycled items
+                    production.product.recycled_quantity -= achieved_quantity;
+                    console.log(`Reducing recycled quantity for ${production.process_name}: ${production.product.recycled_quantity} remaining`);
+                }
             }
             
             await production.save();
@@ -2380,21 +2405,19 @@ const productionQCCheck = asyncHandler(async (req, res) => {
         let startIndex, endIndex;
         
         if (is_rejection) {
-            // REJECTION PROCESS: Deduct from all processes up to and including Cutting (index 0)
-            startIndex = 0; // Start from Cutting
-            endIndex = allProductions.findIndex(p => p._id.toString() === currentProduction._id.toString());
+            // REJECTION PROCESS: Deduct from ALL processes for this semifinished product
+            // When items are rejected, they affect the entire production chain - both previous and subsequent processes
+            // Example: Reject 5 from Assembling → deduct from Machining, Assembling, AND Glass Fixing
+            startIndex = 0; // Start from first process (usually Cutting)
+            endIndex = allProductions.length - 1; // Go to LAST process (all processes affected)
             
-            if (endIndex === -1) {
-                return res.status(400).json({
-                    success: false,
-                    message: 'Current production not found in sequence',
-                });
-            }
+            console.log(`REJECTION: Deducting ${rejected_quantity} from ALL processes (${allProductions.length} total)`);
             
-            // Deduct from all processes from Cutting to current process (excluding current as already deducted)
+            // Deduct from ALL processes (excluding current as already deducted)
             for (let i = startIndex; i <= endIndex; i++) {
                 const productionToUpdate = allProductions[i];
                 if (productionToUpdate._id.toString() !== currentProduction._id.toString()) {
+                    console.log(`Updating process: ${productionToUpdate.process_name} (index ${i})`);
                     productionToUpdate.product.achieved_quantity -= rejected_quantity;
                     if (productionToUpdate.product.achieved_quantity < 0) {
                         productionToUpdate.product.achieved_quantity = 0;
