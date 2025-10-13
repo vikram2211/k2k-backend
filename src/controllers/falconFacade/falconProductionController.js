@@ -2451,8 +2451,9 @@ const productionQCCheck = asyncHandler(async (req, res) => {
                 }
             }
             
-            // Update rejected quantity for current production
-            currentProduction.product.rejected_quantity = (currentProduction.product.rejected_quantity || 0) + rejected_quantity;
+            // Note: For rejection, we don't update rejected_quantity here
+            // It will be set from aggregated QC checks later (see line ~2549)
+            // This prevents double-counting
             
         } else {
             // RECYCLE PROCESS: Deduct from selected process to current process
@@ -2549,8 +2550,8 @@ const productionQCCheck = asyncHandler(async (req, res) => {
             currentProduction.product.rejected_quantity = totalRejected;
             // Don't update recycled_quantity for rejections
         } else {
-            // For recycle, don't update rejected_quantity at all (keep existing value)
-            // Keep the recycled_quantity that was set in the loop above
+            // For recycle, update recycled_quantity from aggregated values (don't touch rejected_quantity)
+            currentProduction.product.recycled_quantity = totalRecycled;
             // Don't update rejected_quantity for recycle operations
         }
         console.log("Before final save - currentProduction recycled_quantity:", currentProduction.product.recycled_quantity);
