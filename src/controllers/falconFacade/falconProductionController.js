@@ -137,7 +137,7 @@ const getProductionsByProcess_22_07_2025 = asyncHandler(async (req, res) => {
                     po_quantity: '$product.po_quantity',
                     achieved_quantity: '$product.achieved_quantity',
                     rejected_quantity: '$product.rejected_quantity',
-                    // recycled_quantity: '$product.recycled_quantity'
+                    recycled_quantity: '$product.recycled_quantity',
                     // },
                     process_name: 1,
                     date: 1,
@@ -297,11 +297,13 @@ const getProductionsByProcess = asyncHandler(async (req, res) => {
                         code: '$product.code', // Include code
                         po_quantity: '$product.po_quantity',
                         achieved_quantity: '$product.achieved_quantity',
-                        rejected_quantity: '$product.rejected_quantity'
+                        rejected_quantity: '$product.rejected_quantity',
+                        recycled_quantity: '$product.recycled_quantity'
                     },
                     po_quantity: '$product.po_quantity',
                     achieved_quantity: '$product.achieved_quantity',
                     rejected_quantity: '$product.rejected_quantity',
+                    recycled_quantity: '$product.recycled_quantity',
                     process_name: 1,
                     date: 1,
                     status: 1,
@@ -1381,21 +1383,29 @@ const startProduction = asyncHandler(async (req, res) => {
             });
         }
 
-        // Check previous process completion
+        // Check previous process completion - find the actual previous process that exists
         let previousProcessAchievedQuantity = null;
         if (currentIndex > 0 && production.process_sequence.previous) {
-            const previousProduction = await falconProduction.findOne({
+            // Find the actual previous process that exists for this semi-finished product
+            const allProductionsForSemi = await falconProduction.find({
                 job_order: production.job_order,
                 semifinished_id: production.semifinished_id,
-                'process_sequence.current.index': currentIndex - 1,
-            });
+            }).sort({ 'process_sequence.current.index': 1 });
+
+            // Find the previous process that actually exists (not just by index)
+            const previousProduction = allProductionsForSemi.find(p => 
+                p.process_sequence.current.index < currentIndex && 
+                p._id.toString() !== production._id.toString()
+            );
+
             if (!previousProduction || previousProduction.product.achieved_quantity === 0) {
                 return res.status(400).json({
                     success: false,
-                    message: `Cannot update ${currentProcess} until the previous process (index ${currentIndex - 1}, ${previousProduction?.process_name || 'unknown'}) has non-zero achieved quantity.`,
+                    message: `Cannot update ${currentProcess} until the previous process (${previousProduction?.process_name || 'unknown'}) has non-zero achieved quantity.`,
                 });
             }
             previousProcessAchievedQuantity = previousProduction.product.achieved_quantity;
+            console.log(`Previous process found: ${previousProduction.process_name} with quantity: ${previousProcessAchievedQuantity}`);
         }
 
         // If production is "Pending", change status to "In Progress" and update quantity
@@ -1429,6 +1439,20 @@ const startProduction = asyncHandler(async (req, res) => {
 
             production.product.achieved_quantity = newAchieved;
             production.updated_by = userId;
+            
+            // Clear recycled quantities if the added quantity is greater than or equal to recycled quantity
+            if (achieved_quantity >= production.product.recycled_quantity) {
+                production.product.recycled_quantity = 0;
+                
+                // For recycle operations, we should only clear recycled quantities from the current process
+                // NOT from subsequent processes, as they might have their own recycled quantities from other operations
+                console.log(`Clearing recycled quantity for current process only: ${production.process_name}`);
+            } else {
+                // Reduce recycled quantity by the amount added
+                production.product.recycled_quantity -= achieved_quantity;
+                console.log(`Reducing recycled quantity for ${production.process_name}: ${production.product.recycled_quantity}`);
+            }
+            
             await production.save();
 
             return res.status(200).json({
@@ -2290,8 +2314,9 @@ const productionQCCheck = asyncHandler(async (req, res) => {
     try {
         console.log("came here in qc");
         const { productionId } = req.params;
-        const { rejected_quantity, process_name, remarks } = req.body;
+        const { rejected_quantity, process_name, remarks, is_rejection } = req.body;
         console.log("rejected_quantity", rejected_quantity);
+        console.log("is_rejection", is_rejection);
         const userId = req.user?._id;
 
         // Validate inputs
@@ -2340,9 +2365,8 @@ const productionQCCheck = asyncHandler(async (req, res) => {
             });
         }
 
-        // Subtract rejected_quantity from current production and update its rejected_quantity
+        // Subtract rejected_quantity from current production
         currentProduction.product.achieved_quantity -= rejected_quantity;
-        currentProduction.product.rejected_quantity += rejected_quantity; // Only for current production
         if (currentProduction.product.achieved_quantity < 0) {
             currentProduction.product.achieved_quantity = 0;
         }
@@ -2353,30 +2377,99 @@ const productionQCCheck = asyncHandler(async (req, res) => {
             semifinished_id: currentProduction.semifinished_id,
         }).sort({ 'process_sequence.current.index': 1 });
 
-        // Find the index of the selected process
-        const selectedProcessIndex = allProductions.findIndex(
-            p => p.process_sequence.current.name === effectiveProcessName
-        );
-
-        if (selectedProcessIndex === -1) {
-            return res.status(400).json({
-                success: false,
-                message: 'Selected process not found in sequence',
-            });
-        }
-
-        // Deduct rejected quantity from the selected process and all subsequent processes
-        // (but do NOT update their rejected_quantity)
-        for (let i = selectedProcessIndex; i < allProductions.length; i++) {
-            const productionToUpdate = allProductions[i];
-            // Skip updating rejected_quantity for non-current productions
-            if (productionToUpdate._id.toString() !== currentProduction._id.toString()) {
-                productionToUpdate.product.achieved_quantity -= rejected_quantity;
-                if (productionToUpdate.product.achieved_quantity < 0) {
-                    productionToUpdate.product.achieved_quantity = 0;
-                }
-                await productionToUpdate.save();
+        let startIndex, endIndex;
+        
+        if (is_rejection) {
+            // REJECTION PROCESS: Deduct from all processes up to and including Cutting (index 0)
+            startIndex = 0; // Start from Cutting
+            endIndex = allProductions.findIndex(p => p._id.toString() === currentProduction._id.toString());
+            
+            if (endIndex === -1) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Current production not found in sequence',
+                });
             }
+            
+            // Deduct from all processes from Cutting to current process (excluding current as already deducted)
+            for (let i = startIndex; i <= endIndex; i++) {
+                const productionToUpdate = allProductions[i];
+                if (productionToUpdate._id.toString() !== currentProduction._id.toString()) {
+                    productionToUpdate.product.achieved_quantity -= rejected_quantity;
+                    if (productionToUpdate.product.achieved_quantity < 0) {
+                        productionToUpdate.product.achieved_quantity = 0;
+                    }
+                    // Update rejected quantity for all processes
+                    productionToUpdate.product.rejected_quantity = (productionToUpdate.product.rejected_quantity || 0) + rejected_quantity;
+                    await productionToUpdate.save();
+                }
+            }
+            
+            // Update rejected quantity for current production
+            currentProduction.product.rejected_quantity = (currentProduction.product.rejected_quantity || 0) + rejected_quantity;
+            
+        } else {
+            // RECYCLE PROCESS: Deduct from selected process to current process
+            console.log("=== RECYCLE PROCESS DEBUG ===");
+            console.log("effectiveProcessName:", effectiveProcessName);
+            console.log("currentProduction.process_name:", currentProduction.process_name);
+            console.log("rejected_quantity:", rejected_quantity);
+            console.log("allProductions count:", allProductions.length);
+            allProductions.forEach((p, idx) => {
+                console.log(`Production ${idx}: ${p.process_sequence.current.name} (${p.process_name})`);
+            });
+            
+            // Find the index of the selected process
+            const selectedProcessIndex = allProductions.findIndex(
+                p => p.process_sequence.current.name === effectiveProcessName
+            );
+            console.log("selectedProcessIndex:", selectedProcessIndex);
+
+            if (selectedProcessIndex === -1) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Selected process not found in sequence',
+                });
+            }
+            
+            const currentProcessIndex = allProductions.findIndex(
+                p => p._id.toString() === currentProduction._id.toString()
+            );
+            console.log("currentProcessIndex:", currentProcessIndex);
+            
+            if (currentProcessIndex === -1) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Current production not found in sequence',
+                });
+            }
+
+            // Deduct recycled quantity from selected process to current process (excluding current as already deducted)
+            console.log(`Updating productions from index ${selectedProcessIndex} to ${currentProcessIndex}`);
+            for (let i = selectedProcessIndex; i <= currentProcessIndex; i++) {
+                const productionToUpdate = allProductions[i];
+                if (productionToUpdate._id.toString() !== currentProduction._id.toString()) {
+                    console.log(`Updating production ${i}: ${productionToUpdate.process_name}`);
+                    console.log(`Before - achieved: ${productionToUpdate.product.achieved_quantity}, recycled: ${productionToUpdate.product.recycled_quantity || 0}`);
+                    
+                    productionToUpdate.product.achieved_quantity -= rejected_quantity;
+                    if (productionToUpdate.product.achieved_quantity < 0) {
+                        productionToUpdate.product.achieved_quantity = 0;
+                    }
+                    // Track recycled quantity for all processes in between
+                    productionToUpdate.product.recycled_quantity = (productionToUpdate.product.recycled_quantity || 0) + rejected_quantity;
+                    
+                    console.log(`After - achieved: ${productionToUpdate.product.achieved_quantity}, recycled: ${productionToUpdate.product.recycled_quantity}`);
+                    await productionToUpdate.save();
+                }
+            }
+            
+            // Update recycled quantity for current production
+            console.log(`Updating current production: ${currentProduction.process_name}`);
+            console.log(`Before - achieved: ${currentProduction.product.achieved_quantity}, recycled: ${currentProduction.product.recycled_quantity || 0}`);
+            currentProduction.product.recycled_quantity = (currentProduction.product.recycled_quantity || 0) + rejected_quantity;
+            console.log(`After - achieved: ${currentProduction.product.achieved_quantity}, recycled: ${currentProduction.product.recycled_quantity}`);
+            console.log("=== END RECYCLE PROCESS DEBUG ===");
         }
 
         // Create a new QC Check record
@@ -2385,10 +2478,11 @@ const productionQCCheck = asyncHandler(async (req, res) => {
             job_order: currentProduction.job_order,
             product_id: currentProduction.product.product_id,
             semifinished_id: currentProduction.semifinished_id,
-            rejected_quantity,
-            recycled_quantity: 0,
+            rejected_quantity: is_rejection ? rejected_quantity : 0,
+            recycled_quantity: is_rejection ? 0 : rejected_quantity,
             process_name: effectiveProcessName, // To which process we're sending back
             from_process_name: currentProduction.process_name, // From which process the rejection is coming
+            is_rejection: is_rejection || false,
             remarks,
             checked_by: userId,
             updated_by: userId,
@@ -2398,21 +2492,31 @@ const productionQCCheck = asyncHandler(async (req, res) => {
         // Aggregate rejected and recycled quantities from all QC checks for this production
         const qcChecks = await falconQCCheck.find({ production: productionId });
         console.log("qcChecks", qcChecks);
-        const totalRejected = qcChecks.reduce((sum, check) => sum + check.rejected_quantity, 0);
+        const totalRejected = qcChecks.reduce((sum, check) => sum + (check.rejected_quantity || 0), 0);
+        const totalRecycled = qcChecks.reduce((sum, check) => sum + (check.recycled_quantity || 0), 0);
         console.log("totalRejected", totalRejected);
-        const totalRecycled = qcChecks.reduce((sum, check) => sum + check.recycled_quantity, 0);
+        console.log("totalRecycled", totalRecycled);
 
         // Update current production record with aggregated values
-        currentProduction.product.rejected_quantity = totalRejected;
-        currentProduction.product.recycled_quantity = totalRecycled;
+        if (is_rejection) {
+            // For rejection, update rejected_quantity from aggregated values (don't touch recycled_quantity)
+            currentProduction.product.rejected_quantity = totalRejected;
+            // Don't update recycled_quantity for rejections
+        } else {
+            // For recycle, don't update rejected_quantity at all (keep existing value)
+            // Keep the recycled_quantity that was set in the loop above
+            // Don't update rejected_quantity for recycle operations
+        }
+        console.log("Before final save - currentProduction recycled_quantity:", currentProduction.product.recycled_quantity);
         currentProduction.qc_checked_by = userId;
         currentProduction.updated_by = userId;
-        currentProduction.status = rejected_quantity > 0 ? 'Pending QC' : currentProduction.status;
+        currentProduction.status = (rejected_quantity > 0 || is_rejection) ? 'Pending QC' : currentProduction.status;
         await currentProduction.save();
+        console.log("After final save - currentProduction recycled_quantity:", currentProduction.product.recycled_quantity);
 
         return res.status(200).json({
             success: true,
-            message: 'QC check completed successfully',
+            message: is_rejection ? 'Rejection completed successfully' : 'Recycle QC check completed successfully',
             data: {
                 qc_check_id: qcCheck._id,
                 production_id: currentProduction._id,
@@ -2426,6 +2530,7 @@ const productionQCCheck = asyncHandler(async (req, res) => {
                     recycled_quantity: currentProduction.product.recycled_quantity,
                 },
                 process_name: effectiveProcessName,
+                is_rejection: is_rejection || false,
                 remarks,
                 checked_by: userId,
                 status: currentProduction.status,
@@ -2790,11 +2895,14 @@ const getProductionById = asyncHandler(async (req, res) => {
         const qcCheck = await falconQCCheck.find({ production: productionId });
         const sortedQCChecks = qcCheck.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
         let cumulativeRejected = 0;
+        let cumulativeRecycled = 0;
         const qcCheckDetails = sortedQCChecks.map((qc) => {
-            cumulativeRejected += qc.rejected_quantity;
+            cumulativeRejected += qc.rejected_quantity || 0;
+            cumulativeRecycled += qc.recycled_quantity || 0;
             return {
                 qc_number: `QC-${qc._id}`,
-                rejected_qty: qc.rejected_quantity,
+                rejected_qty: qc.rejected_quantity || 0,
+                recycled_qty: qc.recycled_quantity || 0,
                 acheived_qty: production.product.po_quantity - cumulativeRejected,
                 remarks: qc.remarks || 'N/A',
                 created_by: qc.checked_by?.username || 'admin',
@@ -2850,6 +2958,7 @@ const getProductionById = asyncHandler(async (req, res) => {
                     )?.uom || 'nos',
                     po_quantity: production.product.po_quantity || 0,
                     rejected_qty: production.product?.rejected_quantity || 0,
+                    recycled_qty: production.product?.recycled_quantity || 0,
                     process: production.process_sequence.current?.name,
                     acheived_qty: production.product?.achieved_quantity || 0,
                     dispatched: dispatchedQuantity,
