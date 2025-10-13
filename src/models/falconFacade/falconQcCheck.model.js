@@ -41,6 +41,11 @@ const qcCheckSchema = new mongoose.Schema(
             type: String,
             required: false,
         },
+        is_rejection: {
+            type: Boolean,
+            required: false,
+            default: false,
+        },
         remarks: {
             type: String,
             required: false,

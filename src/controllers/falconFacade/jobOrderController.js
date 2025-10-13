@@ -2337,11 +2337,15 @@ if (internalWorkOrders.length > 0) {
 
                                 // Calculate total rejected quantity for this process
                                 const totalRejectedQty = qcRejections.reduce((sum, qc) => sum + (qc.rejected_quantity || 0), 0);
+                                
+                                // Get recycled quantity directly from production record (not calculated from QC checks)
+                                const totalRecycledQty = production?.product?.recycled_quantity || 0;
 
                                 // Get rejection details with from/to process information
                                 const rejectionDetails = qcRejections.map(qc => ({
                                     qc_number: `QC-${qc._id}`,
                                     rejected_qty: qc.rejected_quantity || 0,
+                                    recycled_qty: qc.recycled_quantity || 0,
                                     from_process_name: qc.from_process_name || 'N/A',
                                     process_name: qc.process_name || 'N/A',
                                     remarks: qc.remarks || 'N/A',
@@ -2355,6 +2359,7 @@ if (internalWorkOrders.length > 0) {
                                     remarks: proc.remarks,
                                     achievedQty: production?.product?.achieved_quantity || 0,
                                     totalRejectedQty,
+                                    totalRecycledQty,
                                     rejectionDetails,
                                 };
                             })
