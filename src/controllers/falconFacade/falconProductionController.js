@@ -2445,15 +2445,11 @@ const productionQCCheck = asyncHandler(async (req, res) => {
                     if (productionToUpdate.product.achieved_quantity < 0) {
                         productionToUpdate.product.achieved_quantity = 0;
                     }
-                    // Update rejected quantity for all processes
-                    productionToUpdate.product.rejected_quantity = (productionToUpdate.product.rejected_quantity || 0) + rejected_quantity;
+                    // Note: rejected_quantity will be set from aggregated QC checks later
+                    // This prevents double-counting and ensures all processes show the same cumulative rejected qty
                     await productionToUpdate.save();
                 }
             }
-            
-            // Note: For rejection, we don't update rejected_quantity here
-            // It will be set from aggregated QC checks later (see line ~2549)
-            // This prevents double-counting
             
         } else {
             // RECYCLE PROCESS: Deduct from selected process to current process
@@ -2544,11 +2540,33 @@ const productionQCCheck = asyncHandler(async (req, res) => {
         console.log("totalRejected", totalRejected);
         console.log("totalRecycled", totalRecycled);
 
-        // Update current production record with aggregated values
+        // For rejection: Aggregate rejected quantities across ALL related productions (same semifinished_id and job_order)
         if (is_rejection) {
-            // For rejection, update rejected_quantity from aggregated values (don't touch recycled_quantity)
-            currentProduction.product.rejected_quantity = totalRejected;
-            // Don't update recycled_quantity for rejections
+            // Get all production IDs for this semifinished item
+            const allProductionIds = allProductions.map(p => p._id);
+            
+            // Aggregate ALL QC checks across ALL related productions
+            const allRelatedQcChecks = await falconQCCheck.find({
+                production: { $in: allProductionIds },
+                is_rejection: true
+            });
+            console.log("allRelatedQcChecks for rejection", allRelatedQcChecks);
+            
+            // Calculate total rejected quantity across ALL processes
+            const totalRejectedAcrossAllProcesses = allRelatedQcChecks.reduce(
+                (sum, check) => sum + (check.rejected_quantity || 0), 
+                0
+            );
+            console.log("totalRejectedAcrossAllProcesses", totalRejectedAcrossAllProcesses);
+            
+            // Update rejected_quantity for ALL related productions to show the same cumulative value
+            for (const production of allProductions) {
+                production.product.rejected_quantity = totalRejectedAcrossAllProcesses;
+                await production.save();
+            }
+            
+            // Update current production with the same value
+            currentProduction.product.rejected_quantity = totalRejectedAcrossAllProcesses;
         } else {
             // For recycle, update recycled_quantity from aggregated values (don't touch rejected_quantity)
             currentProduction.product.recycled_quantity = totalRecycled;
