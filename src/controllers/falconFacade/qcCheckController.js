@@ -149,8 +149,27 @@ const standaloneQCCheck = asyncHandler(async (req, res) => {
             });
         }
 
-        // Subtract rejected_quantity from achieved_quantity
+        // Subtract rejected_quantity from achieved_quantity for current production
         production.product.achieved_quantity -= rejected_quantity;
+
+        // Fetch all productions for this semifinished_id to update them consistently
+        const allProductions = await falconProduction.find({
+            job_order: production.job_order,
+            semifinished_id: production.semifinished_id,
+        }).sort({ 'process_sequence.current.index': 1 });
+
+        // If this is a rejection (rejected_quantity > 0), deduct from ALL related processes
+        if (rejected_quantity > 0) {
+            for (const productionToUpdate of allProductions) {
+                if (productionToUpdate._id.toString() !== production._id.toString()) {
+                    productionToUpdate.product.achieved_quantity -= rejected_quantity;
+                    if (productionToUpdate.product.achieved_quantity < 0) {
+                        productionToUpdate.product.achieved_quantity = 0;
+                    }
+                    await productionToUpdate.save();
+                }
+            }
+        }
 
         // Create a new QC Check record
         const qcCheck = new falconQCCheck({
@@ -164,23 +183,42 @@ const standaloneQCCheck = asyncHandler(async (req, res) => {
             remarks,
             checked_by: userId,
             updated_by: userId,
+            is_rejection: rejected_quantity > 0,
         });
 
         await qcCheck.save();
 
-        // Aggregate rejected and recycled quantities from all QC checks for this production
-        const qcChecks = await falconQCCheck.find({ production: productionId });
-        const totalRejected = qcChecks.reduce((sum, check) => sum + check.rejected_quantity, 0);
-        const totalRecycled = qcChecks.reduce((sum, check) => sum + check.recycled_quantity, 0);
+        // Aggregate rejected and recycled quantities across ALL related productions
+        const allProductionIds = allProductions.map(p => p._id);
+        
+        // Get all QC checks for ALL related productions
+        const allRelatedQcChecks = await falconQCCheck.find({
+            production: { $in: allProductionIds }
+        });
+        
+        // Calculate totals across all processes
+        const totalRejectedAcrossAll = allRelatedQcChecks.reduce(
+            (sum, check) => sum + (check.rejected_quantity || 0), 
+            0
+        );
+        const totalRecycledAcrossAll = allRelatedQcChecks.reduce(
+            (sum, check) => sum + (check.recycled_quantity || 0), 
+            0
+        );
 
-        // Update production record with aggregated values
-        production.product.rejected_quantity = totalRejected;
-        production.product.recycled_quantity = totalRecycled;
-        production.qc_checked_by = userId;
-        production.updated_by = userId;
-        production.status = rejected_quantity > 0 ? 'Pending QC' : production.status;
-
-        await production.save();
+        // Update ALL related productions with the same cumulative rejected/recycled quantities
+        for (const productionToUpdate of allProductions) {
+            if (rejected_quantity > 0) {
+                productionToUpdate.product.rejected_quantity = totalRejectedAcrossAll;
+            }
+            if (recycled_quantity > 0) {
+                productionToUpdate.product.recycled_quantity = totalRecycledAcrossAll;
+            }
+            productionToUpdate.qc_checked_by = userId;
+            productionToUpdate.updated_by = userId;
+            productionToUpdate.status = rejected_quantity > 0 ? 'Pending QC' : productionToUpdate.status;
+            await productionToUpdate.save();
+        }
 
         // Format response
         return res.status(201).json({
