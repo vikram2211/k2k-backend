@@ -2016,11 +2016,13 @@ const getFalconJobOrderById = asyncHandler(async (req, res) => {
                         (p) => p.product.toString() === productId
                     );
                     if (relatedProduct && relatedProduct.semifinished_details.length > 0) {
-                        let semiResults = [];
+                        // Get achieved quantity from the last process of each semi-finished product
+                        // For products with multiple semi-finished items, the achievable quantity is
+                        // limited by the MINIMUM achieved quantity (you can't assemble more than the limiting component)
+                        const semiAchievedQuantities = [];
+                        
                         for (const semi of relatedProduct.semifinished_details) {
                             const lastProcess = semi.processes?.[semi.processes.length - 1];
-                            let semiAchieved = 0;
-                            let isComplete = false;
                             if (lastProcess) {
                                 const productionDoc = await falconProduction.findOne({
                                     job_order: id,
@@ -2029,16 +2031,15 @@ const getFalconJobOrderById = asyncHandler(async (req, res) => {
                                     process_name: { $regex: `^${lastProcess.name}$`, $options: 'i' },
                                 }).lean();
                                 if (productionDoc) {
-                                    semiAchieved = productionDoc.product.achieved_quantity || 0;
-                                    isComplete = semiAchieved >= relatedProduct.po_quantity;
+                                    semiAchievedQuantities.push(productionDoc.product.achieved_quantity || 0);
                                 }
                             }
-                            semiResults.push({ achievedQty: semiAchieved, isComplete });
                         }
-                        // ✅ Only count once per IWO if ALL its semi-finished are complete
-                        const allComplete = semiResults.every(s => s.isComplete);
-                        if (allComplete) {
-                            achievedQty += relatedProduct.po_quantity;
+                        
+                        // Use the minimum achieved quantity across all semi-finished products
+                        // This represents the actual number of complete units that can be assembled
+                        if (semiAchievedQuantities.length > 0) {
+                            achievedQty += Math.min(...semiAchievedQuantities);
                         }
                     }
                 }
@@ -3387,3 +3388,4 @@ const getWorkOrderClientProjectDetails = asyncHandler(async (req, res) => {
 });
 
 export { createFalconJobOrder, getFalconJobOrders, updateFalconJobOrder, deleteFalconJobOrder, getFalconJobOrderById, getWorkOrderClientProjectDetails };
+// export { createFalconJobOrder, getFalconJobOrders, updateFalconJobOrder, deleteFalconJobOrder, getFalconJobOrderById, getWorkOrderClientProjectDetails };
