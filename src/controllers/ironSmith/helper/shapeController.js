@@ -358,17 +358,17 @@ const updateIronShape_25_08_2025 = asyncHandler(async (req, res) => {
 
 
 const getAllIronShapes = asyncHandler(async (req, res) => {
-  const page = parseInt(req.query.page) || 1;
-  const limit = parseInt(req.query.limit) || 10;
-  const skip = (page - 1) * limit;
+  // const page = parseInt(req.query.page) || 1;
+  // const limit = parseInt(req.query.limit) || 10;
+  // const skip = (page - 1) * limit;
 
   const totalShapes = await ironShape.countDocuments({ isDeleted: false });
 
   const shapes = await ironShape.find({ isDeleted: false })
     .populate('created_by', 'username email')
     .populate('dimension', 'dimension_name')
-    .skip(skip)
-    .limit(limit)
+    // .skip(skip)
+    // .limit(limit)
     .lean();
 
   if (!shapes || shapes.length === 0) {
@@ -381,12 +381,12 @@ const getAllIronShapes = asyncHandler(async (req, res) => {
     res,
     new ApiResponse(200, {
       shapes: formattedShapes,
-      pagination: {
-        total: totalShapes,
-        page,
-        limit,
-        totalPages: Math.ceil(totalShapes / limit),
-      },
+      // pagination: {
+      //   total: totalShapes,
+      //   page,
+      //   limit,
+      //   totalPages: Math.ceil(totalShapes / limit),
+      // },
     }, 'Shapes fetched successfully')
   );
 });
