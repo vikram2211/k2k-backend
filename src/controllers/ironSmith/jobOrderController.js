@@ -3125,7 +3125,7 @@ const getJobOrderById = asyncHandler(async (req, res) => {
         },
         {
           path: 'products',
-          select: 'shapeId quantity uom memberDetails barMark weight dimensions',
+          select: 'shapeId quantity uom memberDetails barMark weight dimensions cuttingLength',
         },
       ],
     })
@@ -3231,6 +3231,9 @@ const getJobOrderById = asyncHandler(async (req, res) => {
         qr_code_id: product.qr_code_id,
         qr_code_url: product.qr_code_url,
         po_quantity: workOrderProduct ? workOrderProduct.quantity : 0,
+        cutting_length: workOrderProduct && (workOrderProduct.cuttingLength !== undefined && workOrderProduct.cuttingLength !== null)
+          ? Number(workOrderProduct.cuttingLength)
+          : null,
         dimensions: workOrderProduct && workOrderProduct.dimensions
           ? workOrderProduct.dimensions.map((dim) => ({
             name: dim.name,
