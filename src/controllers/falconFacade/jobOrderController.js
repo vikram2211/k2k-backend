@@ -3344,7 +3344,7 @@ const getWorkOrderClientProjectDetails = asyncHandler(async (req, res) => {
             select: 'name address client status isDeleted',
             match: { isDeleted: false },
         })
-        .select('work_order_number client_id project_id date')
+        .select('work_order_number client_id project_id date products')
         .lean();
 
     // 4. Check if work order exists
@@ -3378,6 +3378,7 @@ const getWorkOrderClientProjectDetails = asyncHandler(async (req, res) => {
             clientId: workOrder.project_id.client,
             status: workOrder.project_id.status,
         },
+        products: workOrder.products || [],
     };
 
     // 7. Send response
