@@ -693,7 +693,16 @@ const createDispatch_07_10_2025 = asyncHandler(async (req, res, next) => {
 
 const createDispatch = asyncHandler(async (req, res, next) => {
   try {
-    const { products, invoice_or_sto, gate_pass_no, vehicle_number, ticket_number, date } = req.body;
+    let { products, invoice_or_sto, gate_pass_no, vehicle_number, ticket_number, date } = req.body;
+
+    // Parse products if it's a string (from FormData)
+    if (typeof products === 'string') {
+      try {
+        products = JSON.parse(products);
+      } catch (error) {
+        return res.status(400).json(new ApiResponse(400, null, "Invalid products format"));
+      }
+    }
 
     if (!products || !products.length) {
       return res.status(400).json(new ApiResponse(400, null, "Products are required"));
@@ -794,6 +803,22 @@ const createDispatch = asyncHandler(async (req, res, next) => {
       });
     }
 
+    // Handle invoice file uploads
+    let invoiceFileUrls = [];
+    if (req.files && req.files.length > 0) {
+      for (const file of req.files) {
+        const fileBuffer = file.buffer; // Using memoryStorage buffer directly
+        const mimetype = file.mimetype || 'application/octet-stream';
+        const originalName = file.originalname || `file-${Date.now()}`;
+
+        const { url } = await putObject(
+          { data: fileBuffer, mimetype },
+          `irondispatch/${Date.now()}-${originalName}`
+        );
+        invoiceFileUrls.push(url);
+      }
+    }
+
     // Create dispatch record
     const dispatch = await ironDispatch.create({
       work_order: workOrderId,
@@ -802,6 +827,7 @@ const createDispatch = asyncHandler(async (req, res, next) => {
       gate_pass_no,
       vehicle_number,
       ticket_number,
+      invoice_file: invoiceFileUrls,
       created_by: req.user?.id || req.user?._id,
       date: new Date(date),
     });
