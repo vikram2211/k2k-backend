@@ -2342,13 +2342,7 @@ const updateIronJobOrder_11_09_2025_2_PM = asyncHandler(async (req, res) => {
         };
         await matchingProduction.save({ session });
       } else {
-        // Check if the product existed in the original job order
-        const isExistingProduct = existingJobOrder.products.some(
-          (p) => p._id.toString() === product._id.toString()
-        );
-
-        // Only create a new production record if explicitly requested (e.g., new product)
-        if (!isExistingProduct) {
+        // No production record currently contains this product. Create one to keep DPR in sync.
           const newProduction = new ironDailyProduction({
             work_order: updatedJobOrder.work_order,
             job_order: jobOrderId,
@@ -2363,16 +2357,13 @@ const updateIronJobOrder_11_09_2025_2_PM = asyncHandler(async (req, res) => {
                 machines: product.selected_machines || [],
               },
             ],
-            date: new Date(product.schedule_date),
+          date: product.schedule_date ? new Date(product.schedule_date) : new Date(),
             submitted_by: userId,
             created_by: userId,
             updated_by: userId,
             status: 'Pending',
           });
           await newProduction.save({ session });
-        }
-        // Note: If the product exists but has no production record, we skip creating one
-        // unless a business rule requires automatic creation.
       }
     }
 
@@ -2382,9 +2373,9 @@ const updateIronJobOrder_11_09_2025_2_PM = asyncHandler(async (req, res) => {
       .map((p) => p._id.toString());
 
     if (removedProductIds.length > 0) {
-      await ironDailyProduction.updateMany(
+      // Remove related production records entirely for the removed products
+      await ironDailyProduction.deleteMany(
         { job_order: jobOrderId, 'products.object_id': { $in: removedProductIds } },
-        { $set: { status: 'Canceled' } },
         { session }
       );
     }
@@ -2460,6 +2451,7 @@ const updateIronJobOrder = asyncHandler(async (req, res) => {
   }).unknown(true);
 
   const bodyData = req.body;
+  console.log("bodyData",bodyData);
   const userId = req.user?._id?.toString();
   const jobOrderId = req.params.id;
 
@@ -2653,10 +2645,14 @@ console.log("updatedProducts222",updatedProducts);
           };
 
           const newProduction = new ironDailyProduction({
-            work_order: updateData.work_order || existingJobOrder.work_order,
+            work_order: (updatedJobOrder.work_order && updatedJobOrder.work_order._id) ? updatedJobOrder.work_order._id : (updateData.work_order || existingJobOrder.work_order),
             job_order: jobOrderId,
+            color: updatedJobOrder.color || existingJobOrder.color, // required by schema
             products: [schemaProduct],
-            date: new Date(newProductData.schedule_date),
+            // Guard date – if invalid/missing, default to now
+            ...(newProductData?.schedule_date && !isNaN(new Date(newProductData.schedule_date).getTime())
+              ? { date: new Date(newProductData.schedule_date) }
+              : { date: new Date() }),
             submitted_by: userId,
             created_by: userId,
             updated_by: userId,
@@ -2751,6 +2747,23 @@ console.log("updatedProducts222",updatedProducts);
           console.warn(`No production records found for object_id: ${object_id}. This might indicate the production record was not created during job order creation.`);
         }
       }
+    }
+
+    // Also remove production records for products removed from this job order
+    try {
+      const updatedIds = (updatedJobOrder.products || []).map((p) => p._id.toString());
+      const removedProductIds = (existingJobOrder.products || [])
+        .filter((p) => !updatedIds.includes(p._id.toString()))
+        .map((p) => p._id.toString());
+
+      if (removedProductIds.length > 0) {
+        await ironDailyProduction.deleteMany({
+          job_order: jobOrderId,
+          'products.object_id': { $in: removedProductIds },
+        });
+      }
+    } catch (e) {
+      console.warn('Failed to clean up production records for removed products:', e?.message || e);
     }
   } catch (error) {
     console.error('Error updating production records:', error);
