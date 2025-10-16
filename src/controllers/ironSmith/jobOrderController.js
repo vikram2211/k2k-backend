@@ -2666,66 +2666,89 @@ console.log("updatedProducts222",updatedProducts);
           await newProduction.save();
         }
       } else if (productUpdate.isExisting) {
-        console.log("inside2222");
-        // Update existing production record
+        console.log("inside2222 - Updating existing product");
+        // Update existing production record(s)
         const { object_id, oldData, newData } = productUpdate;
-        console.log("object_id",object_id);
-        console.log("oldData",oldData);
-        console.log("newData",newData);
+        console.log("object_id:",object_id);
+        console.log("oldData:",oldData);
+        console.log("newData:",newData);
         
-        // Find the production record for this product
-        const productionRecord = await ironDailyProduction.findOne({
+        // Find ALL production records for this product (there might be multiple)
+        const productionRecords = await ironDailyProduction.find({
           job_order: jobOrderId,
           'products.object_id': object_id
         });
-        console.log("productionRecord",productionRecord);
+        console.log(`Found ${productionRecords.length} production record(s) for object_id: ${object_id}`);
 
-        if (productionRecord) {
-          // Find the specific product in the production record
-          const productIndex = productionRecord.products.findIndex(
-            p => p.object_id.toString() === object_id.toString()
-          );
-          console.log("productIndex",productIndex);
+        if (productionRecords.length > 0) {
+          // Update each production record
+          for (const productionRecord of productionRecords) {
+            // Find the specific product in the production record
+            const productIndex = productionRecord.products.findIndex(
+              p => p.object_id.toString() === object_id.toString()
+            );
+            console.log(`productIndex: ${productIndex} in production record: ${productionRecord._id}`);
 
+            if (productIndex !== -1) {
+              const updateFields = {};
+              
+              // Update planned quantity if changed
+              const oldQty = Number(oldData.planned_quantity);
+              const newQty = Number(newData.planned_quantity);
+              console.log(`Comparing quantities - old: ${oldQty}, new: ${newQty}`);
+              
+              if (oldQty !== newQty) {
+                updateFields[`products.${productIndex}.planned_quantity`] = newQty;
+                console.log(`Planned quantity changed from ${oldQty} to ${newQty}`);
+              }
+              
+              // Update machines if changed
+              const oldMachines = JSON.stringify((oldData.selected_machines || []).sort());
+              const newMachines = JSON.stringify((newData.selected_machines || []).sort());
+              if (oldMachines !== newMachines) {
+                updateFields[`products.${productIndex}.machines`] = newData.selected_machines;
+                console.log(`Machines changed from ${oldMachines} to ${newMachines}`);
+              }
 
-          if (productIndex !== -1) {
-            const updateFields = {};
-            
-            // Update planned quantity if changed
-            if (newData.planned_quantity !== oldData.planned_quantity) {
-              updateFields[`products.${productIndex}.planned_quantity`] = newData.planned_quantity;
-            }
-            
-            // Update machines if changed
-            if (JSON.stringify(newData.selected_machines) !== JSON.stringify(oldData.selected_machines)) {
-              updateFields[`products.${productIndex}.machines`] = newData.selected_machines;
-            }
+              // Update shape if changed
+              const oldShapeStr = oldData.shape ? oldData.shape.toString() : '';
+              const newShapeStr = newData.shape ? newData.shape.toString() : '';
+              if (oldShapeStr !== newShapeStr) {
+                updateFields[`products.${productIndex}.shape_id`] = newData.shape;
+                console.log(`Shape changed from ${oldShapeStr} to ${newShapeStr}`);
+              }
 
-            // Update shape if changed
-            if (newData.shape.toString() !== oldData.shape.toString()) {
-              updateFields[`products.${productIndex}.shape_id`] = newData.shape;
-            }
+              // Update production date if schedule_date changed
+              const oldDate = oldData.schedule_date ? new Date(oldData.schedule_date).getTime() : null;
+              const newDate = newData.schedule_date ? new Date(newData.schedule_date).getTime() : null;
+              if (oldDate !== newDate && newDate !== null) {
+                updateFields['date'] = new Date(newData.schedule_date);
+                console.log(`Schedule date changed from ${oldData.schedule_date} to ${newData.schedule_date}`);
+              }
 
-            // Update production date if schedule_date changed
-            if (newData.schedule_date.getTime() !== oldData.schedule_date.getTime()) {
-              updateFields['date'] = newData.schedule_date;
-            }
+              // Always update updated_by and timestamp when there are changes
+              if (Object.keys(updateFields).length > 0) {
+                updateFields['updated_by'] = userId;
+                updateFields['updatedAt'] = new Date();
 
-            // Update updated_by and timestamp
-            updateFields['updated_by'] = userId;
-            updateFields['updatedAt'] = new Date();
-
-            // Apply updates if there are any
-            if (Object.keys(updateFields).length > 0) {
-              await ironDailyProduction.updateOne(
-                { 
-                  _id: productionRecord._id,
-                  'products.object_id': object_id
-                },
-                { $set: updateFields }
-              );
+                // Apply updates
+                const updateResult = await ironDailyProduction.updateOne(
+                  { 
+                    _id: productionRecord._id,
+                    'products.object_id': object_id
+                  },
+                  { $set: updateFields }
+                );
+                console.log(`Production record updated. Matched: ${updateResult.matchedCount}, Modified: ${updateResult.modifiedCount}`);
+              } else {
+                console.log('No changes detected for this production record');
+              }
+            } else {
+              console.log(`Product with object_id ${object_id} not found in production record ${productionRecord._id}`);
             }
           }
+        } else {
+          console.warn(`No production records found for object_id: ${object_id}. This might indicate the production record was not created during job order creation.`);
         }
       }
     }
