@@ -2050,44 +2050,17 @@ const getShapesByWorkOrderId = async (req, res) => {
           preserveNullAndEmptyArrays: false,
         },
       },
-      // --- NEW: Lookup for total packed quantity ---
       {
-        $lookup: {
-          from: 'ironpackings',
-          let: {
-            objectId: '$jobOrders.products._id',
-          },
-          pipeline: [
-            {
-              $match: {
-                $expr: {
-                  $eq: ['$object_id', '$$objectId'],
-                },
-              },
-            },
-            {
-              $group: {
-                _id: null,
-                totalPacked: { $sum: '$product_quantity' },
-              },
-            },
-          ],
-          as: 'packingData',
-        },
-      },
-      // --- END NEW ---
-      {
+        // Group across ALL job orders for this work order by shape + barMark (+ diameter)
         $group: {
           _id: {
             barMark: '$products.barMark',
-            jobOrderId: '$jobOrders._id',
-            jobOrderNumber: '$jobOrders.job_order_number',
             shapeId: '$products.shapeId',
             diameter: '$products.diameter',
-            objectId: '$jobOrders.products._id',
           },
           shapeCode: { $first: '$shapeDetails.shape_code' },
-          po_quantity: { $first: '$products.quantity' },
+          // Sum PO quantities from WO products (same shape/diameter)
+          po_quantity: { $sum: '$products.quantity' },
           achieved_quantity: {
             $sum: {
               $ifNull: [{ $arrayElemAt: ['$productionData.totalAchieved', 0] }, 0],
@@ -2103,35 +2076,25 @@ const getShapesByWorkOrderId = async (req, res) => {
               $ifNull: [{ $arrayElemAt: ['$productionData.totalRecycled', 0] }, 0],
             },
           },
-          // --- NEW: Calculate total packed quantity ---
-          total_packed_quantity: {
-            $sum: {
-              $ifNull: [{ $arrayElemAt: ['$packingData.totalPacked', 0] }, 0],
-            },
-          },
-          // --- END NEW ---
+          // Total packed from ALL related job order products
+          total_packed_quantity: { $sum: '$jobOrders.products.packed_quantity' },
         },
       },
       {
         $project: {
           _id: 0,
           barMark: '$_id.barMark',
-          job_order_id: '$_id.jobOrderId',
-          job_order_number: '$_id.jobOrderNumber',
           shape_id: '$_id.shapeId',
           shape_code: '$shapeCode',
           diameter: '$_id.diameter',
-          object_id: '$_id.objectId',
           po_quantity: 1,
           achieved_quantity: 1,
           rejected_quantity: 1,
           recycled_quantity: 1,
-          total_packed_quantity: 1, // Include total_packed_quantity
-          // --- NEW: Calculate available quantity ---
+          total_packed_quantity: 1,
           available_quantity: {
             $subtract: ['$achieved_quantity', '$total_packed_quantity'],
           },
-          // --- END NEW ---
         },
       },
       {
