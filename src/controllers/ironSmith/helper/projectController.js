@@ -1450,7 +1450,7 @@ const deleteDiameter_22_09_2025 = asyncHandler(async (req, res) => {
 const deleteDiameter = asyncHandler(async (req, res) => {
     const { projectId, value, type } = req.body;
 
-    // Validate input
+    // Validate input - make type optional since it's not in the Diameter model
     const schema = Joi.object({
         projectId: Joi.string().required().custom((value, helpers) => {
             if (!mongoose.Types.ObjectId.isValid(value)) {
@@ -1459,7 +1459,7 @@ const deleteDiameter = asyncHandler(async (req, res) => {
             return value;
         }),
         value: Joi.number().required().positive(),
-        type: Joi.string().required(), // Add type to validation
+        type: Joi.string().optional(), // Make type optional
     });
 
     const { error } = schema.validate({ projectId, value, type });
@@ -1472,23 +1472,45 @@ const deleteDiameter = asyncHandler(async (req, res) => {
     session.startTransaction();
 
     try {
+        // Build query dynamically based on whether type is provided
+        const diameterQuery = { 
+            project: projectId, 
+            value, 
+            isDeleted: false 
+        };
+        if (type) {
+            diameterQuery.type = type;
+        }
+
         // Find the Diameter record
         const existingDiameter = await Diameter.findOne(
-            { project: projectId, value, type, isDeleted: false },
+            diameterQuery,
             null,
             { session }
         );
+        
         if (!existingDiameter) {
-            throw new ApiError(404, `Diameter ${value} mm with type ${type} not found for this project`);
+            const typeMsg = type ? ` with type ${type}` : '';
+            throw new ApiError(404, `Diameter ${value} mm${typeMsg} not found for this project`);
         }
 
         // Mark the Diameter as deleted
         existingDiameter.isDeleted = true;
         await existingDiameter.save({ session });
 
+        // Build query for RawMaterial deletion
+        const rawMaterialQuery = { 
+            project: projectId, 
+            diameter: value, 
+            isDeleted: false 
+        };
+        if (type) {
+            rawMaterialQuery.type = type;
+        }
+
         // Mark related RawMaterial records as deleted
         await RawMaterial.updateMany(
-            { project: projectId, diameter: value, type, isDeleted: false },
+            rawMaterialQuery,
             { $set: { isDeleted: true } },
             { session }
         );
