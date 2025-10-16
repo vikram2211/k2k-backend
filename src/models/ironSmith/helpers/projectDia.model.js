@@ -19,6 +19,7 @@ const diameterSchema = new mongoose.Schema(
     // },
     added: [
       {
+          rawMaterialId: { type: mongoose.Schema.Types.ObjectId, ref: 'RawMaterial' },
         quantity: { type: Number, required: true },
         timestamp: { type: Date, default: Date.now },
       },

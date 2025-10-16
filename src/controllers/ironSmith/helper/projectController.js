@@ -367,12 +367,12 @@ const addRawMaterial_23_09_2025_WORKING = asyncHandler(async (req, res) => {
       date,
     });
   
-    // Update the Diameter's added array
+    // Update the Diameter's added array (link to raw material)
     await Diameter.updateOne(
       { _id: diameterRecord._id },
       {
         $push: {
-          added: { quantity: qty },
+          added: { rawMaterialId: rawMaterial._id, quantity: qty },
         },
       }
     );
@@ -429,7 +429,8 @@ const addRawMaterial_23_09_2025_WORKING = asyncHandler(async (req, res) => {
       { _id: diameterRecord._id },
       {
         $push: {
-          added: { quantity: qty },
+        //   added: { quantity: qty },
+        added: { rawMaterialId: rawMaterial._id, quantity: qty },
         },
       }
     );
@@ -687,7 +688,11 @@ const updateRawMaterial_23_09_2025_WORKING = asyncHandler(async (req, res) => {
 
 const updateRawMaterial = asyncHandler(async (req, res) => {
     const { id } = req.params; // RawMaterial ID
+    console.log("id",id);
     const { qty, type, date } = req.body;
+    console.log("qty",qty);
+    console.log("type",type);
+    console.log("date",date);   
 
     // Validation schema
     const rawMaterialSchema = Joi.object({
@@ -756,24 +761,30 @@ const updateRawMaterial = asyncHandler(async (req, res) => {
             { new: true, session }
         );
 
-        // Update Diameter's added array
-        // Strategy: Remove the previous added entry (if it exists) and push a new one
+        // Update Diameter's added array using rawMaterialId for deterministic matching
         const previousAddedEntry = diameterRecord.added.find(
-            (entry) => entry.timestamp.toISOString() === rawMaterial.createdAt.toISOString()
+            (entry) => String(entry.rawMaterialId) === String(rawMaterial._id)
         );
+
         if (previousAddedEntry) {
+            // Calculate the difference (new qty - old qty)
+            const quantityDifference = value.qty - rawMaterial.qty;
+
+            if (quantityDifference !== 0) {
+                await Diameter.updateOne(
+                    { _id: diameterRecord._id, 'added.rawMaterialId': rawMaterial._id },
+                    { $inc: { 'added.$.quantity': quantityDifference }, $set: { 'added.$.timestamp': new Date() } },
+                    { session }
+                );
+            }
+        } else {
+            // Fallback for old records without a linked entry: push new linked entry
             await Diameter.updateOne(
                 { _id: diameterRecord._id },
-                { $pull: { added: { timestamp: rawMaterial.createdAt } } },
+                { $push: { added: { rawMaterialId: rawMaterial._id, quantity: value.qty, timestamp: new Date() } } },
                 { session }
             );
         }
-
-        await Diameter.updateOne(
-            { _id: diameterRecord._id },
-            { $push: { added: { quantity: value.qty, timestamp: new Date() } } },
-            { session }
-        );
 
         // Commit the transaction
         await session.commitTransaction();
