@@ -2248,6 +2248,22 @@ const addQcCheck = asyncHandler(async (req, res) => {
     dailyProduction.products[productIndex].rejected_quantity = qcCheck.rejected_quantity;
     dailyProduction.products[productIndex].achieved_quantity = currentAchievedQuantity - rejected_quantity;
     dailyProduction.qc_checked_by = req.user._id; 
+    // If previously marked Pending QC but achieved fell below planned, set back to In Progress
+    try {
+      const planned = Number(dailyProduction.products[productIndex].planned_quantity || 0);
+      const achievedNow = Number(dailyProduction.products[productIndex].achieved_quantity || 0);
+      if (dailyProduction.status === 'Pending QC' && planned > achievedNow) {
+        dailyProduction.status = 'In Progress';
+        // clear stopped_at so UI can resume
+        dailyProduction.stopped_at = undefined;
+        dailyProduction.production_logs.push({
+          action: 'Resume',
+          timestamp: new Date(),
+          user: req.user._id,
+          description: 'Auto-resume after QC rejection reduced achieved below planned',
+        });
+      }
+    } catch { /* no-op */ }
     let packedQuantity = currentAchievedQuantity - rejected_quantity;
 
     // Add a new log entry with the incremental rejected_quantity
