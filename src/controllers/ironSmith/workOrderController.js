@@ -2862,57 +2862,141 @@ const updateIronWorkOrder_23_09_2025_WORKING = asyncHandler(async (req, res) => 
         netDiameterWeightMap.set(diameter, newWeight - oldWeight);
     }
 
-    // Validate and update raw material
+    // Validate and update raw material per diameter using consumption history
     const rawMaterials = await RawMaterial.find({
         project: existingWorkOrder.projectId,
         diameter: { $in: Array.from(netDiameterWeightMap.keys()).map(Number) },
         isDeleted: false,
-    });
+    }).lean();
 
-    for (const [diameter, netWeight] of netDiameterWeightMap) {
+    const bulkRawOps = [];
+    const bulkDiaOps = [];
+
+    for (const [diameterKey, netWeight] of netDiameterWeightMap) {
+        const diameterNum = Number(diameterKey);
+        const materialsForDia = rawMaterials.filter((rm) => rm.diameter === diameterNum);
+
+        if (!materialsForDia.length) {
+            throw new ApiError(400, `No raw material available for diameter ${diameterNum} mm`);
+        }
+
         if (netWeight > 0) {
-            const rawMaterial = rawMaterials.find((rm) => rm.diameter === Number(diameter));
-            if (!rawMaterial) {
-                throw new ApiError(400, `No raw material available for diameter ${diameter} mm`);
+            // Need to consume additional material: deduct following FIFO order
+            let remaining = netWeight;
+            for (const rm of materialsForDia) {
+                if (remaining <= 0) break;
+                const deduct = Math.min(rm.qty, remaining);
+                remaining -= deduct;
+
+                const update = {
+                    $inc: { qty: -deduct, convertedQty: -(deduct * 1000) },
+                };
+
+                const idx = (rm.consumptionHistory || []).findIndex((ch) =>
+                    ch.workOrderId.toString() === workOrderId.toString()
+                );
+                if (idx !== -1) {
+                    update.$set = {
+                        [`consumptionHistory.${idx}.quantity`]: (rm.consumptionHistory[idx].quantity || 0) + deduct,
+                        [`consumptionHistory.${idx}.timestamp`]: new Date(),
+                    };
+                } else {
+                    update.$push = {
+                        consumptionHistory: {
+                            workOrderId,
+                            quantity: deduct,
+                            timestamp: new Date(),
+                        },
+                    };
+                }
+
+                bulkRawOps.push({
+                    updateOne: {
+                        filter: { _id: rm._id, isDeleted: false },
+                        update,
+                    },
+                });
             }
-            if (rawMaterial.qty < netWeight) {
-                throw new ApiError(400, `Insufficient raw material for diameter ${diameter} mm. Available: ${rawMaterial.qty}, Required: ${netWeight}`);
+
+            if (remaining > 0) {
+                const available = materialsForDia.reduce((s, m) => s + (m.qty || 0), 0);
+                throw new ApiError(400, `Insufficient raw material for diameter ${diameterNum} mm. Required: ${netWeight}, Available: ${available}`);
+            }
+
+            // Track in Diameter.subtracted (positive quantity)
+            const diaDoc = await Diameter.findOne({ project: existingWorkOrder.projectId, value: diameterNum, isDeleted: false }).lean();
+            if (diaDoc) {
+                bulkDiaOps.push({
+                    updateOne: {
+                        filter: { _id: diaDoc._id, isDeleted: false },
+                        update: { $push: { subtracted: { quantity: netWeight, workOrderId, timestamp: new Date() } } },
+                    },
+                });
+            }
+        } else if (netWeight < 0) {
+            // Reduce previously consumed: restore to materials that have this workOrderId, LIFO
+            let remainingToRestore = Math.abs(netWeight);
+            // Order by consumptionHistory timestamp desc so we undo last allocations first
+            const withConsumption = materialsForDia
+                .map((rm) => {
+                    const entry = (rm.consumptionHistory || []).find((ch) => ch.workOrderId.toString() === workOrderId.toString());
+                    return entry ? { rm, entry } : null;
+                })
+                .filter(Boolean)
+                .sort((a, b) => new Date(b.entry.timestamp || 0) - new Date(a.entry.timestamp || 0));
+
+            for (const item of withConsumption) {
+                if (remainingToRestore <= 0) break;
+                const rm = item.rm;
+                const consumedQty = item.entry.quantity || 0;
+                const giveBack = Math.min(consumedQty, remainingToRestore);
+                remainingToRestore -= giveBack;
+
+                const idx = (rm.consumptionHistory || []).findIndex((ch) => ch.workOrderId.toString() === workOrderId.toString());
+
+                const update = {
+                    $inc: { qty: giveBack, convertedQty: giveBack * 1000 },
+                };
+                const newQty = consumedQty - giveBack;
+                if (newQty <= 0) {
+                    update.$pull = { consumptionHistory: { workOrderId } };
+                } else {
+                    update.$set = {
+                        [`consumptionHistory.${idx}.quantity`]: newQty,
+                        [`consumptionHistory.${idx}.timestamp`]: new Date(),
+                    };
+                }
+
+                bulkRawOps.push({
+                    updateOne: {
+                        filter: { _id: rm._id, isDeleted: false },
+                        update,
+                    },
+                });
+            }
+
+            if (remainingToRestore > 0) {
+                throw new ApiError(400, `Unable to restore ${remainingToRestore} tons for diameter ${diameterNum} mm; no matching consumption history`);
+            }
+
+            // Track negative in Diameter.subtracted to net out usage
+            const diaDoc = await Diameter.findOne({ project: existingWorkOrder.projectId, value: diameterNum, isDeleted: false }).lean();
+            if (diaDoc) {
+                bulkDiaOps.push({
+                    updateOne: {
+                        filter: { _id: diaDoc._id, isDeleted: false },
+                        update: { $push: { subtracted: { quantity: netWeight, workOrderId, timestamp: new Date() } } },
+                    },
+                });
             }
         }
     }
 
-    const bulkUpdates = rawMaterials.map((rawMaterial) => {
-        const netWeight = netDiameterWeightMap.get(rawMaterial.diameter.toString()) || 0;
-        const updateObj = { $inc: { qty: -netWeight } };
-
-        const existingConsumptionIndex = rawMaterial.consumptionHistory.findIndex((ch) =>
-            ch.workOrderId.equals(workOrderId)
-        );
-        if (netWeight !== 0) {
-            if (existingConsumptionIndex !== -1) {
-                const newQuantity = rawMaterial.consumptionHistory[existingConsumptionIndex].quantity + netWeight;
-                if (newQuantity <= 0) {
-                    updateObj.$pull = { consumptionHistory: { workOrderId } };
-                } else {
-                    updateObj.$set = {
-                        [`consumptionHistory.${existingConsumptionIndex}.quantity`]: newQuantity,
-                    };
-                }
-            } else if (netWeight > 0) {
-                updateObj.$push = { consumptionHistory: { workOrderId, quantity: netWeight } };
-            }
-        }
-
-        return {
-            updateOne: {
-                filter: { _id: rawMaterial._id, isDeleted: false },
-                update: updateObj,
-            },
-        };
-    });
-
-    if (bulkUpdates.length > 0) {
-        await RawMaterial.bulkWrite(bulkUpdates);
+    if (bulkRawOps.length) {
+        await RawMaterial.bulkWrite(bulkRawOps);
+    }
+    if (bulkDiaOps.length) {
+        await Diameter.bulkWrite(bulkDiaOps);
     }
 
     // Prepare updated fields
@@ -3204,57 +3288,105 @@ const updateIronWorkOrder = asyncHandler(async (req, res) => {
         netDiameterWeightMap.set(diameter, newWeight - oldWeight);
     }
 
-    // Validate and update raw material
+    // Validate and update raw material using consumption history (FIFO/LIFO) and convertedQty
     const rawMaterials = await RawMaterial.find({
         project: existingWorkOrder.projectId,
         diameter: { $in: Array.from(netDiameterWeightMap.keys()).map(Number) },
         isDeleted: false,
-    });
+    }).lean();
 
-    for (const [diameter, netWeight] of netDiameterWeightMap) {
+    const bulkRawOps2 = [];
+    const bulkDiaOps2 = [];
+
+    for (const [diameterKey, netWeight] of netDiameterWeightMap) {
+        const diaNum = Number(diameterKey);
+        const materialsForDia = rawMaterials.filter((rm) => rm.diameter === diaNum);
+
+        if (!materialsForDia.length) {
+            throw new ApiError(400, `No raw material available for diameter ${diaNum} mm`);
+        }
+
         if (netWeight > 0) {
-            const rawMaterial = rawMaterials.find((rm) => rm.diameter === Number(diameter));
-            if (!rawMaterial) {
-                throw new ApiError(400, `No raw material available for diameter ${diameter} mm`);
+            // Additional usage → deduct FIFO
+            let remaining = netWeight;
+            for (const rm of materialsForDia) {
+                if (remaining <= 0) break;
+                const deduct = Math.min(rm.qty, remaining);
+                remaining -= deduct;
+
+                const upd = { $inc: { qty: -deduct, convertedQty: -(deduct * 1000) } };
+                const idx = (rm.consumptionHistory || []).findIndex((ch) => ch.workOrderId.toString() === workOrderId.toString());
+                if (idx !== -1) {
+                    upd.$set = {
+                        [`consumptionHistory.${idx}.quantity`]: (rm.consumptionHistory[idx].quantity || 0) + deduct,
+                        [`consumptionHistory.${idx}.timestamp`]: new Date(),
+                    };
+                } else {
+                    upd.$push = {
+                        consumptionHistory: { workOrderId, quantity: deduct, timestamp: new Date() },
+                    };
+                }
+
+                bulkRawOps2.push({ updateOne: { filter: { _id: rm._id, isDeleted: false }, update: upd } });
             }
-            if (rawMaterial.qty < netWeight) {
-                throw new ApiError(400, `Insufficient raw material for diameter ${diameter} mm. Available: ${rawMaterial.qty}, Required: ${netWeight}`);
+
+            if (remaining > 0) {
+                const available = materialsForDia.reduce((s, m) => s + (m.qty || 0), 0);
+                throw new ApiError(400, `Insufficient raw material for diameter ${diaNum} mm. Required: ${netWeight}, Available: ${available}`);
+            }
+
+            const diaDoc = await Diameter.findOne({ project: existingWorkOrder.projectId, value: diaNum, isDeleted: false }).lean();
+            if (diaDoc) {
+                bulkDiaOps2.push({ updateOne: { filter: { _id: diaDoc._id, isDeleted: false }, update: { $push: { subtracted: { quantity: netWeight, workOrderId, timestamp: new Date() } } } } });
+            }
+        } else if (netWeight < 0) {
+            // Less usage → restore from this workOrder's consumption entries (LIFO)
+            let restore = Math.abs(netWeight);
+            const withEntry = materialsForDia
+                .map((rm) => {
+                    const entry = (rm.consumptionHistory || []).find((ch) => ch.workOrderId.toString() === workOrderId.toString());
+                    return entry ? { rm, entry } : null;
+                })
+                .filter(Boolean)
+                .sort((a, b) => new Date(b.entry.timestamp || 0) - new Date(a.entry.timestamp || 0));
+
+            for (const it of withEntry) {
+                if (restore <= 0) break;
+                const rm = it.rm;
+                const consumed = it.entry.quantity || 0;
+                const giveBack = Math.min(consumed, restore);
+                restore -= giveBack;
+
+                const idx = (rm.consumptionHistory || []).findIndex((ch) => ch.workOrderId.toString() === workOrderId.toString());
+                const upd = { $inc: { qty: giveBack, convertedQty: giveBack * 1000 } };
+                const newQty = consumed - giveBack;
+                if (newQty <= 0) {
+                    upd.$pull = { consumptionHistory: { workOrderId } };
+                } else {
+                    upd.$set = {
+                        [`consumptionHistory.${idx}.quantity`]: newQty,
+                        [`consumptionHistory.${idx}.timestamp`]: new Date(),
+                    };
+                }
+                bulkRawOps2.push({ updateOne: { filter: { _id: rm._id, isDeleted: false }, update: upd } });
+            }
+
+            if (restore > 0) {
+                throw new ApiError(400, `Unable to restore ${restore} tons for diameter ${diaNum} mm; no matching consumption history`);
+            }
+
+            const diaDoc = await Diameter.findOne({ project: existingWorkOrder.projectId, value: diaNum, isDeleted: false }).lean();
+            if (diaDoc) {
+                bulkDiaOps2.push({ updateOne: { filter: { _id: diaDoc._id, isDeleted: false }, update: { $push: { subtracted: { quantity: netWeight, workOrderId, timestamp: new Date() } } } } });
             }
         }
     }
 
-    const bulkUpdates = rawMaterials.map((rawMaterial) => {
-        const netWeight = netDiameterWeightMap.get(rawMaterial.diameter.toString()) || 0;
-        const updateObj = { $inc: { qty: -netWeight } };
-
-        const existingConsumptionIndex = rawMaterial.consumptionHistory.findIndex((ch) =>
-            ch.workOrderId.equals(workOrderId)
-        );
-        if (netWeight !== 0) {
-            if (existingConsumptionIndex !== -1) {
-                const newQuantity = rawMaterial.consumptionHistory[existingConsumptionIndex].quantity + netWeight;
-                if (newQuantity <= 0) {
-                    updateObj.$pull = { consumptionHistory: { workOrderId } };
-                } else {
-                    updateObj.$set = {
-                        [`consumptionHistory.${existingConsumptionIndex}.quantity`]: newQuantity,
-                    };
-                }
-            } else if (netWeight > 0) {
-                updateObj.$push = { consumptionHistory: { workOrderId, quantity: netWeight } };
-            }
-        }
-
-        return {
-            updateOne: {
-                filter: { _id: rawMaterial._id, isDeleted: false },
-                update: updateObj,
-            },
-        };
-    });
-
-    if (bulkUpdates.length > 0) {
-        await RawMaterial.bulkWrite(bulkUpdates);
+    if (bulkRawOps2.length) {
+        await RawMaterial.bulkWrite(bulkRawOps2);
+    }
+    if (bulkDiaOps2.length) {
+        await Diameter.bulkWrite(bulkDiaOps2);
     }
 
     // Prepare updated fields
