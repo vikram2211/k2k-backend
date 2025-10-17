@@ -459,6 +459,53 @@ const getProductionData = asyncHandler(async (req, res) => {
   );
 });
 
+// Monthly production counts for Iron Smith based on job_order date_range.from
+export const getIronMonthlyProductionCounts = asyncHandler(async (req, res) => {
+  try {
+    const { year } = req.query;
+    const targetYear = Number(year) || new Date().getFullYear();
+
+    const startOfYear = new Date(Date.UTC(targetYear, 0, 1));
+    const endOfYear = new Date(Date.UTC(targetYear + 1, 0, 1));
+
+    const result = await ironDailyProduction.aggregate([
+      {
+        $lookup: {
+          from: 'ironjoborders',
+          localField: 'job_order',
+          foreignField: '_id',
+          as: 'job_order_data'
+        }
+      },
+      {
+        $unwind: '$job_order_data'
+      },
+      {
+        $match: {
+          'job_order_data.date_range.from': { $gte: startOfYear, $lt: endOfYear }
+        }
+      },
+      {
+        $group: {
+          _id: { month: { $month: "$job_order_data.date_range.from" } },
+          count: { $sum: 1 }
+        }
+      },
+      { $project: { _id: 0, month: "$_id.month", count: 1 } },
+      { $sort: { month: 1 } }
+    ]);
+
+    const months = Array.from({ length: 12 }, (_, i) => i + 1);
+    const map = new Map(result.map(r => [r.month, r.count]));
+    const data = months.map(m => ({ month: m, count: map.get(m) || 0 }));
+
+    return res.status(200).json({ success: true, year: targetYear, data });
+  } catch (error) {
+    console.error('Iron monthly counts error:', error);
+    return res.status(500).json({ success: false, message: error.message });
+  }
+});
+
 
 const manageIronProductionActions1 = asyncHandler(async (req, res) => {
   try {

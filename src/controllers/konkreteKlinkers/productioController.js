@@ -1,7 +1,8 @@
 import { JobOrder } from "../../models/konkreteKlinkers/jobOrders.model.js";
 import { DailyProduction } from "../../models/konkreteKlinkers/dailyProductionPlanning.js";
-import { Inventory } from '../../models/konkreteKlinkers/inventory.model.js';
 import mongoose from "mongoose";
+import { Inventory } from '../../models/konkreteKlinkers/inventory.model.js';
+
 import { parse, addMinutes } from 'date-fns';
 import { ApiError } from '../../utils/ApiError.js';
 
@@ -4998,6 +4999,54 @@ export const addDowntime_20_08_2025 = async (req, res, next) => {
     console.error('Error adding downtime:', error);
     next(new ApiError(500, 'Internal Server Error', error.message));
   }
+};
+
+// Simple monthly production counts for KK (counts of DPRs that have started)
+export const getKKMonthlyProductionCounts = async (req, res) => {
+    try {
+        const { year } = req.query;
+        const targetYear = Number(year) || new Date().getFullYear();
+
+        const startOfYear = new Date(Date.UTC(targetYear, 0, 1));
+        const endOfYear = new Date(Date.UTC(targetYear + 1, 0, 1));
+
+        const result = await DailyProduction.aggregate([
+            {
+                $lookup: {
+                    from: 'joborders',
+                    localField: 'job_order',
+                    foreignField: '_id',
+                    as: 'job_order_data'
+                }
+            },
+            {
+                $unwind: '$job_order_data'
+            },
+            {
+                $match: {
+                    'job_order_data.date.from': { $gte: startOfYear, $lt: endOfYear }
+                }
+            },
+            {
+                $group: {
+                    _id: { month: { $month: "$job_order_data.date.from" } },
+                    count: { $sum: 1 }
+                }
+            },
+            { $project: { _id: 0, month: "$_id.month", count: 1 } },
+            { $sort: { month: 1 } }
+        ]);
+
+        // Normalize to 12 months
+        const months = Array.from({ length: 12 }, (_, i) => i + 1);
+        const map = new Map(result.map(r => [r.month, r.count]));
+        const data = months.map(m => ({ month: m, count: map.get(m) || 0 }));
+
+        return res.status(200).json({ success: true, year: targetYear, data });
+    } catch (error) {
+        console.error("KK monthly counts error:", error);
+        return res.status(500).json({ success: false, message: error.message });
+    }
 };
 
 export const addDowntime = async (req, res, next) => {
