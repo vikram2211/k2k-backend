@@ -3,7 +3,7 @@ import { Router } from 'express';
 import { verifyJWT } from '../../middlewares/auth.middleware.js';
 import { upload } from '../../middlewares/multer.middleware.js';
 import {
-    createFalconJobOrder, getFalconJobOrders, updateFalconJobOrder,deleteFalconJobOrder,getFalconJobOrderById, getWorkOrderClientProjectDetails
+    createFalconJobOrder, getFalconJobOrders, updateFalconJobOrder,deleteFalconJobOrder,getFalconJobOrderById, getWorkOrderClientProjectDetails, updateAllJobOrderStatuses
 } from '../../controllers/falconFacade/jobOrderController.js';
 
 const router = Router();
@@ -18,6 +18,7 @@ router.route('/joborders/:id').get(getFalconJobOrderById).put(upload.array('file
 // // router.route('/workorders-getPlant').get(getPlantBasedOnProduct);
 router.route('/joborders/delete').delete(deleteFalconJobOrder);
 router.route('/:id/client-project').get(getWorkOrderClientProjectDetails);
+router.route('/joborders/update-all-statuses').post(updateAllJobOrderStatuses);
 // .put(updateClient);
 
 export default router;

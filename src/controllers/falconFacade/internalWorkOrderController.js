@@ -17,6 +17,7 @@ import { ApiResponse } from '../../utils/ApiResponse.js';
 import { ApiError } from '../../utils/ApiError.js';
 import { falconInternalWorkOrderCounter } from '../../models/falconFacade/falconIWOcounter.model.js';
 import {falconQCCheck} from '../../models/falconFacade/falconQcCheck.model.js';
+import { updateJobOrderStatus } from './jobOrderController.js';
 
 
 // Helper function to format date to DD-MM-YYYY
@@ -576,6 +577,16 @@ const createInternalWorkOrder1 = asyncHandler(async (req, res) => {
 
     try {
         const jobOrder = await falconInternalWorkOrder.create(jobOrderData);
+        
+        // Update job order status to 'In Progress' when internal work order is created
+        try {
+            await updateJobOrderStatus(bodyData.job_order_id);
+            console.log(`Job order ${bodyData.job_order_id} status updated after internal work order creation`);
+        } catch (statusError) {
+            console.error('Error updating job order status:', statusError);
+            // Don't fail the internal work order creation if status update fails
+        }
+        
         return res.status(201).json({
             success: true,
             message: 'Internal Work order created successfully',
@@ -754,6 +765,15 @@ const createInternalWorkOrder_16_07_25 = asyncHandler(async (req, res) => {
     let internalWorkOrder;
     try {
         internalWorkOrder = await falconInternalWorkOrder.create(jobOrderData);
+        
+        // Update job order status to 'In Progress' when internal work order is created
+        try {
+            await updateJobOrderStatus(job_order_id);
+            console.log(`Job order ${job_order_id} status updated after internal work order creation`);
+        } catch (statusError) {
+            console.error('Error updating job order status:', statusError);
+            // Don't fail the internal work order creation if status update fails
+        }
     } catch (error) {
         console.log("error", error);
         return res.status(500).json({
@@ -2348,6 +2368,15 @@ const createInternalWorkOrder = asyncHandler(async (req, res) => {
         await falconProduction.insertMany(productionDocs, { session });
 
         await session.commitTransaction();
+
+        // Update job order status to 'In Progress' when internal work order is created
+        try {
+            await updateJobOrderStatus(job_order_id);
+            console.log(`Job order ${job_order_id} status updated after internal work order creation`);
+        } catch (statusError) {
+            console.error('Error updating job order status:', statusError);
+            // Don't fail the internal work order creation if status update fails
+        }
 
         return res.status(201).json(new ApiResponse(201, internalWorkOrder[0], 'Internal work order created successfully'));
     } catch (error) {

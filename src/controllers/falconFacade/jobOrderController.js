@@ -21,6 +21,7 @@ import { falconSystem } from '../../models/falconFacade/helpers/falconSystem.mod
 import { falconProductSystem } from '../../models/falconFacade/helpers/falconProductSystem.model.js';
 import { z } from 'zod';
 import { log } from 'console';
+// import { updateWorkOrderStatus } from './workOrderController.js';
 
 
 
@@ -265,13 +266,7 @@ if (req.files && req.files.length > 0) {
     // 7. Validate with Joi
     const { error, value } = jobOrderSchema.validate(jobOrderData, { abortEarly: false });
     if (error) {
-        // Cleanup temp files on validation error
-        if (req.files) {
-            req.files.forEach((file) => {
-                const tempFilePath = path.join('./public/temp', file.filename);
-                if (fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath);
-            });
-        }
+        // No temp files to cleanup since we're using memory buffer uploads
         throw new ApiError(400, 'Validation failed for job order creation', error.details);
     }
 
@@ -295,6 +290,18 @@ if (req.files && req.files.length > 0) {
 
     // 9. Save to MongoDB
     const jobOrder = await falconJobOrder.create(value);
+
+    // 9.1. Update work order status to 'In Progress' after job order creation
+    // Note: Status update is handled by a separate service to avoid circular dependencies
+    try {
+        // Import dynamically to avoid circular dependency
+        const { updateWorkOrderStatus } = await import('./workOrderController.js');
+        await updateWorkOrderStatus(value.work_order_number);
+        console.log(`Work order status updated for work_order_number: ${value.work_order_number}`);
+    } catch (statusError) {
+        console.error('Error updating work order status:', statusError);
+        // Don't fail the job order creation if status update fails
+    }
 
     // 10. Populate and format response
     const populatedJobOrder = await falconJobOrder
@@ -3129,13 +3136,7 @@ if (req.files && req.files.length > 0) {
         { abortEarly: false }
     );
     if (error) {
-        // Cleanup temp files
-        if (req.files) {
-            req.files.forEach((file) => {
-                const tempFilePath = path.join('./public/temp', file.filename);
-                if (fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath);
-            });
-        }
+        // No temp files to cleanup since we're using memory buffer uploads
         throw new ApiError(400, 'Validation failed for job order update', error.details);
     }
 
@@ -3203,13 +3204,7 @@ if (req.files && req.files.length > 0) {
     );
 
     if (!jobOrder) {
-        // Cleanup temp files
-        if (req.files) {
-            req.files.forEach((file) => {
-                const tempFilePath = path.join('./public/temp', file.filename);
-                if (fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath);
-            });
-        }
+        // No temp files to cleanup since we're using memory buffer uploads
         throw new ApiError(404, `Job order not found with ID: ${id}`);
     }
 
@@ -3378,7 +3373,12 @@ const getWorkOrderClientProjectDetails = asyncHandler(async (req, res) => {
             clientId: workOrder.project_id.client,
             status: workOrder.project_id.status,
         },
-        products: workOrder.products || [],
+        products: (workOrder.products || []).map(product => ({
+            sac_code: product.sac_code,
+            uom: product.uom,
+            po_quantity: product.po_quantity,
+            _id: product._id
+        })),
     };
 
     // 7. Send response
@@ -3388,5 +3388,82 @@ const getWorkOrderClientProjectDetails = asyncHandler(async (req, res) => {
     );
 });
 
-export { createFalconJobOrder, getFalconJobOrders, updateFalconJobOrder, deleteFalconJobOrder, getFalconJobOrderById, getWorkOrderClientProjectDetails };
+/**
+ * Update job order status based on internal work orders
+ */
+const updateJobOrderStatus = async (jobOrderId) => {
+    try {
+        // Check if there are any internal work orders for this job order
+        const internalWorkOrders = await falconInternalWorkOrder.find({ job_order_id: jobOrderId });
+        
+        let newStatus = 'Pending'; // Default status
+        
+        if (internalWorkOrders.length > 0) {
+            // If internal work orders exist, status should be 'In Progress'
+            newStatus = 'In Progress';
+        }
+        
+        console.log(`Updating Job Order ${jobOrderId} status to: ${newStatus}`);
+        
+        // Update the job order status in database
+        const updatedJobOrder = await falconJobOrder.findByIdAndUpdate(
+            jobOrderId,
+            { status: newStatus },
+            { new: true }
+        );
+
+        console.log(`Job Order ${jobOrderId} status updated in database to: ${updatedJobOrder?.status}`);
+
+        return {
+            status: newStatus,
+            internalWorkOrdersCount: internalWorkOrders.length
+        };
+    } catch (error) {
+        console.error('Error updating job order status:', error);
+        throw error;
+    }
+};
+
+/**
+ * Manually update all job order statuses
+ */
+const updateAllJobOrderStatuses = asyncHandler(async (req, res) => {
+    try {
+        // Get all job orders
+        const jobOrders = await falconJobOrder.find().select('_id job_order_id status');
+        
+        const results = [];
+        
+        for (const jobOrder of jobOrders) {
+            try {
+                const statusData = await updateJobOrderStatus(jobOrder._id);
+                results.push({
+                    jobOrderId: jobOrder._id,
+                    jobOrderNumber: jobOrder.job_order_id,
+                    oldStatus: jobOrder.status,
+                    newStatus: statusData.status,
+                    internalWorkOrdersCount: statusData.internalWorkOrdersCount
+                });
+            } catch (error) {
+                console.error(`Error updating job order ${jobOrder._id}:`, error);
+                results.push({
+                    jobOrderId: jobOrder._id,
+                    jobOrderNumber: jobOrder.job_order_id,
+                    oldStatus: jobOrder.status,
+                    error: error.message
+                });
+            }
+        }
+        
+        return sendResponse(
+            res,
+            new ApiResponse(200, results, 'All job order statuses updated successfully')
+        );
+    } catch (error) {
+        console.error('Error updating all job order statuses:', error);
+        throw error;
+    }
+});
+
+export { createFalconJobOrder, getFalconJobOrders, updateFalconJobOrder, deleteFalconJobOrder, getFalconJobOrderById, getWorkOrderClientProjectDetails, updateJobOrderStatus, updateAllJobOrderStatuses };
 // export { createFalconJobOrder, getFalconJobOrders, updateFalconJobOrder, deleteFalconJobOrder, getFalconJobOrderById, getWorkOrderClientProjectDetails };

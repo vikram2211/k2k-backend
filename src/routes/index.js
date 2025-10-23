@@ -15,6 +15,7 @@ import dropdownRouter from './dropdown.routes.js';
 import dispatchRouter from './dispatch.routes.js';
 import tranferRouter from './tranfer.routes.js';
 import inventoryRouter from './inventory.routes.js';
+import activityRouter from './activity.routes.js';
 
 const router = Router();
 
@@ -22,6 +23,7 @@ const router = Router();
 router.use('/users', userRouter);
 router.use('/users', employeeRouter);
 router.use('/dropdown', dropdownRouter);
+router.use('/api', activityRouter);
 
 //the routes should be a/c to the company type, so that multiple companies can be added.
 router.use('/konkreteKlinkers', clientRouter);

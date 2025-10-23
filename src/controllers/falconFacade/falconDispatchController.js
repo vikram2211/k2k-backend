@@ -13,6 +13,7 @@ import { falconCounter } from '../../models/falconFacade/falconCouner.model.js'
 import path from 'path';
 import fs from 'fs';
 import { z } from 'zod';
+// import { updateWorkOrderStatus } from './workOrderController.js';
 
 const sanitizeFilename = (filename) => {
     return filename.replace(/[^a-zA-Z0-9.-]/g, '_');
@@ -626,6 +627,20 @@ const createDispatch = async (req, res, next) => {
         { _id: { $in: packingEntries.map((p) => p._id) } },
         { delivery_stage: 'Dispatched', updated_by: userId }
     );
+
+    // Update work order status after dispatch creation
+    try {
+        const jobOrderDoc = await falconJobOrder.findById(job_order).select('work_order_number').lean();
+        if (jobOrderDoc && jobOrderDoc.work_order_number) {
+            // Import dynamically to avoid circular dependency
+            const { updateWorkOrderStatus } = await import('./workOrderController.js');
+            await updateWorkOrderStatus(jobOrderDoc.work_order_number);
+            console.log(`Work order status updated after dispatch for work_order_number: ${jobOrderDoc.work_order_number}`);
+        }
+    } catch (statusError) {
+        console.error('Error updating work order status after dispatch:', statusError);
+        // Don't fail the dispatch creation if status update fails
+    }
 
     res.status(201).json(new ApiResponse(201, dispatchEntry, 'Dispatch created successfully'));
 };

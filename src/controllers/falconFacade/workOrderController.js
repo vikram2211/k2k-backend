@@ -2180,6 +2180,291 @@ const deleteFalconWorkOrder = asyncHandler(async (req, res) => {
     }, `${result.deletedCount} work order(s) deleted successfully`));
 });
 
+/**
+ * Calculate and update work order status based on job orders and dispatches
+ * Status Logic:
+ * - Pending: No job orders created yet
+ * - In Progress: Job orders created but not all quantities dispatched
+ * - Completed: All planned quantities and line items fully dispatched
+ */
+const calculateWorkOrderStatus = async (workOrderId) => {
+    try {
+        // Fetch the work order
+        const workOrder = await falconWorkOrder.findById(workOrderId).lean();
+        if (!workOrder) {
+            throw new ApiError(404, `Work order with ID ${workOrderId} not found`);
+        }
+
+        // Fetch all job orders for this work order
+        const jobOrders = await falconJobOrder.find({ work_order_number: workOrderId }).lean();
+
+        // If no job orders exist, status should be Pending
+        if (!jobOrders || jobOrders.length === 0) {
+            return {
+                status: 'Pending',
+                totalPlannedQty: 0,
+                totalDispatchedQty: 0,
+                progress: 0,
+                lineItems: []
+            };
+        }
+
+        // Get all job order IDs
+        const jobOrderIds = jobOrders.map(jo => jo._id);
+
+        // Fetch all dispatches for these job orders
+        const dispatches = await falocnDispatch.find({ 
+            job_order: { $in: jobOrderIds } 
+        }).lean();
+
+        // Calculate total planned quantity from work order products
+        let totalPlannedQty = 0;
+        const workOrderProducts = workOrder.products || [];
+        workOrderProducts.forEach(product => {
+            totalPlannedQty += product.po_quantity || 0;
+        });
+
+        // Calculate total dispatched quantity
+        let totalDispatchedQty = 0;
+        const dispatchedByProduct = {}; // Track dispatched qty by product
+
+        dispatches.forEach(dispatch => {
+            dispatch.products.forEach(product => {
+                const productId = product.product_id.toString();
+                const dispatchQty = product.dispatch_quantity || 0;
+                
+                if (!dispatchedByProduct[productId]) {
+                    dispatchedByProduct[productId] = 0;
+                }
+                dispatchedByProduct[productId] += dispatchQty;
+                totalDispatchedQty += dispatchQty;
+            });
+        });
+
+        // Get internal work orders to calculate line items
+        const internalWorkOrders = await falconInternalWorkOrder.find({
+            job_order_id: { $in: jobOrderIds }
+        }).lean();
+
+        // Build line item details
+        const lineItems = [];
+        let allLineItemsDispatched = true;
+
+        // Check internal work orders first
+        for (const iwo of internalWorkOrders) {
+            for (const product of iwo.products) {
+                const productId = product.product?.toString();
+                const poQuantity = product.po_quantity || 0;
+                const dispatchedQty = dispatchedByProduct[productId] || 0;
+                const isFullyDispatched = dispatchedQty >= poQuantity;
+
+                if (!isFullyDispatched) {
+                    allLineItemsDispatched = false;
+                }
+
+                // Get product details
+                const relatedJobOrder = jobOrders.find(jo => jo._id.toString() === iwo.job_order_id.toString());
+                const relatedJobProduct = relatedJobOrder?.products?.find(p => p.product.toString() === productId);
+
+                lineItems.push({
+                    product_id: productId,
+                    job_order_id: relatedJobOrder?.job_order_id || 'N/A',
+                    sales_order_no: iwo.sales_order_no || 'N/A',
+                    po_quantity: poQuantity,
+                    dispatched_quantity: dispatchedQty,
+                    remaining_quantity: Math.max(0, poQuantity - dispatchedQty),
+                    is_fully_dispatched: isFullyDispatched,
+                    code: relatedJobProduct?.code || 'N/A',
+                    width: relatedJobProduct?.width || 0,
+                    height: relatedJobProduct?.height || 0,
+                    color_code: relatedJobProduct?.color_code || 'N/A'
+                });
+            }
+        }
+
+        // Simplified completion logic: If total dispatched >= total planned, mark as completed
+        // This is more reliable than checking individual line items
+        const isFullyDispatched = totalDispatchedQty >= totalPlannedQty;
+        
+        console.log('Simplified Completion Check:', {
+            totalPlannedQty,
+            totalDispatchedQty,
+            isFullyDispatched,
+            allLineItemsDispatched
+        });
+
+        // Determine status
+        let status = 'In Progress';
+        const progress = totalPlannedQty > 0 ? (totalDispatchedQty / totalPlannedQty) * 100 : 0;
+
+        console.log(`Work Order ${workOrderId} Status Calculation:`, {
+            totalPlannedQty,
+            totalDispatchedQty,
+            allLineItemsDispatched,
+            progress: Math.round(progress * 100) / 100
+        });
+
+        if (isFullyDispatched) {
+            status = 'Completed';
+            console.log(`Work Order ${workOrderId} marked as COMPLETED`);
+        }
+
+        return {
+            status,
+            totalPlannedQty,
+            totalDispatchedQty,
+            progress: Math.round(progress * 100) / 100,
+            lineItems
+        };
+    } catch (error) {
+        console.error('Error calculating work order status:', error);
+        throw error;
+    }
+};
+
+/**
+ * Update work order status
+ */
+const updateWorkOrderStatus = async (workOrderId) => {
+    try {
+        const statusData = await calculateWorkOrderStatus(workOrderId);
+        
+        console.log(`Updating Work Order ${workOrderId} status to: ${statusData.status}`);
+        
+        // Update the work order status in database
+        const updatedWorkOrder = await falconWorkOrder.findByIdAndUpdate(
+            workOrderId,
+            { status: statusData.status },
+            { new: true }
+        );
+
+        console.log(`Work Order ${workOrderId} status updated in database to: ${updatedWorkOrder?.status}`);
+
+        return statusData;
+    } catch (error) {
+        console.error('Error updating work order status:', error);
+        throw error;
+    }
+};
+
+/**
+ * Get work order status and tracking details
+ */
+const getWorkOrderStatus = asyncHandler(async (req, res) => {
+    const { id } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+        throw new ApiError(400, `Invalid work order ID: ${id}`);
+    }
+
+    try {
+        const statusData = await calculateWorkOrderStatus(id);
+        
+        // Get work order basic details
+        const workOrder = await falconWorkOrder.findById(id)
+            .select('work_order_number date status client_id project_id')
+            .populate('client_id', 'name')
+            .populate('project_id', 'name')
+            .lean();
+
+        if (!workOrder) {
+            throw new ApiError(404, `Work order with ID ${id} not found`);
+        }
+
+        // Get product names for line items
+        const productIds = statusData.lineItems.map(item => item.product_id);
+        const products = await falconProduct.find({ _id: { $in: productIds } }).select('name').lean();
+        const productNamesMap = Object.fromEntries(products.map(p => [p._id.toString(), p.name]));
+
+        // Add product names to line items
+        statusData.lineItems = statusData.lineItems.map(item => ({
+            ...item,
+            product_name: productNamesMap[item.product_id] || 'Unknown Product'
+        }));
+
+        const response = {
+            work_order_id: workOrder._id,
+            work_order_number: workOrder.work_order_number,
+            date: workOrder.date,
+            client: workOrder.client_id?.name || 'N/A',
+            project: workOrder.project_id?.name || 'N/A',
+            current_status: statusData.status,
+            total_planned_quantity: statusData.totalPlannedQty,
+            total_dispatched_quantity: statusData.totalDispatchedQty,
+            remaining_quantity: Math.max(0, statusData.totalPlannedQty - statusData.totalDispatchedQty),
+            progress_percentage: statusData.progress,
+            line_items: statusData.lineItems,
+            summary: {
+                total_line_items: statusData.lineItems.length,
+                fully_dispatched_items: statusData.lineItems.filter(item => item.is_fully_dispatched).length,
+                pending_items: statusData.lineItems.filter(item => !item.is_fully_dispatched).length
+            }
+        };
+
+        return sendResponse(
+            res,
+            new ApiResponse(200, response, 'Work order status fetched successfully')
+        );
+    } catch (error) {
+        console.error('Error fetching work order status:', error);
+        throw error;
+    }
+});
+
+/**
+ * Get status summary for all work orders
+ */
+const getAllWorkOrdersStatus = asyncHandler(async (req, res) => {
+    try {
+        const workOrders = await falconWorkOrder.find()
+            .select('work_order_number date status client_id project_id products')
+            .populate('client_id', 'name')
+            .populate('project_id', 'name')
+            .lean()
+            .sort({ createdAt: -1 });
+
+        const statusSummary = [];
+
+        for (const workOrder of workOrders) {
+            const statusData = await calculateWorkOrderStatus(workOrder._id);
+            
+            statusSummary.push({
+                work_order_id: workOrder._id,
+                work_order_number: workOrder.work_order_number,
+                date: workOrder.date,
+                client: workOrder.client_id?.name || 'N/A',
+                project: workOrder.project_id?.name || 'N/A',
+                status: statusData.status,
+                progress_percentage: statusData.progress,
+                total_planned_quantity: statusData.totalPlannedQty,
+                total_dispatched_quantity: statusData.totalDispatchedQty,
+                remaining_quantity: Math.max(0, statusData.totalPlannedQty - statusData.totalDispatchedQty),
+                total_line_items: statusData.lineItems.length,
+                fully_dispatched_items: statusData.lineItems.filter(item => item.is_fully_dispatched).length
+            });
+        }
+
+        const overallSummary = {
+            total_work_orders: statusSummary.length,
+            pending: statusSummary.filter(wo => wo.status === 'Pending').length,
+            in_progress: statusSummary.filter(wo => wo.status === 'In Progress').length,
+            completed: statusSummary.filter(wo => wo.status === 'Completed').length,
+            cancelled: statusSummary.filter(wo => wo.status === 'Cancelled').length
+        };
+
+        return sendResponse(
+            res,
+            new ApiResponse(200, {
+                summary: overallSummary,
+                work_orders: statusSummary
+            }, 'Work orders status summary fetched successfully')
+        );
+    } catch (error) {
+        console.error('Error fetching work orders status summary:', error);
+        throw error;
+    }
+});
+
 const getFalconProjectBasedOnClient = async (req, res, next) => {
     try {
         console.log("came in get projects");
@@ -2225,4 +2510,38 @@ const getFalconProjectBasedOnClient = async (req, res, next) => {
     }
 }
 
-export { createFalconWorkOrder, getFalconWorkOrders, getFalconWorkOrderById, getFalconProjectBasedOnClient, updateFalconWorkOrder, deleteFalconWorkOrder };
+/**
+ * Manual status update endpoint for testing
+ */
+const manualUpdateWorkOrderStatus = asyncHandler(async (req, res) => {
+    const { workOrderId } = req.params;
+    
+    if (!mongoose.Types.ObjectId.isValid(workOrderId)) {
+        throw new ApiError(400, `Invalid work order ID: ${workOrderId}`);
+    }
+
+    try {
+        const statusData = await updateWorkOrderStatus(workOrderId);
+        
+        return sendResponse(
+            res,
+            new ApiResponse(200, statusData, 'Work order status updated manually')
+        );
+    } catch (error) {
+        console.error('Error in manual status update:', error);
+        throw error;
+    }
+});
+
+export { 
+    createFalconWorkOrder, 
+    getFalconWorkOrders, 
+    getFalconWorkOrderById, 
+    getFalconProjectBasedOnClient, 
+    updateFalconWorkOrder, 
+    deleteFalconWorkOrder,
+    getWorkOrderStatus,
+    getAllWorkOrdersStatus,
+    updateWorkOrderStatus,
+    manualUpdateWorkOrderStatus
+};
