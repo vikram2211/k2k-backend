@@ -2336,6 +2336,107 @@ export const updateWorkOrder = async (req, res) => {
     });
   }
 };
+
+// Update work order status based on production status
+export const updateWorkOrderStatus = async (workOrderId) => {
+  try {
+    // Get the work order
+    const workOrder = await WorkOrder.findById(workOrderId);
+    if (!workOrder) {
+      console.log(`Work order ${workOrderId} not found`);
+      return;
+    }
+
+    // Get all job orders for this work order
+    const jobOrders = await JobOrder.find({ work_order: workOrderId });
+    
+    if (jobOrders.length === 0) {
+      // No job orders, keep as Pending
+      if (workOrder.status !== 'Pending') {
+        workOrder.status = 'Pending';
+        await workOrder.save();
+        console.log(`Work order ${workOrderId} status updated to Pending (no job orders)`);
+      }
+      return;
+    }
+
+    // Check if any job order has production in progress
+    let hasInProgressProduction = false;
+    let allCompleted = true;
+
+    for (const jobOrder of jobOrders) {
+      // Check if any daily production for this job order is in progress
+      const dailyProductions = await DailyProduction.find({ job_order: jobOrder._id });
+      
+      for (const production of dailyProductions) {
+        if (production.status === 'In Progress') {
+          hasInProgressProduction = true;
+          allCompleted = false;
+          break;
+        }
+        if (production.status !== 'Completed') {
+          allCompleted = false;
+        }
+      }
+      
+      if (hasInProgressProduction) break;
+    }
+
+    // Update work order status based on production status
+    let newStatus = workOrder.status;
+    
+    if (hasInProgressProduction) {
+      newStatus = 'In Progress';
+    } else if (allCompleted && jobOrders.length > 0) {
+      newStatus = 'Completed';
+    } else {
+      newStatus = 'Pending';
+    }
+
+    if (workOrder.status !== newStatus) {
+      workOrder.status = newStatus;
+      await workOrder.save();
+      console.log(`Work order ${workOrderId} status updated to ${newStatus}`);
+    }
+
+  } catch (error) {
+    console.error(`Error updating work order status for ${workOrderId}:`, error);
+  }
+};
+
+// Update all work order statuses
+export const updateAllWorkOrderStatuses = async (req, res) => {
+  try {
+    console.log('Starting to update all work order statuses...');
+    
+    // Get all work orders
+    const workOrders = await WorkOrder.find({});
+    console.log(`Found ${workOrders.length} work orders to update`);
+    
+    let updatedCount = 0;
+    
+    for (const workOrder of workOrders) {
+      await updateWorkOrderStatus(workOrder._id);
+      updatedCount++;
+    }
+    
+    console.log(`Updated ${updatedCount} work order statuses`);
+    
+    res.status(200).json({
+      success: true,
+      message: `Updated ${updatedCount} work order statuses successfully`,
+      data: { updatedCount }
+    });
+    
+  } catch (error) {
+    console.error('Error updating all work order statuses:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to update work order statuses',
+      error: error.message
+    });
+  }
+};
 // export const updateWorkOrder = async (req, res) => {
 //   // console.log(req.body);
 

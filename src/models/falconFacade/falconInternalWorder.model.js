@@ -95,6 +95,12 @@ const falconInternalWorkOrderSchema = new mongoose.Schema(
             required: true,
         },
         products: [productSchema],
+        status: {
+            type: String,
+            enum: ['Pending', 'In Progress', 'Completed', 'Cancelled'],
+            default: 'Pending',
+            required: true,
+        },
     },
     { timestamps: true }
 );

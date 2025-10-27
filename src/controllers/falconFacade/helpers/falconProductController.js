@@ -6,6 +6,7 @@ import { formatDateToIST } from "../../../utils/formatDate.js";
 
 import { ApiResponse } from '../../../utils/ApiResponse.js';
 import { falconProduct } from '../../../models/falconFacade/helpers/falconProduct.model.js';
+import { falconJobOrder } from '../../../models/falconFacade/falconJobOrder.model.js';
 import Joi from 'joi';
 
 const sendResponse = (res, response) => {
@@ -199,4 +200,82 @@ const deleteFalconProduct = asyncHandler(async (req, res) => {
     );
 });
 
-export { createFalconProduct, getAllFalconProducts, getFalconProductById, updateFalconProduct, deleteFalconProduct };     
+// Get product usage statistics
+const getProductUsageStats = asyncHandler(async (req, res) => {
+    try {
+        // Get all products
+        const products = await falconProduct
+            .find({ isDeleted: false })
+            .populate('created_by', 'username email')
+            .lean();
+
+        // Get all job orders with their products
+        const jobOrders = await falconJobOrder
+            .find({})
+            .select('products')
+            .lean();
+
+        // Extract all product IDs that are being used in job orders
+        const usedProductIds = new Set();
+        
+        jobOrders.forEach((jobOrder) => {
+            if (jobOrder.products && Array.isArray(jobOrder.products)) {
+                jobOrder.products.forEach((product) => {
+                    if (product.product) {
+                        usedProductIds.add(product.product.toString());
+                    }
+                });
+            }
+        });
+
+        // Categorize products based on usage
+        const activeProducts = products.filter((product) => 
+            usedProductIds.has(product._id.toString())
+        );
+        
+        const inactiveProducts = products.filter((product) => 
+            !usedProductIds.has(product._id.toString())
+        );
+
+        // Calculate additional statistics
+        const totalProducts = products.length;
+        const activeCount = activeProducts.length;
+        const inactiveCount = inactiveProducts.length;
+        
+        const createdToday = products.filter((product) => {
+            const createdDate = new Date(product.createdAt);
+            return createdDate.toDateString() === new Date().toDateString();
+        }).length;
+
+        const recentActivity = products.filter((product) => {
+            const updatedDate = new Date(product.updatedAt);
+            return updatedDate > new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+        }).length;
+
+        const stats = {
+            total: totalProducts,
+            active: activeCount,
+            inactive: inactiveCount,
+            createdToday,
+            recentActivity,
+            usedProductIds: Array.from(usedProductIds),
+            activeProducts: activeProducts.map(product => ({
+                _id: product._id,
+                name: product.name,
+                status: product.status
+            })),
+            inactiveProducts: inactiveProducts.map(product => ({
+                _id: product._id,
+                name: product.name,
+                status: product.status
+            }))
+        };
+
+        return sendResponse(res, new ApiResponse(200, stats, 'Product usage statistics fetched successfully'));
+    } catch (error) {
+        console.error('Error fetching product usage stats:', error);
+        throw new ApiError(500, 'Failed to fetch product usage statistics');
+    }
+});
+
+export { createFalconProduct, getAllFalconProducts, getFalconProductById, updateFalconProduct, deleteFalconProduct, getProductUsageStats };     

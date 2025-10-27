@@ -7,7 +7,8 @@ import {
     getJobOrderById,
     updateJobOrder,
     deleteJobOrder,
-    getMachinesByProduct
+    getMachinesByProduct,
+    updateAllJobOrderStatuses
 } from '../controllers/konkreteKlinkers/jobOrderController.js';
 // import 'mongoose' from "mongoose";
 const router = Router();
@@ -18,6 +19,7 @@ router.route('/joborders').get(getJobOrders);
 router.route('/joborders/:id').get(getJobOrderById).put(updateJobOrder);
 router.route('/joborders/delete').delete(deleteJobOrder);
 router.route('/joborder-getMachine').get(getMachinesByProduct);
+router.route('/joborders/update-all-statuses').post(updateAllJobOrderStatuses);
 // router.route('/helpers/clients/:id').get(getClientById).put(updateClient);
 
 export default router;

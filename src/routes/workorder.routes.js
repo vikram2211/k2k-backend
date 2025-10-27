@@ -9,7 +9,8 @@ import {
     getProjectBasedOnClient,
     getPlantBasedOnProduct,
     deleteWorkOrder,
-    updateWorkOrder
+    updateWorkOrder,
+    updateAllWorkOrderStatuses
 } from '../controllers/konkreteKlinkers/workOrder.js';
 // import 'mongoose' from "mongoose";
 const router = Router();
@@ -21,6 +22,7 @@ router.route('/workorders/:id').get(getWorkOrderById).put(upload.array('files'),
 router.route('/workorders-getProject').get(getProjectBasedOnClient);
 router.route('/workorders-getPlant').get(getPlantBasedOnProduct);
 router.route('/workorders-delete').delete(deleteWorkOrder);
+router.route('/workorders/update-all-statuses').post(updateAllWorkOrderStatuses);
 // .put(updateClient);
 
 export default router;

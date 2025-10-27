@@ -1,5 +1,6 @@
 import { falconInternalWorkOrder } from "../../models/falconFacade/falconInternalWorder.model.js";
 import { falconProduction } from '../../models/falconFacade/falconProduction.model.js';
+import { updateInternalWorkOrderStatus } from './internalWorkOrderController.js';
 import { falconQCCheck } from "../../models/falconFacade/falconQcCheck.model.js";
 import { falconPacking } from "../../models/falconFacade/falconPacking.model.js";
 import { falocnDispatch } from "../../models/falconFacade/falconDispatch.model.js";
@@ -1224,6 +1225,15 @@ const startProduction_07_08_2025 = asyncHandler(async (req, res) => {
 
             await production.save();
 
+            // Update internal work order status when production quantity is updated
+            try {
+                await updateInternalWorkOrderStatus(production.internal_work_order);
+                console.log(`Internal work order ${production.internal_work_order} status updated after production update`);
+            } catch (statusError) {
+                console.error('Error updating internal work order status:', statusError);
+                // Don't fail the production update if status update fails
+            }
+
             return res.status(200).json({
                 success: true,
                 message: 'Achieved quantity updated successfully',
@@ -1391,6 +1401,15 @@ const startProduction_29_08_2025 = asyncHandler(async (req, res) => {
             production.updated_by = userId;
 
             await production.save();
+
+            // Update internal work order status when production quantity is updated
+            try {
+                await updateInternalWorkOrderStatus(production.internal_work_order);
+                console.log(`Internal work order ${production.internal_work_order} status updated after production update`);
+            } catch (statusError) {
+                console.error('Error updating internal work order status:', statusError);
+                // Don't fail the production update if status update fails
+            }
 
             return res.status(200).json({
                 success: true,
@@ -1589,6 +1608,15 @@ const startProduction = asyncHandler(async (req, res) => {
             
             await production.save();
 
+            // Update internal work order status when production quantity is updated
+            try {
+                await updateInternalWorkOrderStatus(production.internal_work_order);
+                console.log(`Internal work order ${production.internal_work_order} status updated after production update`);
+            } catch (statusError) {
+                console.error('Error updating internal work order status:', statusError);
+                // Don't fail the production update if status update fails
+            }
+
             return res.status(200).json({
                 success: true,
                 message: 'Achieved quantity updated successfully',
@@ -1764,6 +1792,15 @@ const startProduction_22_07_2025 = asyncHandler(async (req, res) => {
             production.updated_by = userId;
 
             await production.save();
+
+            // Update internal work order status when production quantity is updated
+            try {
+                await updateInternalWorkOrderStatus(production.internal_work_order);
+                console.log(`Internal work order ${production.internal_work_order} status updated after production update`);
+            } catch (statusError) {
+                console.error('Error updating internal work order status:', statusError);
+                // Don't fail the production update if status update fails
+            }
 
             return res.status(200).json({
                 success: true,

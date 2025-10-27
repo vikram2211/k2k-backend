@@ -4,7 +4,7 @@ import { verifyJWT } from '../../middlewares/auth.middleware.js';
 import { upload } from '../../middlewares/multer.middleware.js';
 import {
     getJobOrderAutoFetch, getJobOrderProductDetails, getJobOrderTotalProductDetail, getProductSystem, createInternalWorkOrder, getInternalWorkOrderDetails, getInternalWorkOrderById,updateInternalWorkOrder,deleteInternalWorkOrder,
-    getJobOrderRemainingQuantities} from '../../controllers/falconFacade/internalWorkOrderController.js';
+    getJobOrderRemainingQuantities, updateAllInternalWorkOrderStatuses, testUpdateInternalWorkOrderStatus, debugInternalWorkOrderProduction} from '../../controllers/falconFacade/internalWorkOrderController.js';
 
 const router = Router();
 
@@ -20,6 +20,9 @@ router.route('/product/details').get(getJobOrderProductDetails);
 router.route('/products/details').get(getJobOrderTotalProductDetail);
 router.route('/productsystem').get(getProductSystem);
 router.route('/remaining-qty').get(getJobOrderRemainingQuantities);
+router.route('/internal-workorder/update-all-statuses').post(updateAllInternalWorkOrderStatuses);
+router.route('/internal-workorder/test-status/:internalWorkOrderId').post(testUpdateInternalWorkOrderStatus);
+router.route('/internal-workorder/debug-production').get(debugInternalWorkOrderProduction);
 // .put(upload.array('files'), updateFalconJobOrder); //
 // // 
 // router.route('/workorders-getProject').get(getFalconProjectBasedOnClient);

@@ -5976,7 +5976,201 @@ const getJobOrderRemainingQuantities = asyncHandler(async (req, res) => {
 
 
 
-export { getJobOrderAutoFetch, getJobOrderProductDetails, getJobOrderTotalProductDetail, getProductSystem, createInternalWorkOrder, getInternalWorkOrderDetails, getInternalWorkOrderById, updateInternalWorkOrder, deleteInternalWorkOrder, getJobOrderRemainingQuantities };
+/**
+ * Update internal work order status based on production progress
+ */
+const updateInternalWorkOrderStatus = async (internalWorkOrderId) => {
+    try {
+        // Find the internal work order
+        const internalWorkOrder = await falconInternalWorkOrder.findById(internalWorkOrderId);
+        if (!internalWorkOrder) {
+            throw new Error('Internal work order not found');
+        }
+
+        // Find all production records for this internal work order
+        const productions = await falconProduction.find({
+            internal_work_order: internalWorkOrderId
+        });
+
+        console.log(`Internal Work Order ${internalWorkOrderId}: Found ${productions.length} production records`);
+
+        if (productions.length === 0) {
+            // No production records - set to Pending
+            internalWorkOrder.status = 'Pending';
+            await internalWorkOrder.save();
+            console.log(`Internal Work Order ${internalWorkOrderId}: No productions, set to Pending`);
+            return {
+                status: 'Pending',
+                productionsCount: 0,
+                inProgressCount: 0
+            };
+        }
+
+        // Check if any production has started (status changed from Pending or has achieved quantity)
+        const inProgressCount = productions.filter(prod => 
+            prod.status === 'In Progress' || 
+            prod.status === 'Pending QC' ||
+            prod.status === 'Completed' ||
+            prod.product.achieved_quantity > 0
+        ).length;
+
+        // Check if all productions are completed
+        const completedCount = productions.filter(prod => 
+            prod.status === 'Completed'
+        ).length;
+
+        console.log(`Internal Work Order ${internalWorkOrderId}: InProgress=${inProgressCount}, Completed=${completedCount}, Total=${productions.length}`);
+
+        // Determine status
+        let newStatus = 'Pending';
+        if (inProgressCount > 0) {
+            newStatus = 'In Progress';
+        }
+        if (completedCount === productions.length && productions.length > 0) {
+            newStatus = 'Completed';
+        }
+
+        console.log(`Internal Work Order ${internalWorkOrderId}: Setting status to ${newStatus}`);
+
+        // Update the internal work order status
+        internalWorkOrder.status = newStatus;
+        await internalWorkOrder.save();
+
+        return {
+            status: newStatus,
+            productionsCount: productions.length,
+            inProgressCount: inProgressCount,
+            completedCount: completedCount
+        };
+    } catch (error) {
+        console.error('Error updating internal work order status:', error);
+        throw error;
+    }
+};
+
+/**
+ * Manually update all internal work order statuses
+ */
+const updateAllInternalWorkOrderStatuses = asyncHandler(async (req, res) => {
+    try {
+        // First, ensure all internal work orders have a status field (for existing records)
+        await falconInternalWorkOrder.updateMany(
+            { status: { $exists: false } },
+            { $set: { status: 'Pending' } }
+        );
+        
+        // Get all internal work orders
+        const internalWorkOrders = await falconInternalWorkOrder.find().select('_id int_work_order_id status');
+        
+        const results = [];
+        
+        for (const internalWorkOrder of internalWorkOrders) {
+            try {
+                const statusData = await updateInternalWorkOrderStatus(internalWorkOrder._id);
+                results.push({
+                    internalWorkOrderId: internalWorkOrder._id,
+                    internalWorkOrderNumber: internalWorkOrder.int_work_order_id,
+                    oldStatus: internalWorkOrder.status,
+                    newStatus: statusData.status,
+                    productionsCount: statusData.productionsCount,
+                    inProgressCount: statusData.inProgressCount,
+                    completedCount: statusData.completedCount
+                });
+            } catch (error) {
+                console.error(`Error updating internal work order ${internalWorkOrder._id}:`, error);
+                results.push({
+                    internalWorkOrderId: internalWorkOrder._id,
+                    internalWorkOrderNumber: internalWorkOrder.int_work_order_id,
+                    oldStatus: internalWorkOrder.status,
+                    error: error.message
+                });
+            }
+        }
+        
+        return res.status(200).json(new ApiResponse(200, results, 'All internal work order statuses updated successfully'));
+    } catch (error) {
+        console.error('Error updating all internal work order statuses:', error);
+        throw error;
+    }
+});
+
+/**
+ * Test function to update a specific internal work order status
+ */
+const testUpdateInternalWorkOrderStatus = asyncHandler(async (req, res) => {
+    try {
+        const { internalWorkOrderId } = req.params;
+        
+        if (!internalWorkOrderId) {
+            return res.status(400).json({
+                success: false,
+                message: 'Internal work order ID is required'
+            });
+        }
+
+        const statusData = await updateInternalWorkOrderStatus(internalWorkOrderId);
+        
+        return res.status(200).json({
+            success: true,
+            message: 'Internal work order status updated successfully',
+            data: statusData
+        });
+    } catch (error) {
+        console.error('Error testing internal work order status update:', error);
+        return res.status(500).json({
+            success: false,
+            message: 'Error updating internal work order status',
+            error: error.message
+        });
+    }
+});
+
+/**
+ * Debug function to check production data for internal work orders
+ */
+const debugInternalWorkOrderProduction = asyncHandler(async (req, res) => {
+    try {
+        // Get all internal work orders
+        const internalWorkOrders = await falconInternalWorkOrder.find().select('_id int_work_order_id status').limit(5);
+        
+        const debugData = [];
+        
+        for (const iwo of internalWorkOrders) {
+            // Get production records for this internal work order
+            const productions = await falconProduction.find({
+                internal_work_order: iwo._id
+            }).select('_id product.achieved_quantity status process_name');
+            
+            debugData.push({
+                internalWorkOrderId: iwo._id,
+                internalWorkOrderNumber: iwo.int_work_order_id,
+                status: iwo.status,
+                productionsCount: productions.length,
+                productions: productions.map(prod => ({
+                    id: prod._id,
+                    achieved_quantity: prod.product.achieved_quantity,
+                    status: prod.status,
+                    process_name: prod.process_name
+                }))
+            });
+        }
+        
+        return res.status(200).json({
+            success: true,
+            message: 'Debug data retrieved successfully',
+            data: debugData
+        });
+    } catch (error) {
+        console.error('Error getting debug data:', error);
+        return res.status(500).json({
+            success: false,
+            message: 'Error getting debug data',
+            error: error.message
+        });
+    }
+});
+
+export { getJobOrderAutoFetch, getJobOrderProductDetails, getJobOrderTotalProductDetail, getProductSystem, createInternalWorkOrder, getInternalWorkOrderDetails, getInternalWorkOrderById, updateInternalWorkOrder, deleteInternalWorkOrder, getJobOrderRemainingQuantities, updateInternalWorkOrderStatus, updateAllInternalWorkOrderStatuses, testUpdateInternalWorkOrderStatus, debugInternalWorkOrderProduction };
 
 
 

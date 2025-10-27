@@ -6,6 +6,7 @@ import { formatDateToIST } from "../../../utils/formatDate.js";
 
 import { ApiResponse } from '../../../utils/ApiResponse.js';
 import { falconSystem } from '../../../models/falconFacade/helpers/falconSystem.model.js';
+import { falconInternalWorkOrder } from '../../../models/falconFacade/falconInternalWorder.model.js';
 import Joi from 'joi';
 
 //Create a client
@@ -191,4 +192,82 @@ const sendResponse = (res, response) => {
     );
   });
   
-  export {createFalconSystem, getAllFalconSystems, getFalconSystemById, updateFalconSystem, deleteFalconSystem };
+  // Get system usage statistics
+  const getSystemUsageStats = asyncHandler(async (req, res) => {
+    try {
+      // Get all systems
+      const systems = await falconSystem
+        .find({ isDeleted: false })
+        .populate('created_by', 'username email')
+        .lean();
+
+      // Get all internal work orders with their products
+      const internalWorkOrders = await falconInternalWorkOrder
+        .find({})
+        .select('products')
+        .lean();
+
+      // Extract all system IDs that are being used in internal work orders
+      const usedSystemIds = new Set();
+      
+      internalWorkOrders.forEach((iwo) => {
+        if (iwo.products && Array.isArray(iwo.products)) {
+          iwo.products.forEach((product) => {
+            if (product.system) {
+              usedSystemIds.add(product.system.toString());
+            }
+          });
+        }
+      });
+
+      // Categorize systems based on usage
+      const activeSystems = systems.filter((system) => 
+        usedSystemIds.has(system._id.toString())
+      );
+      
+      const inactiveSystems = systems.filter((system) => 
+        !usedSystemIds.has(system._id.toString())
+      );
+
+      // Calculate additional statistics
+      const totalSystems = systems.length;
+      const activeCount = activeSystems.length;
+      const inactiveCount = inactiveSystems.length;
+      
+      const createdToday = systems.filter((system) => {
+        const createdDate = new Date(system.createdAt);
+        return createdDate.toDateString() === new Date().toDateString();
+      }).length;
+
+      const recentActivity = systems.filter((system) => {
+        const updatedDate = new Date(system.updatedAt);
+        return updatedDate > new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+      }).length;
+
+      const stats = {
+        total: totalSystems,
+        active: activeCount,
+        inactive: inactiveCount,
+        createdToday,
+        recentActivity,
+        usedSystemIds: Array.from(usedSystemIds),
+        activeSystems: activeSystems.map(system => ({
+          _id: system._id,
+          name: system.name,
+          status: system.status
+        })),
+        inactiveSystems: inactiveSystems.map(system => ({
+          _id: system._id,
+          name: system.name,
+          status: system.status
+        }))
+      };
+
+      return sendResponse(res, new ApiResponse(200, stats, 'System usage statistics fetched successfully'));
+    } catch (error) {
+      console.error('Error fetching system usage stats:', error);
+      throw new ApiError(500, 'Failed to fetch system usage statistics');
+    }
+  });
+
+  export {createFalconSystem, getAllFalconSystems, getFalconSystemById, updateFalconSystem, deleteFalconSystem, getSystemUsageStats };

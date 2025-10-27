@@ -6,6 +6,7 @@ import { formatDateToIST } from "../../../utils/formatDate.js";
 
 import { ApiResponse } from '../../../utils/ApiResponse.js';
 import { falconProductSystem } from '../../../models/falconFacade/helpers/falconProductSystem.model.js';
+import { falconInternalWorkOrder } from '../../../models/falconFacade/falconInternalWorder.model.js';
 import Joi from 'joi';
 
 
@@ -239,4 +240,85 @@ const deleteFalconProductSystem = asyncHandler(async (req, res) => {
     );
 });
 
-export { createFalconProductSystem, getAllFalconProductSystems, getFalconProductSystemById, updateFalconProductSystem, deleteFalconProductSystem };
+// Get product system usage statistics
+const getProductSystemUsageStats = asyncHandler(async (req, res) => {
+    try {
+        // Get all product systems
+        const productSystems = await falconProductSystem
+            .find({ isDeleted: false })
+            .populate('system', 'name')
+            .populate('created_by', 'username email')
+            .lean();
+
+        // Get all internal work orders with their products
+        const internalWorkOrders = await falconInternalWorkOrder
+            .find({})
+            .select('products')
+            .lean();
+
+        // Extract all product system IDs that are being used in internal work orders
+        const usedProductSystemIds = new Set();
+        
+        internalWorkOrders.forEach((iwo) => {
+            if (iwo.products && Array.isArray(iwo.products)) {
+                iwo.products.forEach((product) => {
+                    if (product.product_system) {
+                        usedProductSystemIds.add(product.product_system.toString());
+                    }
+                });
+            }
+        });
+
+        // Categorize product systems based on usage
+        const activeProductSystems = productSystems.filter((productSystem) => 
+            usedProductSystemIds.has(productSystem._id.toString())
+        );
+        
+        const inactiveProductSystems = productSystems.filter((productSystem) => 
+            !usedProductSystemIds.has(productSystem._id.toString())
+        );
+
+        // Calculate additional statistics
+        const totalProductSystems = productSystems.length;
+        const activeCount = activeProductSystems.length;
+        const inactiveCount = inactiveProductSystems.length;
+        
+        const createdToday = productSystems.filter((productSystem) => {
+            const createdDate = new Date(productSystem.createdAt);
+            return createdDate.toDateString() === new Date().toDateString();
+        }).length;
+
+        const recentActivity = productSystems.filter((productSystem) => {
+            const updatedDate = new Date(productSystem.updatedAt);
+            return updatedDate > new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+        }).length;
+
+        const stats = {
+            total: totalProductSystems,
+            active: activeCount,
+            inactive: inactiveCount,
+            createdToday,
+            recentActivity,
+            usedProductSystemIds: Array.from(usedProductSystemIds),
+            activeProductSystems: activeProductSystems.map(productSystem => ({
+                _id: productSystem._id,
+                name: productSystem.name,
+                system: productSystem.system,
+                status: productSystem.status
+            })),
+            inactiveProductSystems: inactiveProductSystems.map(productSystem => ({
+                _id: productSystem._id,
+                name: productSystem.name,
+                system: productSystem.system,
+                status: productSystem.status
+            }))
+        };
+
+        return sendResponse(res, new ApiResponse(200, stats, 'Product system usage statistics fetched successfully'));
+    } catch (error) {
+        console.error('Error fetching product system usage stats:', error);
+        throw new ApiError(500, 'Failed to fetch product system usage statistics');
+    }
+});
+
+export { createFalconProductSystem, getAllFalconProductSystems, getFalconProductSystemById, updateFalconProductSystem, deleteFalconProductSystem, getProductSystemUsageStats };

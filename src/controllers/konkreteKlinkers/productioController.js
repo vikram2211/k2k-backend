@@ -2,6 +2,8 @@ import { JobOrder } from "../../models/konkreteKlinkers/jobOrders.model.js";
 import { DailyProduction } from "../../models/konkreteKlinkers/dailyProductionPlanning.js";
 import mongoose from "mongoose";
 import { Inventory } from '../../models/konkreteKlinkers/inventory.model.js';
+import { updateWorkOrderStatus } from './workOrder.js';
+import { updateJobOrderStatus } from './jobOrderController.js';
 
 import { parse, addMinutes } from 'date-fns';
 import { ApiError } from '../../utils/ApiError.js';
@@ -3504,6 +3506,20 @@ export const handleDailyProductionActions_19_08_2025 = async (req, res) => {
         const updatedProduction = await dailyProduction.save();
         console.log("updatedProduction", updatedProduction);
 
+        // Update work order status based on production status
+        try {
+          await updateWorkOrderStatus(jobOrder.work_order);
+        } catch (error) {
+          console.error('Error updating work order status:', error);
+        }
+
+        // Update job order status based on production status
+        try {
+          await updateJobOrderStatus(job_order);
+        } catch (error) {
+          console.error('Error updating job order status:', error);
+        }
+
         // Start production simulation only for the requested product
         const productionKey = `${job_order}_${product_id}`;
         if (!activeProductions.has(productionKey)) {
@@ -3998,6 +4014,20 @@ export const handleDailyProductionActions_18_08_2025 = async (req, res) => {
         });
 
         const updatedProduction = await dailyProduction.save();
+
+        // Update work order status based on production status
+        try {
+          await updateWorkOrderStatus(jobOrder.work_order);
+        } catch (error) {
+          console.error('Error updating work order status:', error);
+        }
+
+        // Update job order status based on production status
+        try {
+          await updateJobOrderStatus(job_order);
+        } catch (error) {
+          console.error('Error updating job order status:', error);
+        }
 
         // Start production simulation only for the requested product
         const productionKey = `${job_order}_${objId}`;
@@ -4494,6 +4524,20 @@ export const handleDailyProductionActions = async (req, res) => {
         });
 
         const updatedProduction = await dailyProduction.save();
+
+        // Update work order status based on production status
+        try {
+          await updateWorkOrderStatus(jobOrder.work_order);
+        } catch (error) {
+          console.error('Error updating work order status:', error);
+        }
+
+        // Update job order status based on production status
+        try {
+          await updateJobOrderStatus(job_order);
+        } catch (error) {
+          console.error('Error updating job order status:', error);
+        }
 
         // Start production simulation
         const productionKey = `${job_order}_${product_id}_${prodId}`;
