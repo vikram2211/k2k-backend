@@ -1486,8 +1486,7 @@ const deleteDiameter = asyncHandler(async (req, res) => {
         // Build query dynamically based on whether type is provided
         const diameterQuery = { 
             project: projectId, 
-            value, 
-            isDeleted: false 
+            value
         };
         if (type) {
             diameterQuery.type = type;
@@ -1505,24 +1504,24 @@ const deleteDiameter = asyncHandler(async (req, res) => {
             throw new ApiError(404, `Diameter ${value} mm${typeMsg} not found for this project`);
         }
 
-        // Mark the Diameter as deleted
-        existingDiameter.isDeleted = true;
-        await existingDiameter.save({ session });
+        // Delete the Diameter record from database
+        await Diameter.deleteOne(
+            { _id: existingDiameter._id },
+            { session }
+        );
 
         // Build query for RawMaterial deletion
         const rawMaterialQuery = { 
             project: projectId, 
-            diameter: value, 
-            isDeleted: false 
+            diameter: value
         };
         if (type) {
             rawMaterialQuery.type = type;
         }
 
-        // Mark related RawMaterial records as deleted
-        await RawMaterial.updateMany(
+        // Delete related RawMaterial records from database
+        await RawMaterial.deleteMany(
             rawMaterialQuery,
-            { $set: { isDeleted: true } },
             { session }
         );
 
@@ -1530,7 +1529,7 @@ const deleteDiameter = asyncHandler(async (req, res) => {
         await session.commitTransaction();
         session.endSession();
 
-        return res.status(200).json(new ApiResponse(200, null, 'Diameter and related raw materials marked as deleted successfully'));
+        return res.status(200).json(new ApiResponse(200, null, 'Diameter and related raw materials deleted successfully'));
     } catch (error) {
         // Rollback the transaction on error
         await session.abortTransaction();
@@ -1549,7 +1548,8 @@ const getDiametersByProjectId = asyncHandler(async (req, res) => {
       throw new ApiError(400, 'Invalid project ID');
     }
   
-    const diameters = await Diameter.find({ project: projectId, isDeleted: false });
+    // No need to filter by isDeleted since we're doing hard deletes now
+    const diameters = await Diameter.find({ project: projectId });
     return res.status(200).json(new ApiResponse(200, diameters, 'Diameters fetched successfully'));
   });
 

@@ -4,6 +4,7 @@ import { ApiError } from '../../../utils/ApiError.js';
 import { ApiResponse } from '../../../utils/ApiResponse.js';
 import { ironMachine } from '../../../models/ironSmith/helpers/ironMachine.model.js';
 import {putObject} from '../../../../util/putObject.js';
+import {deleteObject} from '../../../../util/deleteObject.js';
 import Joi from 'joi';
 import { formatDateToIST } from '../../../utils/formatDate.js';
 
@@ -182,12 +183,44 @@ const updateIronMachine = asyncHandler(async (req, res) => {
       throw new ApiError(400, `Provided Machine ID (${machineId}) is not a valid ObjectId`);
   }
 
+  // Get existing machine data to check for old file
+  const existingMachine = await ironMachine.findById(machineId);
+  if (!existingMachine) {
+      throw new ApiError(404, 'No machine found with the given ID');
+  }
+
   // Prepare update data
   const updateData = {};
 
   // Handle file upload to S3
   if (req.files && req.files.length > 0) {
       const uploadedFiles = [];
+      
+      // Delete old file from S3 if it exists
+      if (existingMachine.file && existingMachine.file.file_url) {
+          try {
+              // Extract the S3 key from the URL
+              const oldFileUrl = existingMachine.file.file_url;
+              // The URL format is typically: https://bucket-name.s3.region.amazonaws.com/key
+              // or just the key if stored that way
+              const urlParts = oldFileUrl.split('.com/');
+              const s3Key = urlParts.length > 1 ? urlParts[1] : oldFileUrl;
+              
+              console.log('Deleting old file from S3:', s3Key);
+              const deleteResult = await deleteObject(s3Key);
+              
+              if (deleteResult && deleteResult.status === 204) {
+                  console.log('Old file deleted successfully from S3');
+              } else {
+                  console.warn('Failed to delete old file from S3:', deleteResult);
+              }
+          } catch (err) {
+              console.error('Error deleting old file from S3:', err);
+              // Continue with upload even if deletion fails
+          }
+      }
+
+      // Upload new file to S3
       for (const file of req.files) {
           try {
               const s3Key = `machines/${Date.now()}-${sanitizeFilename(file.originalname)}`;
@@ -210,17 +243,17 @@ const updateIronMachine = asyncHandler(async (req, res) => {
   if (req.body.name) updateData.name = req.body.name;
   if (req.body.role) updateData.role = req.body.role;
 
-  // If updateData is still empty, but a file was uploaded, force include the file
-  if (Object.keys(updateData).length === 0 && req.files && req.files.length > 0) {
-      updateData.file = {
-          file_name: req.files[0].originalname,
-          file_url: `machines/${Date.now()}-${sanitizeFilename(req.files[0].originalname)}`,
-      };
-  }
-
   // Check if updateData is empty
   if (Object.keys(updateData).length === 0) {
       throw new ApiError(400, 'No valid fields provided for update');
+  }
+
+  // Validate that machine always has a file (either existing or new)
+  const hasExistingFile = existingMachine.file && existingMachine.file.file_url;
+  const hasNewFile = updateData.file;
+  
+  if (!hasExistingFile && !hasNewFile) {
+      throw new ApiError(400, 'Machine file is required. Please upload a file.');
   }
 
   // Update machine

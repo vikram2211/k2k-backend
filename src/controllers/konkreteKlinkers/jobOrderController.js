@@ -2143,8 +2143,6 @@ export const updateJobOrder = async (req, res) => {
 
 
     // 9. Handle products update if provided
-let productsToUpdate = [];
-let newProducts = [];
 if (bodyData.products !== undefined) {
   let updatedProducts = bodyData.products;
 
@@ -2218,28 +2216,6 @@ if (bodyData.products !== undefined) {
       );
     }
   }
-
-  // Identify products with changed scheduled_date and new products
-  productsToUpdate = updateData.products.map((newProduct) => {
-    const existingProduct = existingJobOrder.products.find((p) =>
-      p.product.equals(newProduct.product)
-    );
-    const hasDateChanged =
-      existingProduct &&
-      new Date(existingProduct.scheduled_date).getTime() !==
-        new Date(newProduct.scheduled_date).getTime();
-    const isNewProduct = !existingProduct;
-    return {
-      product_id: newProduct.product,
-      scheduled_date: newProduct.scheduled_date,
-      hasDateChanged,
-      isNewProduct,
-    };
-  });
-
-  newProducts = updateData.products.filter((newProduct) =>
-    !existingJobOrder.products.some((p) => p.product.equals(newProduct.product))
-  );
 }
 
 
@@ -2254,47 +2230,7 @@ if (bodyData.products !== undefined) {
       });
     }
 
-    // 11. Validate work order constraints for new products
-    if (newProducts.length > 0) {
-      const workOrder = await WorkOrder.findById(existingJobOrder.work_order);
-      if (!workOrder) {
-        return res.status(400).json({
-          success: false,
-          message: 'Invalid work_order ID associated with job order',
-        });
-      }
-
-      for (const product of newProducts) {
-        const woProduct = workOrder.products.find((p) => p.product_id.equals(product.product));
-        if (!woProduct) {
-          throw new Error(`Product ${product.product} not found in work order`);
-        }
-
-        const existingJobOrders = await JobOrder.find({
-          work_order: existingJobOrder.work_order,
-          'products.product': product.product,
-        });
-
-        const totalExistingPlannedQuantity = existingJobOrders.reduce((total, jo) => {
-          const joProduct = jo.products.find((p) => p.product.equals(product.product));
-          return total + (joProduct ? joProduct.planned_quantity : 0);
-        }, 0);
-
-        const totalPlannedQuantity = totalExistingPlannedQuantity + product.planned_quantity;
-
-        if (totalPlannedQuantity > woProduct.qty_in_nos) {
-          throw new Error(
-            `Planned quantity for product ${product.product} exceeds available work order quantity. ` +
-            `Work order has qty_in_nos of ${woProduct.qty_in_nos}, ` +
-            `existing job orders have a total planned quantity of ${totalExistingPlannedQuantity}, ` +
-            `and you are trying to add ${product.planned_quantity}. ` +
-            `Maximum allowed additional quantity is ${woProduct.qty_in_nos - totalExistingPlannedQuantity}.`
-          );
-        }
-      }
-    }
-
-    // 12. Update job order
+    // 11. Update job order
     const updatedJobOrder = await JobOrder.findByIdAndUpdate(
       id,
       { $set: updateData },
@@ -2304,90 +2240,171 @@ if (bodyData.products !== undefined) {
       }
     );
 
-    // 13. Update existing DailyProduction records for changed scheduled_date
-    if (productsToUpdate.length > 0) {
-      const dailyProductionUpdates = productsToUpdate
-        .filter((p) => p.hasDateChanged)
-        .map(async (product) => {
-          // Find DailyProduction records for this job order and product
-          // Note: Do not restrict to a specific status; reflect schedule changes regardless of current status
-          const dailyProductions = await DailyProduction.find({
-            job_order: id,
-            'products.product_id': product.product_id,
+    // 12. Sync DailyProduction records with updated products
+    // Strategy: 
+    // - Match existing DailyProductions to job order products by creation order (index)
+    // - Update if date/qty changed (preserves _id)
+    // - Delete if product row was removed
+    // - Create if product row was added
+
+    if (bodyData.products !== undefined) {
+      // Get all existing DailyProduction records for this job order (sorted by creation time)
+      const existingProductions = await DailyProduction.find({ job_order: id }).sort({ createdAt: 1 });
+
+      console.log(`Syncing productions: ${existingProductions.length} existing, ${updateData.products.length} new`);
+
+      const productionsToUpdate = [];
+      const productionsToCreate = [];
+      const productionsToDelete = [];
+
+      // Build a mapping of old products by (product_id + old_scheduled_date) to track which DailyProductions correspond to which products
+      const oldProductionMap = new Map();
+      existingJobOrder.products.forEach((oldProd, idx) => {
+        const key = `${oldProd.product}_${new Date(oldProd.scheduled_date).toISOString()}`;
+        if (!oldProductionMap.has(key)) {
+          oldProductionMap.set(key, []);
+        }
+        oldProductionMap.get(key).push({ product: oldProd, index: idx });
+      });
+
+      // Build a mapping for existing DailyProduction by (product_id + date)
+      const existingProdByKey = new Map();
+      existingProductions.forEach((prod) => {
+        const productId = prod.products[0].product_id.toString();
+        const dateKey = new Date(prod.date).toISOString();
+        const key = `${productId}_${dateKey}`;
+        if (!existingProdByKey.has(key)) {
+          existingProdByKey.set(key, []);
+        }
+        existingProdByKey.get(key).push(prod);
+      });
+
+      // Track which productions have been matched
+      const matchedProductionIds = new Set();
+
+      // Process each NEW product and match to existing DailyProduction
+      updateData.products.forEach((newProd, newIdx) => {
+        const newProductId = newProd.product.toString();
+        const newDate = new Date(newProd.scheduled_date).toISOString();
+        
+        // Try to find a matching OLD product at the same or nearby index
+        let matchedProduction = null;
+        let matchedOldProduct = null;
+
+        // First, try to match by index (most likely scenario - just editing existing row)
+        if (newIdx < existingJobOrder.products.length) {
+          const oldProductAtSameIndex = existingJobOrder.products[newIdx];
+          if (oldProductAtSameIndex.product.toString() === newProductId) {
+            // Same product at same index - this is an update
+            const oldDateKey = new Date(oldProductAtSameIndex.scheduled_date).toISOString();
+            const oldKey = `${newProductId}_${oldDateKey}`;
+            const prods = existingProdByKey.get(oldKey);
+            if (prods && prods.length > 0) {
+              matchedProduction = prods.find(p => !matchedProductionIds.has(p._id.toString()));
+              if (matchedProduction) {
+                matchedOldProduct = oldProductAtSameIndex;
+              }
+            }
+          }
+        }
+
+        // If not matched by index, try to find any matching product that hasn't been matched yet
+        if (!matchedProduction) {
+          // Look for same product with same date (no change)
+          const sameKey = `${newProductId}_${newDate}`;
+          const prods = existingProdByKey.get(sameKey);
+          if (prods && prods.length > 0) {
+            matchedProduction = prods.find(p => !matchedProductionIds.has(p._id.toString()));
+            if (matchedProduction) {
+              matchedOldProduct = existingJobOrder.products.find(
+                p => p.product.toString() === newProductId && 
+                new Date(p.scheduled_date).toISOString() === newDate
+              );
+            }
+          }
+        }
+
+        if (matchedProduction) {
+          // Found a match - check if update needed
+          matchedProductionIds.add(matchedProduction._id.toString());
+          
+          const oldDate = new Date(matchedProduction.date).toISOString();
+          if (oldDate !== newDate) {
+            // Date changed - update it
+            productionsToUpdate.push({
+              productionId: matchedProduction._id,
+              newDate: newProd.scheduled_date,
+            });
+          }
+          // Note: We don't update planned_quantity here as it's stored in job order, not DailyProduction
+        } else {
+          // No match found - this is a new product row
+          productionsToCreate.push(newProd);
+        }
+      });
+
+      // Any unmatched existing productions should be deleted
+      existingProductions.forEach((prod) => {
+        if (!matchedProductionIds.has(prod._id.toString())) {
+          productionsToDelete.push(prod._id);
+        }
+      });
+
+      // Execute creates
+      if (productionsToCreate.length > 0) {
+        const createPromises = productionsToCreate.map(async (product) => {
+          const schemaProduct = {
+            product_id: product.product,
+            achieved_quantity: 0,
+            rejected_quantity: 0,
+            recycled_quantity: 0,
+          };
+
+          const newProduction = new DailyProduction({
+            work_order: existingJobOrder.work_order,
+            job_order: updatedJobOrder._id,
+            products: [schemaProduct],
+            date: new Date(product.scheduled_date),
+            submitted_by: req.user?._id,
+            created_by: req.user?._id,
+            updated_by: req.user?._id,
+            status: 'Pending',
           });
 
-          if (dailyProductions.length === 0) {
-            // If none exists (e.g., product newly scheduled or previously cleaned), create one so it appears in planning
-            const schemaProduct = {
-              product_id: product.product_id,
-              achieved_quantity: 0,
-              rejected_quantity: 0,
-              recycled_quantity: 0,
-            };
+          return newProduction.save();
+        });
 
-            const newProduction = new DailyProduction({
-              work_order: existingJobOrder.work_order,
-              job_order: id,
-              products: [schemaProduct],
-              date: new Date(product.scheduled_date),
-              submitted_by: req.user?._id,
-              created_by: req.user?._id,
-              updated_by: req.user?._id,
-              status: 'Pending',
-            });
-            await newProduction.save();
-            return newProduction;
-          }
+        await Promise.all(createPromises);
+        console.log(`✅ Created ${productionsToCreate.length} new DailyProduction records`);
+      }
 
-          // Update date for each matching DailyProduction record
-          return Promise.all(
-            dailyProductions.map(async (production) => {
-              return DailyProduction.findByIdAndUpdate(
-                production._id,
-                {
-                  $set: {
-                    date: new Date(product.scheduled_date),
-                    updated_by: req.user._id,
-                  },
-                },
-                { new: true }
-              );
-            })
+      // Execute updates
+      if (productionsToUpdate.length > 0) {
+        const updatePromises = productionsToUpdate.map(async ({ productionId, newDate }) => {
+          return DailyProduction.findByIdAndUpdate(
+            productionId,
+            {
+              $set: {
+                date: new Date(newDate),
+                updated_by: req.user?._id,
+              },
+            },
+            { new: true }
           );
         });
 
-      await Promise.all(dailyProductionUpdates);
+        await Promise.all(updatePromises);
+        console.log(`✅ Updated ${productionsToUpdate.length} DailyProduction dates (preserved _id)`);
+      }
+
+      // Execute deletes
+      if (productionsToDelete.length > 0) {
+        await DailyProduction.deleteMany({ _id: { $in: productionsToDelete } });
+        console.log(`✅ Deleted ${productionsToDelete.length} orphaned DailyProduction records`);
+      }
     }
 
-    // 14. Create new DailyProduction records for new products
-    if (newProducts.length > 0) {
-      const dailyProductionPromises = newProducts.map(async (product) => {
-        const schemaProduct = {
-          product_id: product.product,
-          // objId: updatedJobOrder.products.find((p) => p.product.equals(product.product))._id,
-          achieved_quantity: 0,
-          rejected_quantity: 0,
-          recycled_quantity: 0,
-        };
-
-        const newProduction = new DailyProduction({
-          work_order: existingJobOrder.work_order,
-          job_order: updatedJobOrder._id,
-          products: [schemaProduct],
-          date: new Date(product.scheduled_date),
-          submitted_by: req.user._id,
-          created_by: req.user._id,
-          updated_by: req.user._id,
-          status: 'Pending',
-        });
-
-        return newProduction.save();
-      });
-
-      await Promise.all(dailyProductionPromises);
-    }
-
-    // 15. Populate the updated job order for better response
+    // 13. Populate the updated job order for better response
     const populatedJobOrder = await JobOrder.findById(updatedJobOrder._id)
       .populate({
         path: 'work_order',

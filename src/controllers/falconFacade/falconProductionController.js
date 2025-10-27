@@ -334,6 +334,7 @@ const getProductionsByProcess = asyncHandler(async (req, res) => {
                 $project: {
                     _id: 1,
                     job_order: '$jobOrderDetails.job_order_id',
+                    job_order_ref: '$job_order', // Keep the original ObjectId for queries
                     work_order_id: '$jobOrderDetails.work_order_number',
                     work_order_number: '$workOrderDetails.work_order_number',
                     semifinished_id: 1,
@@ -352,6 +353,7 @@ const getProductionsByProcess = asyncHandler(async (req, res) => {
                     rejected_quantity: '$product.rejected_quantity',
                     recycled_quantity: '$product.recycled_quantity',
                     process_name: 1,
+                    process_sequence: 1, // Add process_sequence to access previous process
                     date: 1,
                     status: 1,
                     created_by: '$createdByDetails.username',
@@ -378,11 +380,48 @@ const getProductionsByProcess = asyncHandler(async (req, res) => {
             });
         }
 
-        // 5. Return the filtered productions
+        // 5. For each production, fetch the previous process's achieved quantity
+        const enrichedProductions = await Promise.all(productions.map(async (prod) => {
+            let previousProcessAchievedQty = prod.po_quantity; // Default to PO quantity
+            
+            // Check if there's a previous process in the sequence
+            const previousProcessName = prod.process_sequence?.previous?.name;
+            console.log(`Processing ${prod.semifinished_id}: Current process=${prod.process_name}, Previous process=${previousProcessName}`);
+            
+            if (previousProcessName) {
+                // Find the production record for the same semifinished_id and previous process
+                // Use job_order_ref (ObjectId) instead of job_order (string)
+                const query = {
+                    job_order: prod.job_order_ref, // Use the ObjectId reference
+                    semifinished_id: prod.semifinished_id,
+                    'product.product_id': prod.product_id,
+                    process_name: { $regex: `^${previousProcessName}$`, $options: 'i' },
+                };
+                console.log(`Query for previous process:`, JSON.stringify(query));
+                
+                const previousProduction = await falconProduction.findOne(query).select('product.achieved_quantity').lean();
+                
+                console.log(`Previous production found for ${prod.semifinished_id}:`, previousProduction);
+                
+                if (previousProduction) {
+                    previousProcessAchievedQty = previousProduction.product?.achieved_quantity || prod.po_quantity;
+                    console.log(`Using previous achieved qty: ${previousProcessAchievedQty}`);
+                } else {
+                    console.log(`No previous production found, using PO quantity: ${prod.po_quantity}`);
+                }
+            }
+            
+            return {
+                ...prod,
+                previous_process_achieved_qty: previousProcessAchievedQty,
+            };
+        }));
+
+        // 6. Return the filtered productions
         return res.status(200).json({
             success: true,
             message: `Production records fetched successfully for process: ${process}`,
-            data: formatDateToIST(productions),
+            data: formatDateToIST(enrichedProductions),
         });
     } catch (error) {
         console.log('Error:', error);
@@ -2912,6 +2951,16 @@ const getProductionById = asyncHandler(async (req, res) => {
                         model: 'User',
                         select: 'username',
                     },
+                    {
+                        path: 'prod_issued_approved_by',
+                        model: 'Employee',
+                        select: 'name',
+                    },
+                    {
+                        path: 'prod_recieved_by',
+                        model: 'Employee',
+                        select: 'name',
+                    },
                 ],
             })
             .populate({
@@ -3049,6 +3098,10 @@ const getProductionById = asyncHandler(async (req, res) => {
                     createdBy: jobOrder.created_by?.username || 'N/A',
                     status: jobOrder.status || 'Pending',
                     file: jobOrder.files?.[0] || 'file', // Fallback to 'file' as in original
+                    productionRequestDate: formatDate(jobOrder.prod_requset_date) || 'N/A',
+                    productionRequirementDate: formatDate(jobOrder.prod_requirement_date) || 'N/A',
+                    issuedBy: jobOrder.prod_issued_approved_by?.name || 'N/A',
+                    receivedBy: jobOrder.prod_recieved_by?.name || 'N/A',
                 },
                 productDetails: {
                     productName: production.product.product_id?.name || 'N/A',

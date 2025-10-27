@@ -3499,10 +3499,32 @@ const deleteIronWorkOrder = asyncHandler(async (req, res) => {
         }
     }
 
-    // 4. Delete the document from MongoDB
+    // 4. Remove subtracted entries from Diameter records
+    const diametersWithSubtraction = await Diameter.find({
+        'subtracted.workOrderId': new mongoose.Types.ObjectId(workOrderId),
+        isDeleted: false,
+    });
+
+    if (diametersWithSubtraction && diametersWithSubtraction.length > 0) {
+        const diameterOps = diametersWithSubtraction.map((dia) => {
+            return {
+                updateOne: {
+                    filter: { _id: dia._id, isDeleted: false },
+                    update: {
+                        $pull: { subtracted: { workOrderId: new mongoose.Types.ObjectId(workOrderId) } },
+                    },
+                },
+            };
+        });
+        if (diameterOps.length) {
+            await Diameter.bulkWrite(diameterOps);
+        }
+    }
+
+    // 5. Delete the document from MongoDB
     await ironWorkOrder.findByIdAndDelete(workOrderId);
 
-    return res.status(200).json(new ApiResponse(200, null, 'Work order deleted and diameters restored successfully'));
+    return res.status(200).json(new ApiResponse(200, null, 'Work order deleted and quantities restored successfully'));
 });
 
 

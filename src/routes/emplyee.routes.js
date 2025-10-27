@@ -30,7 +30,8 @@ const factoryModules = {
         tabs: ["Cutting", "Machining", "Assembling", "Glass fixing / glazing"]
       },
       { name: "Packings", type: "standard" },
-      { name: "Dispatch", type: "standard" }
+      { name: "Dispatch", type: "standard" },
+      { name: "Users", type: "standard" }
     ]
   },
   "Konkrete Klinkers": {
@@ -46,7 +47,8 @@ const factoryModules = {
       { name: "Packing", type: "standard" },
       { name: "Dispatch", type: "standard" },
       { name: "Inventory", type: "standard" },
-      { name: "Stock Management", type: "standard" }
+      { name: "Stock Management", type: "standard" },
+      { name: "Users", type: "standard" }
     ]
   },
   "Iron Smith": {
@@ -60,7 +62,8 @@ const factoryModules = {
       },
       { name: "QC Check", type: "standard" },
       { name: "Packing", type: "standard" },
-      { name: "Dispatch", type: "standard" }
+      { name: "Dispatch", type: "standard" },
+      { name: "Users", type: "standard" }
     ]
   }
 };

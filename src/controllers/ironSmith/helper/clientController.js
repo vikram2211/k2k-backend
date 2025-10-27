@@ -103,32 +103,9 @@ const updateIronClient = asyncHandler(async (req, res) => {
 });
 
 // Fetch all clients
-// const getAllIronClients = asyncHandler(async (req, res) => {
-//   const clients = await ironClient.find({isDeleted:false})
-//     .populate('created_by', 'username email')
-//     .lean();
-
-//   if (!clients || clients.length === 0) {
-//     throw new ApiError(404, 'No clients available');
-//   }
-
-//   const formattedClients = formatDateToIST(clients);
-
-//   return sendResponse(res, new ApiResponse(200, formattedClients, 'Clients fetched successfully'));
-// });
-
-
 const getAllIronClients = asyncHandler(async (req, res) => {
-  const page = parseInt(req.query.page) || 1;
-  const limit = parseInt(req.query.limit) || 10;
-  const skip = (page - 1) * limit;
-
-  const totalClients = await ironClient.countDocuments({ isDeleted: false });
-
-  const clients = await ironClient.find({ isDeleted: false })
+  const clients = await ironClient.find({isDeleted:false})
     .populate('created_by', 'username email')
-    .skip(skip)
-    .limit(limit)
     .lean();
 
   if (!clients || clients.length === 0) {
@@ -137,15 +114,7 @@ const getAllIronClients = asyncHandler(async (req, res) => {
 
   const formattedClients = formatDateToIST(clients);
 
-  return sendResponse(res, new ApiResponse(200, {
-    clients: formattedClients,
-    pagination: {
-      total: totalClients,
-      page,
-      limit,
-      totalPages: Math.ceil(totalClients / limit),
-    },
-  }, 'Clients fetched successfully'));
+  return sendResponse(res, new ApiResponse(200, formattedClients, 'Clients fetched successfully'));
 });
 
 

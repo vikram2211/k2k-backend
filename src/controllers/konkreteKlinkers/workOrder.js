@@ -2598,7 +2598,7 @@ export const getProjectBasedOnClient = async (req, res, next) => {
     const clientId = req.query.clientId;
     // console.log("body",clientId);
 
-    let getProjectByClient = await Project.find({ client: clientId }).select({ name: 1 });
+    let getProjectByClient = await Project.find({ client: clientId, isDeleted:false }).select({ name: 1 });
     console.log("getProjectByClient", getProjectByClient);
 
     const validProjects = getProjectByClient.filter((project) => project.client !== null);

@@ -1162,6 +1162,9 @@ export const getJobOrdersByDate = async (req, res) => {
     // Group by DailyProduction to include all records
     const jobOrderProductMap = new Map();
 
+    // Track which job order product rows have been used (to handle duplicates correctly)
+    const usedJobOrderProducts = new Map(); // key: jobOrderId-productId-scheduledDate, value: array of used indices
+
     dailyProductions.forEach((dailyProduction) => {
       const jobOrder = dailyProduction.job_order;
       const jobOrderId = jobOrder?._id?.toString() || dailyProduction._id.toString();
@@ -1177,6 +1180,25 @@ export const getJobOrdersByDate = async (req, res) => {
             prod.product.toString() === productId &&
             new Date(prod.scheduled_date).getTime() === new Date(scheduledDate).getTime()
         );
+
+        // Determine which matching product to use based on DailyProduction creation order
+        const matchKey = `${jobOrderId}-${productId}-${new Date(scheduledDate).getTime()}`;
+        if (!usedJobOrderProducts.has(matchKey)) {
+          usedJobOrderProducts.set(matchKey, []);
+        }
+        const usedIndices = usedJobOrderProducts.get(matchKey);
+        
+        // Find the next unused job order product
+        let jobOrderProductIndex = 0;
+        for (let i = 0; i < matchingJobOrderProducts.length; i++) {
+          if (!usedIndices.includes(i)) {
+            jobOrderProductIndex = i;
+            usedIndices.push(i);
+            break;
+          }
+        }
+
+        const matchedJobOrderProduct = matchingJobOrderProducts?.[jobOrderProductIndex];
 
         // Find the corresponding product in the work order's products array to get po_quantity
         const workOrderProduct = jobOrder?.work_order?.products?.find(
@@ -1218,13 +1240,13 @@ export const getJobOrdersByDate = async (req, res) => {
           job_order_id: jobOrder?.job_order_id,
           product_id: dpProduct.product_id._id,
           plant_name: dpProduct.product_id?.plant?.plant_name || 'N/A',
-          machine_name: matchingJobOrderProducts?.[0]?.machine_name?.name || 'N/A',
+          machine_name: matchedJobOrderProduct?.machine_name?.name || 'N/A',
           material_code: dpProduct.product_id?.material_code || 'N/A',
           description: dpProduct.product_id?.description || 'N/A',
           po_quantity: workOrderProduct?.po_quantity || 0,
           qty_in_nos: workOrderProduct?.qty_in_nos || 0,
-          planned_quantity: matchingJobOrderProducts?.[0]?.planned_quantity || 0,
-          scheduled_date: matchingJobOrderProducts?.[0]?.scheduled_date || dailyProduction.date,
+          planned_quantity: matchedJobOrderProduct?.planned_quantity || 0,
+          scheduled_date: matchedJobOrderProduct?.scheduled_date || dailyProduction.date,
           achieved_quantity: dpProduct.achieved_quantity || 0,
           rejected_quantity: dpProduct.rejected_quantity || 0,
           recycled_quantity: dpProduct.recycled_quantity || 0,
@@ -4408,19 +4430,8 @@ export const handleDailyProductionActions = async (req, res) => {
       });
     }
 
-    const jobOrderProduct = jobOrder.products.find((product) =>
-      product.product.equals(product_id)
-    );
-    if (!jobOrderProduct) {
-      return res.status(400).json({
-        success: false,
-        message: 'Product ID not found in job order.',
-      });
-    }
-
-    const plannedQuantity = jobOrderProduct.planned_quantity;
-
     let dailyProduction;
+    let plannedQuantity;
 
     if (action === 'start') {
       // For 'start', either use provided prodId or create a new DailyProduction
@@ -4443,6 +4454,22 @@ export const handleDailyProductionActions = async (req, res) => {
             message: 'Production already started for this daily production.',
           });
         }
+
+        // Find the correct job order product by matching date and product_id
+        const dailyProductionDate = new Date(dailyProduction.date).toISOString();
+        const jobOrderProduct = jobOrder.products.find((product) =>
+          product.product.equals(product_id) &&
+          new Date(product.scheduled_date).toISOString() === dailyProductionDate
+        );
+        
+        if (!jobOrderProduct) {
+          return res.status(400).json({
+            success: false,
+            message: 'Matching product not found in job order for this production date.',
+          });
+        }
+
+        plannedQuantity = jobOrderProduct.planned_quantity;
 
         // Check achieved_quantity
         const dailyProduct = dailyProduction.products.find((p) =>
@@ -4562,6 +4589,22 @@ export const handleDailyProductionActions = async (req, res) => {
           message: `Daily production not found for prodId: ${prodId}.`,
         });
       }
+
+      // Find the correct job order product by matching date and product_id
+      const dailyProductionDate = new Date(dailyProduction.date).toISOString();
+      const jobOrderProduct = jobOrder.products.find((product) =>
+        product.product.equals(product_id) &&
+        new Date(product.scheduled_date).toISOString() === dailyProductionDate
+      );
+      
+      if (!jobOrderProduct) {
+        return res.status(400).json({
+          success: false,
+          message: 'Matching product not found in job order for this production date.',
+        });
+      }
+
+      plannedQuantity = jobOrderProduct.planned_quantity;
 
       // Check achieved_quantity
       const dailyProduct = dailyProduction.products.find((p) =>
@@ -5862,7 +5905,7 @@ export const getProductionLogByProduct2 = async (req, res) => {
 export const getProductionLogByProduct = async (req, res) => {
   try {
     console.log("came here.......123");
-    const { product_id, job_order } = req.query;
+    const { product_id, job_order, prodId } = req.query;
 
     // Validate input
     if (!product_id || !mongoose.isValidObjectId(product_id)) {
@@ -5873,9 +5916,17 @@ export const getProductionLogByProduct = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Valid job_order is required' });
     }
 
-    const query = { 'products.product_id': product_id };
-    if (job_order) {
-      query.job_order = job_order;
+    // If prodId is provided, query directly by DailyProduction _id (most specific)
+    const query = {};
+    if (prodId && mongoose.isValidObjectId(prodId)) {
+      query._id = prodId;
+      query['products.product_id'] = product_id;
+    } else {
+      // Fallback to old behavior for backward compatibility
+      query['products.product_id'] = product_id;
+      if (job_order) {
+        query.job_order = job_order;
+      }
     }
 
     // Fetch daily production records
