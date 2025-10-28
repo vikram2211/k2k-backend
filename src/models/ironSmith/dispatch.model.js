@@ -170,7 +170,7 @@ const ironDispatchSchema = new mongoose.Schema(
     },
     gate_pass_no: {
       type: String,
-      required: true,
+      required: false,
     },
     vehicle_number: {
       type: String,
