@@ -692,6 +692,10 @@ const createDispatch_07_10_2025 = asyncHandler(async (req, res, next) => {
 
 
 const createDispatch = asyncHandler(async (req, res, next) => {
+  // Start a MongoDB session for transaction
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
   try {
     let { products, invoice_or_sto, gate_pass_no, vehicle_number, ticket_number, date } = req.body;
 
@@ -700,11 +704,15 @@ const createDispatch = asyncHandler(async (req, res, next) => {
       try {
         products = JSON.parse(products);
       } catch (error) {
+        await session.abortTransaction();
+        session.endSession();
         return res.status(400).json(new ApiResponse(400, null, "Invalid products format"));
       }
     }
 
     if (!products || !products.length) {
+      await session.abortTransaction();
+      session.endSession();
       return res.status(400).json(new ApiResponse(400, null, "Products are required"));
     }
 
@@ -712,6 +720,8 @@ const createDispatch = asyncHandler(async (req, res, next) => {
     let workOrderId = null; // ensure we capture the related job order id
     for (const { object_id, dispatch_quantity, qr_code_id } of products) {
       if (!object_id || !dispatch_quantity || !qr_code_id) {
+        await session.abortTransaction();
+        session.endSession();
         return res.status(400).json(new ApiResponse(400, null, "Missing required fields for product"));
       }
 
@@ -719,9 +729,11 @@ const createDispatch = asyncHandler(async (req, res, next) => {
       const jobOrderProduct = await ironJobOrder.findOne(
         { "products._id": object_id },
         { "products.$": 1, work_order: 1 }
-      );
+      ).session(session);
 
       if (!jobOrderProduct) {
+        await session.abortTransaction();
+        session.endSession();
         return res.status(404).json(new ApiResponse(404, null, `Job Order product not found for object_id: ${object_id}`));
       }
 
@@ -731,11 +743,15 @@ const createDispatch = asyncHandler(async (req, res, next) => {
       if (!workOrderId) {
         workOrderId = jobOrderProduct.work_order; // use ironWorkOrder id
       } else if (String(workOrderId) !== String(jobOrderProduct.work_order)) {
+        await session.abortTransaction();
+        session.endSession();
         return res.status(400).json(new ApiResponse(400, null, `All products must belong to the same work order`));
       }
 
       // Check if the QR code matches
       if (product.qr_code_id !== qr_code_id) {
+        await session.abortTransaction();
+        session.endSession();
         return res.status(400).json(new ApiResponse(400, null, `QR code mismatch for object_id: ${object_id}`));
       }
 
@@ -743,9 +759,11 @@ const createDispatch = asyncHandler(async (req, res, next) => {
       const dailyProduction = await ironDailyProduction.findOne({
         job_order: jobOrderProduct._id,
         'products.object_id': object_id,
-      });
+      }).session(session);
 
       if (!dailyProduction) {
+        await session.abortTransaction();
+        session.endSession();
         return res.status(404).json(new ApiResponse(404, null, `Production record not found for object_id: ${object_id}`));
       }
 
@@ -754,11 +772,15 @@ const createDispatch = asyncHandler(async (req, res, next) => {
       );
 
       if (productionProduct.delivery_stage === 'Dispatched') {
+        await session.abortTransaction();
+        session.endSession();
         return res.status(400).json(new ApiResponse(400, null, `Product with object_id: ${object_id} is already dispatched`));
       }
 
       // Check if packed_quantity is sufficient
       if (product.packed_quantity < dispatch_quantity) {
+        await session.abortTransaction();
+        session.endSession();
         return res.status(400).json(new ApiResponse(400, null, `Insufficient packed quantity for object_id: ${object_id}`));
       }
     }
@@ -774,20 +796,22 @@ const createDispatch = asyncHandler(async (req, res, next) => {
             "products.$.packed_quantity": -dispatch_quantity,
             "products.$.dispatched_quantity": dispatch_quantity,
           },
-        }
+        },
+        { session }
       );
 
       // Update Daily Production: set delivery_stage to "Dispatched"
       await ironDailyProduction.findOneAndUpdate(
         { "products.object_id": object_id },
-        { $set: { "products.$.delivery_stage": "Dispatched" } }
+        { $set: { "products.$.delivery_stage": "Dispatched" } },
+        { session }
       );
 
       // Fetch product details again to enrich dispatch product (shape, etc.)
       const jobOrderProductForItem = await ironJobOrder.findOne(
         { "products._id": object_id },
         { "products.$": 1, work_order: 1 }
-      );
+      ).session(session);
       const joProduct = jobOrderProductForItem?.products?.[0];
 
       // Add to dispatch products with required fields in schema
@@ -819,8 +843,8 @@ const createDispatch = asyncHandler(async (req, res, next) => {
       }
     }
 
-    // Create dispatch record
-    const dispatch = await ironDispatch.create({
+    // Create dispatch record (THIS CAN FAIL due to validation)
+    const dispatch = await ironDispatch.create([{
       work_order: workOrderId,
       products: dispatchProducts,
       invoice_or_sto,
@@ -830,12 +854,20 @@ const createDispatch = asyncHandler(async (req, res, next) => {
       invoice_file: invoiceFileUrls,
       created_by: req.user?.id || req.user?._id,
       date: new Date(date),
-    });
+    }], { session });
 
-    res.status(201).json(new ApiResponse(201, dispatch, "Dispatch created successfully"));
+    // If everything succeeded, commit the transaction
+    await session.commitTransaction();
+    session.endSession();
+
+    res.status(201).json(new ApiResponse(201, dispatch[0], "Dispatch created successfully"));
   } catch (error) {
+    // If anything fails, rollback all changes
+    await session.abortTransaction();
+    session.endSession();
+    
     console.error('Error creating dispatch:', error);
-    res.status(500).json(new ApiResponse(500, null, "Internal Server Error", error.message));
+    res.status(500).json(new ApiResponse(500, null, "Failed to create dispatch", error.message));
   }
 });
 
