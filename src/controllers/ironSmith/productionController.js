@@ -1377,6 +1377,13 @@ const addIronDowntime = async (req, res, next) => {
       );
     }
 
+    // Validate that production has started before allowing downtime
+    if (!dailyProduction.started_at) {
+      return next(
+        new ApiError(400, 'Cannot add downtime. Production has not started yet.')
+      );
+    }
+
     const downtimeEntry = {
       downtime_start_time: parsedDowntimeStartTime || undefined,
       description,
