@@ -5393,8 +5393,10 @@ const updateInternalWorkOrder = asyncHandler(async (req, res) => {
         }, {});
         // Helper function to calculate total allocated quantity (excluding current IWO)
         async function getTotalAllocatedQty(jobOrderId, productId, code, excludeIwoId) {
+            // Ensure excludeIwoId is an ObjectId for proper comparison
+            const excludeId = new mongoose.Types.ObjectId(excludeIwoId);
             const result = await falconInternalWorkOrder.aggregate([
-                { $match: { job_order_id: jobOrderId, _id: { $ne: excludeIwoId } } },
+                { $match: { job_order_id: jobOrderId, _id: { $ne: excludeId } } },
                 { $unwind: "$products" },
                 {
                     $match: {
@@ -5500,9 +5502,9 @@ const updateInternalWorkOrder = asyncHandler(async (req, res) => {
                     p.code === product.code
                 );
                 const existingQty = existingProduct ? existingProduct.po_quantity : 0;
-                // Calculate the new total quantity: allocatedQty + (newQty - existingQty)
+                // Calculate the new total quantity: allocatedQty already excludes current IWO, so just add new qty
                 const newQty = parseInt(product.planned_quantity);
-                const totalQtyAfterUpdate = allocatedQty + (newQty - existingQty);
+                const totalQtyAfterUpdate = allocatedQty + newQty;
 
 
                 // Debug logs
@@ -5517,7 +5519,7 @@ const updateInternalWorkOrder = asyncHandler(async (req, res) => {
                         400,
                         `Cannot update quantity to ${newQty} for product ${product.code}. ` +
                         `Job Order Qty: ${jobOrderPoQuantity}, Allocated in other IWOs: ${allocatedQty}, ` +
-                        `Existing in this IWO: ${existingQty}, New total: ${totalQtyAfterUpdate}.`
+                        `Existing in this IWO: ${existingQty}, New total would be: ${totalQtyAfterUpdate}.`
                     );
                 }
             }
