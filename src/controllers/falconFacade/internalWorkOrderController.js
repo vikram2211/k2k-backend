@@ -17,6 +17,7 @@ import { ApiResponse } from '../../utils/ApiResponse.js';
 import { ApiError } from '../../utils/ApiError.js';
 import { falconInternalWorkOrderCounter } from '../../models/falconFacade/falconIWOcounter.model.js';
 import {falconQCCheck} from '../../models/falconFacade/falconQcCheck.model.js';
+import { falconPacking } from '../../models/falconFacade/falconPacking.model.js';
 import { updateJobOrderStatus } from './jobOrderController.js';
 
 
@@ -3560,10 +3561,47 @@ const getInternalWorkOrderById = asyncHandler(async (req, res) => {
                             };
                         }
 
+                        // Fetch packing quantities for this semi-finished product
+                        const packingRecords = await falconPacking.aggregate([
+                            {
+                                $match: {
+                                    semi_finished_id: semi.semifinished_id,
+                                    product: new mongoose.Types.ObjectId(internalProduct.product)
+                                }
+                            },
+                            {
+                                $group: {
+                                    _id: null,
+                                    total_packed_qty: {
+                                        $sum: {
+                                            $cond: [
+                                                { $eq: ["$delivery_stage", "Packed"] },
+                                                "$semi_finished_quantity",
+                                                0
+                                            ]
+                                        }
+                                    },
+                                    total_dispatched_qty: {
+                                        $sum: {
+                                            $cond: [
+                                                { $eq: ["$delivery_stage", "Dispatched"] },
+                                                "$semi_finished_quantity",
+                                                0
+                                            ]
+                                        }
+                                    }
+                                }
+                            }
+                        ]);
+
+                        const packingData = packingRecords[0] || { total_packed_qty: 0, total_dispatched_qty: 0 };
+
                         return {
                             ...semi,
                             achieved_qty: semiLevelAchieved,
                             rejected_qty: semiLevelRejected,
+                            packed_qty: packingData.total_packed_qty,
+                            dispatched_qty: packingData.total_dispatched_qty,
                             processes: processesWithDetails,
                         };
                     })
