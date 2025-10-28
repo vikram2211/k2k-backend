@@ -2861,8 +2861,8 @@ const getWorkOrderDetails = asyncHandler(async (req, res) => {
                 pipeline: [
                   {
                     $match: {
-                      $expr: { $eq: ['$job_order_id', '$$job_order_id'] },
-                      delivery_stage: 'Packed'
+                      $expr: { $eq: ['$job_order_id', '$$job_order_id'] }
+                      // Removed delivery_stage filter to count ALL packed records (Packed + Dispatched)
                     }
                   },
                   {
