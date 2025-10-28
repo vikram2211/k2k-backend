@@ -769,10 +769,16 @@ const updateQCCheck = asyncHandler(async (req, res) => {
       return res.status(400).json(new ApiResponse(400, null, 'Recycled quantity must be a non-negative number.'));
     }
   
+    // Start a transaction to ensure atomicity (same as create)
+    const session = await mongoose.startSession();
+    session.startTransaction();
+  
     try {
       // Find the existing QC check
-      const qcCheck = await ironQCCheck.findById(id);
+      const qcCheck = await ironQCCheck.findById(id).session(session);
       if (!qcCheck) {
+        await session.abortTransaction();
+        session.endSession();
         return res.status(404).json(new ApiResponse(404, null, 'QC check not found.'));
       }
   
@@ -780,40 +786,75 @@ const updateQCCheck = asyncHandler(async (req, res) => {
       const prevRejectedQuantity = qcCheck.rejected_quantity;
       const prevRecycledQuantity = qcCheck.recycled_quantity;
   
+      // Calculate incremental changes
+      const incrementRejected = (rejected_quantity !== undefined ? rejected_quantity : prevRejectedQuantity) - prevRejectedQuantity;
+      const incrementRecycled = (recycled_quantity !== undefined ? recycled_quantity : prevRecycledQuantity) - prevRecycledQuantity;
+  
+      // Find daily production document
+      const dailyProduction = await ironDailyProduction.findOne({ 'products.object_id': qcCheck.object_id }).session(session);
+      if (!dailyProduction) {
+        await session.abortTransaction();
+        session.endSession();
+        return res.status(404).json(new ApiResponse(404, null, 'Daily production document not found for this object_id.'));
+      }
+  
+      const productIndex = dailyProduction.products.findIndex(p => p.object_id.toString() === qcCheck.object_id.toString());
+      if (productIndex === -1) {
+        await session.abortTransaction();
+        session.endSession();
+        return res.status(404).json(new ApiResponse(404, null, 'object_id not found in the products array.'));
+      }
+  
+      const currentAchievedQuantity = dailyProduction.products[productIndex].achieved_quantity || 0;
+      const newRejectedQuantity = rejected_quantity !== undefined ? rejected_quantity : prevRejectedQuantity;
+      const newRecycledQuantity = recycled_quantity !== undefined ? recycled_quantity : prevRecycledQuantity;
+  
+      // Validate that new quantities don't exceed available achieved quantity
+      const totalNewDeduction = newRejectedQuantity + newRecycledQuantity;
+      const totalPreviousDeduction = prevRejectedQuantity + prevRecycledQuantity;
+      const netChange = totalNewDeduction - totalPreviousDeduction;
+  
+      if (currentAchievedQuantity - netChange < 0) {
+        await session.abortTransaction();
+        session.endSession();
+        return res.status(400).json(
+          new ApiResponse(
+            400,
+            null,
+            `Update would result in negative achieved quantity. Current achieved: ${currentAchievedQuantity}, attempting to add deduction of: ${netChange}`
+          )
+        );
+      }
+  
       // Update QC check fields
       if (rejected_quantity !== undefined) qcCheck.rejected_quantity = rejected_quantity;
       if (recycled_quantity !== undefined) qcCheck.recycled_quantity = recycled_quantity;
       if (remarks !== undefined) qcCheck.remarks = remarks;
       qcCheck.updated_by = req.user?._id;
-      await qcCheck.save();
+      await qcCheck.save({ session });
   
       // Update ironDailyProduction
-      const dailyProduction = await ironDailyProduction.findOne({ 'products.object_id': qcCheck.object_id });
-      if (dailyProduction) {
-        const productIndex = dailyProduction.products.findIndex(p => p.object_id.toString() === qcCheck.object_id.toString());
-        if (productIndex !== -1) {
-          // Calculate incremental changes
-          const incrementRejected = (rejected_quantity !== undefined ? rejected_quantity : prevRejectedQuantity) - prevRejectedQuantity;
-          const incrementRecycled = (recycled_quantity !== undefined ? recycled_quantity : prevRecycledQuantity) - prevRecycledQuantity;
+      dailyProduction.products[productIndex].rejected_quantity = qcCheck.rejected_quantity;
+      dailyProduction.products[productIndex].recycled_quantity = qcCheck.recycled_quantity;
+      dailyProduction.products[productIndex].achieved_quantity = currentAchievedQuantity - netChange;
+      dailyProduction.updated_by = req.user?._id;
+      dailyProduction.production_logs.push({
+        action: 'QCCheckUpdate',
+        user: req.user?._id,
+        rejected_quantity: qcCheck.rejected_quantity,
+        recycled_quantity: qcCheck.recycled_quantity,
+        description: remarks || 'QC check updated',
+      });
+      await dailyProduction.save({ session });
   
-          // Update production record
-          dailyProduction.products[productIndex].rejected_quantity = qcCheck.rejected_quantity;
-          dailyProduction.products[productIndex].recycled_quantity = qcCheck.recycled_quantity;
-          dailyProduction.products[productIndex].achieved_quantity -= incrementRejected; // Deduct incremental rejected qty
-          if (dailyProduction.products[productIndex].achieved_quantity < 0) {
-            return res.status(400).json(new ApiResponse(400, null, 'Update would result in negative achieved quantity.'));
-          }
-  
-          dailyProduction.updated_by = req.user?._id;
-          dailyProduction.production_logs.push({
-            action: 'QCCheckUpdate',
-            user: req.user?._id,
-            rejected_quantity: qcCheck.rejected_quantity,
-            recycled_quantity: qcCheck.recycled_quantity,
-            description: remarks || 'QC check updated',
-          });
-          await dailyProduction.save();
-        }
+      // Update job order's packed_quantity - adjust by the incremental rejected quantity (same as create)
+      const { ironJobOrder } = await import('../../models/ironSmith/jobOrders.model.js');
+      if (incrementRejected !== 0) {
+        await ironJobOrder.findOneAndUpdate(
+          { _id: qcCheck.job_order, "products._id": qcCheck.object_id },
+          { $inc: { "products.$.packed_quantity": -incrementRejected } },
+          { session }
+        );
       }
   
       // Populate response
@@ -823,12 +864,19 @@ const updateQCCheck = asyncHandler(async (req, res) => {
         .populate('job_order', 'job_order_number')
         .populate('shape_id', 'shape_code name')
         .populate('created_by', 'username email')
-        .lean();
+        .lean()
+        .session(session);
+  
+      // Commit the transaction
+      await session.commitTransaction();
+      session.endSession();
   
       return res.status(200).json(
         new ApiResponse(200, populatedQCCheck, 'QC check updated successfully.')
       );
     } catch (error) {
+      await session.abortTransaction();
+      session.endSession();
       console.error('Error updating QC check:', error);
       return res.status(500).json(new ApiResponse(500, null, 'Internal Server Error', error.message));
     }
