@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { QCCheck } from '../../models/konkreteKlinkers/qcCheck.model.js';
 import { JobOrder } from '../../models/konkreteKlinkers/jobOrders.model.js';
 import { DailyProduction } from '../../models/konkreteKlinkers/dailyProductionPlanning.js';
+import { Inventory } from '../../models/konkreteKlinkers/inventory.model.js';
 import mongoose from 'mongoose';
 
 // Helper for MongoDB ObjectId validation
@@ -531,7 +532,35 @@ export const addQcCheck = async (req, res) => {
     dailyProduction.updated_by = req.user._id;
     await dailyProduction.save();
 
-    // 6. Save QC check
+    // 6. Update inventory - produced_quantity should match achieved_quantity after QC deductions
+    const allDailyProductions = await DailyProduction.find({
+      work_order: dailyProduction.work_order,
+      'products.product_id': validatedData.product_id,
+    });
+
+    let totalAchievedQuantity = 0;
+    allDailyProductions.forEach((dp) => {
+      const product = dp.products.find((p) => p.product_id.equals(validatedData.product_id));
+      if (product) {
+        totalAchievedQuantity += product.achieved_quantity || 0;
+      }
+    });
+
+    const inventory = await Inventory.findOne({
+      work_order: dailyProduction.work_order,
+      product: validatedData.product_id,
+    });
+
+    if (inventory) {
+      inventory.produced_quantity = totalAchievedQuantity;
+      inventory.updated_by = req.user._id;
+      await inventory.save();
+      console.log(`✅ Inventory updated: produced_quantity = ${totalAchievedQuantity} for work_order: ${dailyProduction.work_order}, product: ${validatedData.product_id}`);
+    } else {
+      console.warn(`⚠️ Inventory record not found for work_order: ${dailyProduction.work_order}, product: ${validatedData.product_id}`);
+    }
+
+    // 7. Save QC check
     const qcCheck = new QCCheck(validatedData);
     await qcCheck.save();
 
@@ -1242,6 +1271,34 @@ export const updateQcCheck = async (req, res) => {
 
           dailyProduction.updated_by = req.user._id;
           await dailyProduction.save();
+
+          // Update inventory - produced_quantity should match achieved_quantity after QC deductions
+          const allDailyProductions = await DailyProduction.find({
+            work_order: dailyProduction.work_order,
+            'products.product_id': oldQcCheck.product_id,
+          });
+
+          let totalAchievedQuantity = 0;
+          allDailyProductions.forEach((dp) => {
+            const prod = dp.products.find((p) => p.product_id.equals(oldQcCheck.product_id));
+            if (prod) {
+              totalAchievedQuantity += prod.achieved_quantity || 0;
+            }
+          });
+
+          const inventory = await Inventory.findOne({
+            work_order: dailyProduction.work_order,
+            product: oldQcCheck.product_id,
+          });
+
+          if (inventory) {
+            inventory.produced_quantity = totalAchievedQuantity;
+            inventory.updated_by = req.user._id;
+            await inventory.save();
+            console.log(`✅ Inventory updated: produced_quantity = ${totalAchievedQuantity} for work_order: ${dailyProduction.work_order}, product: ${oldQcCheck.product_id}`);
+          } else {
+            console.warn(`⚠️ Inventory record not found for work_order: ${dailyProduction.work_order}, product: ${oldQcCheck.product_id}`);
+          }
         }
       }
     }
