@@ -177,7 +177,7 @@ export const getCombinedInventoryByProduct = async (req, res) => {
           total_packed_quantity: { $sum: '$packed_quantity' },
           total_dispatched_quantity: { $sum: '$dispatched_quantity' },
           total_available_stock: { $sum: '$available_stock' },
-          total_po_quantity: { $sum: '$workOrderDetails.products.po_quantity' },
+          total_po_quantity: { $sum: '$workOrderDetails.products.qty_in_nos' },
           work_orders: { $addToSet: '$work_order' },
         },
       },
@@ -379,7 +379,7 @@ export const getInventoryByProductId = async (req, res) => {
               ],
             },
           },
-          po_quantity: { $first: '$workOrderDetails.products.po_quantity' },
+          po_quantity: { $first: '$workOrderDetails.products.qty_in_nos' },
           client: {
             $first: {
               $cond: [
