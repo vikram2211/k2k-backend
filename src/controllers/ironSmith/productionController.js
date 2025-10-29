@@ -429,6 +429,14 @@ const getProductionData = asyncHandler(async (req, res) => {
         })
         .lean();
 
+  // 2.1. Transform color field to color_data in job_order
+  productions.forEach((production) => {
+    if (production.job_order && production.job_order.color) {
+      production.job_order.color_data = production.job_order.color;
+      delete production.job_order.color;
+    }
+  });
+
   // 3. Categorize based on Job Order's date_range
   const categorizedProductions = {
     pastDPR: [],
@@ -2584,6 +2592,12 @@ const getUpdatedProductionByObjectId = asyncHandler(async (req, res) => {
       return res.status(404).json(
         new ApiResponse(404, null, 'Production record not found')
       );
+    }
+
+    // Transform color field to color_data in job_order
+    if (production.job_order && production.job_order.color) {
+      production.job_order.color_data = production.job_order.color;
+      delete production.job_order.color;
     }
 
     // Find the specific product by object_id
