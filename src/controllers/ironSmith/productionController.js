@@ -364,11 +364,16 @@ const getProductionData = asyncHandler(async (req, res) => {
         })
         .populate({
           path: 'job_order',
-          select: 'job_order_number date_range',
+          select: 'job_order_number date_range color',
+          populate: {
+            path: 'color',
+            model: 'Color',
+            select: 'name code',
+          },
         })
         .populate({
           path: 'products.shape_id',
-          select: 'shape_code name',
+          select: 'shape_code name file',
         })
         .populate({
           path: 'products.machines',
@@ -403,11 +408,16 @@ const getProductionData = asyncHandler(async (req, res) => {
         })
         .populate({
           path: 'job_order',
-          select: 'job_order_number date_range',
+          select: 'job_order_number date_range color',
+          populate: {
+            path: 'color',
+            model: 'Color',
+            select: 'name code',
+          },
         })
         .populate({
           path: 'products.shape_id',
-          select: 'shape_code name',
+          select: 'shape_code name file',
         })
         .populate({
           path: 'products.machines',
@@ -2549,11 +2559,16 @@ const getUpdatedProductionByObjectId = asyncHandler(async (req, res) => {
     })
     .populate({
       path: 'job_order',
-      select: 'job_order_number date_range',
+      select: 'job_order_number date_range color',
+      populate: {
+        path: 'color',
+        model: 'Color',
+        select: 'name code',
+      },
     })
     .populate({
       path: 'products.shape_id',
-      select: 'shape_code name',
+      select: 'shape_code name file',
     })
     .populate({
       path: 'products.machines',
