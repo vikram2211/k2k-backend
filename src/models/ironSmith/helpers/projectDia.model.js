@@ -11,7 +11,6 @@ const diameterSchema = new mongoose.Schema(
     value: {
       type: Number,
       required: true,
-        unique: true, 
     },
     // type: {
     //   type: String,
@@ -40,5 +39,9 @@ const diameterSchema = new mongoose.Schema(
     timestamps: true,
   }
 );
+
+// Compound unique index: same diameter value can exist for different projects
+// But prevents duplicate diameter values within the same project
+diameterSchema.index({ project: 1, value: 1 }, { unique: true });
 
 export const Diameter = mongoose.model('Diameter', diameterSchema);
