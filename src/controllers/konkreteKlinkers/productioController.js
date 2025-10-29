@@ -4301,7 +4301,7 @@ const simulateProductionCounts = async (job_order, product_id, prodId) => {
     // Check if product has manual flag enabled
     const product = await Product.findById(product_id);
     if (product && product.manual === true) {
-      console.log(`Product ${product_id} has manual update enabled. Skipping auto-update.`);
+      // console.log(`Product ${product_id} has manual update enabled. Skipping auto-update.`);
       return; // Don't auto-update if manual flag is true
     }
 
@@ -4411,28 +4411,51 @@ const simulateProductionCounts = async (job_order, product_id, prodId) => {
 };
 
 // Helper function to update inventory
-const updateInventory = async (work_order, product_id, updated_by) => {
-  const allDailyProductions = await DailyProduction.find({
-    work_order,
-    'products.product_id': product_id,
-  });
-
-  let totalAchievedQuantity = 0;
-  allDailyProductions.forEach((dp) => {
-    const product = dp.products.find((p) => p.product_id.equals(product_id));
-    if (product) {
-      totalAchievedQuantity += product.achieved_quantity;
+const updateInventory = async (work_order, product_id, updated_by, session = null) => {
+  try {
+    const queryOptions = session ? { session } : {};
+    
+    let dailyProductionsQuery = DailyProduction.find({
+      work_order,
+      'products.product_id': product_id,
+    });
+    
+    if (session) {
+      dailyProductionsQuery = dailyProductionsQuery.session(session);
     }
-  });
+    
+    const allDailyProductions = await dailyProductionsQuery;
 
-  const inventory = await Inventory.findOne({
-    work_order,
-    product: product_id,
-  });
-  if (inventory) {
-    inventory.produced_quantity = totalAchievedQuantity;
-    inventory.updated_by = updated_by;
-    await inventory.save();
+    let totalAchievedQuantity = 0;
+    allDailyProductions.forEach((dp) => {
+      const product = dp.products.find((p) => p.product_id.equals(product_id));
+      if (product) {
+        totalAchievedQuantity += product.achieved_quantity;
+      }
+    });
+
+    let inventoryQuery = Inventory.findOne({
+      work_order,
+      product: product_id,
+    });
+    
+    if (session) {
+      inventoryQuery = inventoryQuery.session(session);
+    }
+    
+    const inventory = await inventoryQuery;
+    
+    if (inventory) {
+      inventory.produced_quantity = totalAchievedQuantity;
+      inventory.updated_by = updated_by;
+      await inventory.save(queryOptions);
+      console.log(`✅ Inventory updated: produced_quantity = ${totalAchievedQuantity} for work_order: ${work_order}, product: ${product_id}`);
+    } else {
+      console.error(`❌ Inventory record NOT FOUND for work_order: ${work_order}, product: ${product_id}`);
+    }
+  } catch (error) {
+    console.error(`❌ Error in updateInventory: ${error.message}`);
+    throw error;
   }
 };
 
