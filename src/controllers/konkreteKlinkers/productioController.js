@@ -7,6 +7,7 @@ import { updateJobOrderStatus } from './jobOrderController.js';
 
 import { parse, addMinutes } from 'date-fns';
 import { ApiError } from '../../utils/ApiError.js';
+import { Product } from "../../models/konkreteKlinkers/product.model.js";
 
 //WORKING CODE -
 
@@ -525,7 +526,7 @@ export const getJobOrdersByDate_13_08_2025 = async (req, res) => {
       })
       .populate({
         path: 'products.product_id',
-        select: 'material_code description plant',
+        select: 'material_code description plant manual',
         populate: {
           path: 'plant',
           select: 'plant_name',
@@ -735,7 +736,7 @@ export const getJobOrdersByDate_19_08_2025 = async (req, res) => {
       })
       .populate({
         path: 'products.product_id',
-        select: 'material_code description plant',
+        select: 'material_code description plant manual',
         populate: {
           path: 'plant',
           select: 'plant_name',
@@ -942,7 +943,7 @@ export const getJobOrdersByDate_21_08_2025 = async (req, res) => {
       })
       .populate({
         path: 'products.product_id',
-        select: 'material_code description plant',
+        select: 'material_code description plant manual',
         populate: {
           path: 'plant',
           select: 'plant_name',
@@ -1153,7 +1154,7 @@ export const getJobOrdersByDate = async (req, res) => {
       })
       .populate({
         path: 'products.product_id',
-        select: 'material_code description plant',
+        select: 'material_code description plant manual',
         populate: {
           path: 'plant',
           select: 'plant_name',
@@ -1256,6 +1257,7 @@ export const getJobOrdersByDate = async (req, res) => {
           started_at,
           stopped_at,
           submitted_by: dpProduct.submitted_by || null,
+          product_manual: dpProduct.product_id?.manual || false, // Check if product has manual update enabled
           daily_production: {
             _id: dailyProduction._id, // Production ID for uniqueness
             status: dailyProduction.status,
@@ -4295,6 +4297,13 @@ export const handleDailyProductionActions_18_08_2025 = async (req, res) => {
 
 const simulateProductionCounts = async (job_order, product_id, prodId) => {
   try {
+    // Check if product has manual flag enabled
+    const product = await Product.findById(product_id);
+    if (product && product.manual === true) {
+      console.log(`Product ${product_id} has manual update enabled. Skipping auto-update.`);
+      return; // Don't auto-update if manual flag is true
+    }
+
     // Find the specific DailyProduction document using prodId
     const dailyProduction = await DailyProduction.findOne({
       _id: prodId,
@@ -6264,7 +6273,7 @@ export const getUpdatedProductProduction_20_08_2025 = async (req, res) => {
       .populate({
         // details for the **DailyProduction** products array
         path: 'products.product_id',
-        select: 'material_code description plant',
+        select: 'material_code description plant manual',
         populate: { path: 'plant', select: 'plant_name' },
       })
       .lean();
@@ -6400,7 +6409,7 @@ export const getUpdatedProductProduction = async (req, res) => {
       })
       .populate({
         path: 'products.product_id',
-        select: 'material_code description plant',
+        select: 'material_code description plant manual',
         populate: { path: 'plant', select: 'plant_name' },
       })
       .lean();
@@ -6533,14 +6542,14 @@ export const getUpdatedProductProduction_18_08_2025 = async (req, res) => {
           },
           {
             path: 'products.product', // Populate product details from JobOrder.products
-            select: 'material_code description plant',
+            select: 'material_code description plant manual',
             populate: { path: 'plant', select: 'plant_name' },
           },
         ],
       })
       .populate({
         path: 'products.product_id',
-        select: 'material_code description plant',
+        select: 'material_code description plant manual',
         populate: { path: 'plant', select: 'plant_name' },
       })
       .lean();
@@ -6691,7 +6700,7 @@ export const getUpdatedProductProduction_18_08_2025 = async (req, res) => {
 //       })
 //       .populate({
 //         path: 'products.product_id',
-//         select: 'material_code description plant',
+//         select: 'material_code description plant manual',
 //         populate: { path: 'plant', select: 'plant_name' },
 //       })
 //       .lean();
@@ -6809,3 +6818,166 @@ export const getUpdatedProductProduction_18_08_2025 = async (req, res) => {
 //     });
 //   }
 // };
+
+
+// Manual quantity update function (like Iron Smith)
+export const updateProductionQuantityManually = async (req, res, next) => {
+  const { prodId, job_order, product_id, achieved_quantity } = req.body;
+
+  if (!prodId || !job_order || !product_id || achieved_quantity === undefined) {
+    return res.status(400).json({
+      success: false,
+      message: 'Missing required fields: prodId, job_order, product_id, and achieved_quantity are required.',
+    });
+  }
+
+  // Start a transaction to ensure atomicity
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    // Check if product has manual flag enabled
+    const product = await Product.findById(product_id).session(session);
+    if (!product || product.manual !== true) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({
+        success: false,
+        message: 'Manual update is not enabled for this product.',
+      });
+    }
+
+    // Find the DailyProduction document
+    const dailyProduction = await DailyProduction.findOne({
+      _id: prodId,
+      job_order,
+      'products.product_id': product_id,
+    }).session(session);
+
+    if (!dailyProduction) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(404).json({
+        success: false,
+        message: 'Daily production record not found.',
+      });
+    }
+
+    // Check if production has started
+    if (!dailyProduction.started_at) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({
+        success: false,
+        message: 'Cannot update quantity. Production has not started yet.',
+      });
+    }
+
+    // Find the JobOrder to get the planned_quantity
+    const jobOrder = await JobOrder.findById(job_order).session(session);
+    if (!jobOrder) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(404).json({
+        success: false,
+        message: 'Job order not found.',
+      });
+    }
+
+    const jobOrderProduct = jobOrder.products.find((product) =>
+      product.product.equals(product_id)
+    );
+    if (!jobOrderProduct) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({
+        success: false,
+        message: 'Product not found in job order.',
+      });
+    }
+
+    const plannedQuantity = jobOrderProduct.planned_quantity;
+
+    // Validate that quantity to add is not negative
+    if (achieved_quantity < 0) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({
+        success: false,
+        message: 'Quantity to add cannot be negative.',
+      });
+    }
+
+    // Find and update the product in DailyProduction
+    const productIndex = dailyProduction.products.findIndex((p) =>
+      p.product_id.equals(product_id)
+    );
+
+    if (productIndex === -1) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(404).json({
+        success: false,
+        message: 'Product not found in daily production.',
+      });
+    }
+
+    const currentQuantity = dailyProduction.products[productIndex].achieved_quantity || 0;
+    const newTotalQuantity = currentQuantity + achieved_quantity;
+    
+    // Validate that new total doesn't exceed planned quantity
+    if (newTotalQuantity > plannedQuantity) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({
+        success: false,
+        message: `Total achieved quantity (${newTotalQuantity}) cannot exceed planned quantity (${plannedQuantity}). Current: ${currentQuantity}, Adding: ${achieved_quantity}`,
+      });
+    }
+    
+    dailyProduction.products[productIndex].achieved_quantity = newTotalQuantity;
+    dailyProduction.updated_by = req.user._id;
+    dailyProduction.production_logs.push({
+      action: 'UpdateQuantity',
+      timestamp: new Date(),
+      user: req.user._id,
+      description: `Manually added ${achieved_quantity} quantity (from ${currentQuantity} to ${newTotalQuantity})`,
+    });
+    
+    // Auto-change status to 'Pending QC' if achieved quantity reaches or exceeds planned quantity
+    if (newTotalQuantity >= plannedQuantity && (dailyProduction.status === 'In Progress' || dailyProduction.status === 'Paused')) {
+      dailyProduction.status = 'Pending QC';
+      dailyProduction.stopped_at = new Date();
+      dailyProduction.production_logs.push({
+        action: 'Stop',
+        timestamp: new Date(),
+        user: req.user._id,
+        description: `Production auto-completed after reaching planned quantity (${newTotalQuantity}/${plannedQuantity})`,
+      });
+    }
+
+    await dailyProduction.save({ session });
+
+    // Update inventory
+    await updateInventory(dailyProduction.work_order, product_id, req.user._id, session);
+
+    // Commit the transaction
+    await session.commitTransaction();
+    session.endSession();
+
+    return res.status(200).json({
+      success: true,
+      message: 'Production quantity updated successfully.',
+      data: dailyProduction,
+    });
+  } catch (error) {
+    await session.abortTransaction();
+    session.endSession();
+    console.error('Error updating production quantity manually:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Internal Server Error',
+      error: error.message,
+    });
+  }
+};

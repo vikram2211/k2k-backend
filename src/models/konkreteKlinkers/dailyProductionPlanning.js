@@ -269,7 +269,7 @@ const dailyProductionSchema = new mongoose.Schema(
       {
         action: {
           type: String,
-          enum: ['Start', 'Pause', 'Resume', 'Stop'],
+          enum: ['Start', 'Pause', 'Resume', 'Stop', 'UpdateQuantity'],
           required: true,
         },
         timestamp: {

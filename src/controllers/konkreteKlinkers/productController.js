@@ -263,6 +263,11 @@ const productSchema = Joi.object({
     status: Joi.string()
         .valid('Active', 'Inactive')
         .default('Active'),
+    manual: Joi.boolean()
+        .default(false)
+        .messages({
+            'boolean.base': 'Manual must be a boolean value',
+        }),
 });
 
 const createProduct = asyncHandler(async (req, res, next) => {
@@ -285,6 +290,7 @@ const createProduct = asyncHandler(async (req, res, next) => {
         no_of_pieces_per_punch,
         qty_in_bundle,
         status,
+        manual,
     } = value;
 
     // Check for duplicate material_code
@@ -319,6 +325,7 @@ const createProduct = asyncHandler(async (req, res, next) => {
         qty_in_bundle,
         created_by,
         status,
+        manual: manual || false,
     });
 
     return res.status(201).json(new ApiResponse(201, newProduct, 'Product created successfully'));

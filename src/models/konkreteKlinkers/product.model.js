@@ -305,6 +305,10 @@ const productSchema = new mongoose.Schema(
             type: Boolean,
             default: false,
         },
+        manual: {
+            type: Boolean,
+            default: false, // false = auto update, true = manual update
+        },
     },
     {
         timestamps: true,

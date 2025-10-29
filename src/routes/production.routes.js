@@ -10,7 +10,8 @@ import {
     getProductionLogByProduct,
     getUpdatedProductProduction,
     updateDowntime,
-    getKKMonthlyProductionCounts
+    getKKMonthlyProductionCounts,
+    updateProductionQuantityManually
 } from '../controllers/konkreteKlinkers/productioController.js';
 
 const router = Router();
@@ -22,6 +23,7 @@ router.route('/production/downtime').post(addDowntime).get(getDowntimeByProduct)
 router.route('/production/downtime/edit/:prodId/:downtimeId').patch(updateDowntime);
 // router.route('/production/action').post(handleDailyProductionAction);
 router.route('/production/action').post(handleDailyProductionActions);
+router.route('/production/manual-update').post(updateProductionQuantityManually);
 // Simple monthly counts endpoint for dashboard
 router.route('/production/monthly-counts').get(getKKMonthlyProductionCounts);
 
