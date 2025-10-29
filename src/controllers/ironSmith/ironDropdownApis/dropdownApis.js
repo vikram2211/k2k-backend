@@ -413,8 +413,9 @@ const getRawMaterialDataByProjectId_23_09_2025 = async (req, res) => {
 
 const getRawMaterialDataByProjectId = async (req, res) => {
   const { projectId } = req.params;
-  const { groupByType } = req.query; // Optional query param to group by type
+  const { groupByType, workOrderId } = req.query; // Optional query params
   console.log("projectId", projectId);
+  console.log("workOrderId", workOrderId);
 
   // Validate projectId
   if (!mongoose.Types.ObjectId.isValid(projectId)) {
@@ -430,13 +431,30 @@ const getRawMaterialDataByProjectId = async (req, res) => {
 
       // Fetch raw materials for the given project ID, excluding deleted ones
       const rawMaterials = await RawMaterial.find({ project: projectId, isDeleted: false })
-          .select('diameter type qty')
+          .select('diameter type qty consumptionHistory')
           .lean();
       console.log("rawMaterials", rawMaterials);
 
       // If no raw materials are found, return an empty array
       if (!rawMaterials || rawMaterials.length === 0) {
           return res.status(200).json({ success: true, rawMaterialData: [], message: "No raw material data found for the given project ID" });
+      }
+
+      // If workOrderId is provided (for update scenario), add back the consumed quantities
+      if (workOrderId) {
+          console.log("Adding back consumed quantities for work order:", workOrderId);
+          rawMaterials.forEach((material) => {
+              if (material.consumptionHistory && material.consumptionHistory.length > 0) {
+                  const consumedByThisWorkOrder = material.consumptionHistory
+                      .filter((history) => history.workOrderId && history.workOrderId.toString() === workOrderId)
+                      .reduce((sum, history) => sum + (history.quantity || 0), 0);
+                  
+                  if (consumedByThisWorkOrder > 0) {
+                      console.log(`Adding back ${consumedByThisWorkOrder} kg for diameter ${material.diameter}`);
+                      material.qty += consumedByThisWorkOrder;
+                  }
+              }
+          });
       }
 
       // Group quantities
