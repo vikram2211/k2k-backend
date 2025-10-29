@@ -316,6 +316,12 @@ const dailyProductionSchema = new mongoose.Schema(
       ref: 'User',
       required: false,
     },
+    manual_override: {
+      type: Boolean,
+      default: false,
+      // Allows manual quantity updates even when product.manual is false
+      // Used as fallback when IoT/API stops working
+    },
   },
   { timestamps: true }
 );

@@ -11,7 +11,8 @@ import {
     getUpdatedProductProduction,
     updateDowntime,
     getKKMonthlyProductionCounts,
-    updateProductionQuantityManually
+    updateProductionQuantityManually,
+    toggleManualOverride
 } from '../controllers/konkreteKlinkers/productioController.js';
 
 const router = Router();
@@ -24,6 +25,7 @@ router.route('/production/downtime/edit/:prodId/:downtimeId').patch(updateDownti
 // router.route('/production/action').post(handleDailyProductionAction);
 router.route('/production/action').post(handleDailyProductionActions);
 router.route('/production/manual-update').post(updateProductionQuantityManually);
+router.route('/production/toggle-manual-override').post(toggleManualOverride);
 // Simple monthly counts endpoint for dashboard
 router.route('/production/monthly-counts').get(getKKMonthlyProductionCounts);
 

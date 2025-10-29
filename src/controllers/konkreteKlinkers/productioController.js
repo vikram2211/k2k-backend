@@ -1258,6 +1258,7 @@ export const getJobOrdersByDate = async (req, res) => {
           stopped_at,
           submitted_by: dpProduct.submitted_by || null,
           product_manual: dpProduct.product_id?.manual || false, // Check if product has manual update enabled
+          manual_override: dailyProduction.manual_override || false, // Check if manual override is enabled for this production session
           daily_production: {
             _id: dailyProduction._id, // Production ID for uniqueness
             status: dailyProduction.status,
@@ -4311,6 +4312,12 @@ const simulateProductionCounts = async (job_order, product_id, prodId) => {
       'products.product_id': product_id,
     });
 
+    // Check if manual_override is enabled for this production session
+    if (dailyProduction && dailyProduction.manual_override === true) {
+      console.log(`Production ${prodId} has manual_override enabled. Skipping auto-update.`);
+      return; // Don't auto-update if manual_override is true
+    }
+
     if (!dailyProduction) {
       console.error(`DailyProduction not found for _id: ${prodId}, job_order: ${job_order}, product_id: ${product_id}`);
       return;
@@ -6342,6 +6349,8 @@ export const getUpdatedProductProduction_20_08_2025 = async (req, res) => {
       started_at,
       stopped_at,
       submitted_by: dp.submitted_by || null,
+      product_manual: dpProduct.product_id?.manual || false,
+      manual_override: dp.manual_override || false,
       daily_production: {
         _id: dp._id,
         status: dp.status,
@@ -6478,6 +6487,8 @@ export const getUpdatedProductProduction = async (req, res) => {
       started_at,
       stopped_at,
       submitted_by: dp.submitted_by || null,
+      product_manual: dpProduct.product_id?.manual || false,
+      manual_override: dp.manual_override || false,
       daily_production: {
         _id: dp._id,
         status: dp.status,
@@ -6621,6 +6632,8 @@ export const getUpdatedProductProduction_18_08_2025 = async (req, res) => {
       started_at,
       stopped_at,
       submitted_by: dp.submitted_by || null,
+      product_manual: dpProduct.product_id?.manual || false,
+      manual_override: dp.manual_override || false,
       daily_production: {
         _id: dp._id,
         status: dp.status,
@@ -6838,12 +6851,12 @@ export const updateProductionQuantityManually = async (req, res, next) => {
   try {
     // Check if product has manual flag enabled
     const product = await Product.findById(product_id).session(session);
-    if (!product || product.manual !== true) {
+    if (!product) {
       await session.abortTransaction();
       session.endSession();
-      return res.status(400).json({
+      return res.status(404).json({
         success: false,
-        message: 'Manual update is not enabled for this product.',
+        message: 'Product not found.',
       });
     }
 
@@ -6870,6 +6883,16 @@ export const updateProductionQuantityManually = async (req, res, next) => {
       return res.status(400).json({
         success: false,
         message: 'Cannot update quantity. Production has not started yet.',
+      });
+    }
+
+    // Check if manual update is allowed (either product.manual OR dailyProduction.manual_override)
+    if (product.manual !== true && dailyProduction.manual_override !== true) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({
+        success: false,
+        message: 'Manual update is not enabled for this product. Switch to manual mode first.',
       });
     }
 
@@ -6981,3 +7004,83 @@ export const updateProductionQuantityManually = async (req, res, next) => {
     });
   }
 };
+
+// Toggle manual_override for a production session (fallback when IoT fails)
+const toggleManualOverride = async (req, res, next) => {
+  const { prodId, enable } = req.body;
+
+  if (!prodId) {
+    return res.status(400).json({
+      success: false,
+      message: 'Production ID (prodId) is required.',
+    });
+  }
+
+  if (typeof enable !== 'boolean') {
+    return res.status(400).json({
+      success: false,
+      message: 'Enable flag must be a boolean value.',
+    });
+  }
+
+  try {
+    const dailyProduction = await DailyProduction.findById(prodId);
+
+    if (!dailyProduction) {
+      return res.status(404).json({
+        success: false,
+        message: 'Daily production record not found.',
+      });
+    }
+
+    // Check if production has started
+    if (!dailyProduction.started_at) {
+      return res.status(400).json({
+        success: false,
+        message: 'Cannot toggle manual mode. Production has not started yet.',
+      });
+    }
+
+    // Check if production is already completed
+    if (dailyProduction.status === 'Pending QC' || dailyProduction.status === 'Approved') {
+      return res.status(400).json({
+        success: false,
+        message: 'Cannot toggle manual mode. Production is already completed.',
+      });
+    }
+
+    // Update manual_override
+    dailyProduction.manual_override = enable;
+    dailyProduction.updated_by = req.user._id;
+    dailyProduction.production_logs.push({
+      action: 'UpdateQuantity',
+      timestamp: new Date(),
+      user: req.user._id,
+      description: enable 
+        ? 'Switched to manual mode (IoT fallback)' 
+        : 'Switched back to automatic mode',
+    });
+
+    await dailyProduction.save();
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        prodId: dailyProduction._id,
+        manual_override: dailyProduction.manual_override,
+      },
+      message: enable 
+        ? 'Successfully switched to manual mode. You can now update quantities manually.' 
+        : 'Successfully switched back to automatic mode.',
+    });
+  } catch (error) {
+    console.error('Error toggling manual override:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Internal Server Error',
+      error: error.message,
+    });
+  }
+};
+
+export { toggleManualOverride };

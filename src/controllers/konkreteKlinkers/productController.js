@@ -564,6 +564,12 @@ const updateProductSchema = Joi.object({
         .messages({
             'any.only': 'Status must be either "Active" or "Inactive"',
         }),
+    manual: Joi.boolean()
+        .optional()
+        .default(false)
+        .messages({
+            'boolean.base': 'Manual must be a boolean value',
+        }),
 });
 
 
@@ -585,6 +591,7 @@ const updateProduct = asyncHandler(async (req, res, next) => {
         no_of_pieces_per_punch,
         qty_in_bundle,
         status,
+        manual,
     } = value;
 
     // Check if product exists
@@ -611,6 +618,7 @@ const updateProduct = asyncHandler(async (req, res, next) => {
         ...(no_of_pieces_per_punch !== undefined && { no_of_pieces_per_punch }),
         ...(qty_in_bundle !== undefined && { qty_in_bundle }),
         ...(status && { status }),
+        ...(manual !== undefined && { manual }),
         updated_by: req.user._id,
     };
 
