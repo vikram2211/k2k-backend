@@ -361,8 +361,8 @@ export const createPackingBundles = async (req, res) => {
       const numberOfBundles = remainingItems > 0 ? Math.max(1, fullBundles) : fullBundles;
       console.log("numberOfBundles",numberOfBundles);
 
-      // 8. Generate Packing documents for each bundle
-      const packingDocuments = [];
+      // 8. Generate bundle data with auto-generated QR IDs (NO DATABASE RECORDS YET)
+      const bundleData = [];
       let itemsAssigned = 0;
 
       for (let i = 0; i < numberOfBundles; i++) {
@@ -375,16 +375,27 @@ export const createPackingBundles = async (req, res) => {
               bundleQuantity = product_quantity - itemsAssigned;
           }
 
-          const packing = {
+          // Generate unique QR ID: 6-digit random + timestamp (ensures uniqueness)
+          const randomPart = Math.floor(100000 + Math.random() * 900000); // 6-digit random number
+          const timestampPart = Date.now().toString().slice(-6); // Last 6 digits of timestamp
+          const uniqueQrId = `${randomPart}${timestampPart}`; // 12-digit unique ID
+          
+          // Add tiny delay to ensure timestamp changes for next iteration
+          if (i < numberOfBundles - 1) {
+              await new Promise(resolve => setTimeout(resolve, 1));
+          }
+
+          const bundle = {
               work_order: validatedData.work_order || null,
               product: validatedData.product,
               product_quantity: bundleQuantity,
               bundle_size: validatedData.bundle_size,
               uom: validatedData.uom,
               packed_by: userId,
+              qr_id: uniqueQrId, // Auto-generated QR ID
           };
 
-          packingDocuments.push(packing);
+          bundleData.push(bundle);
           itemsAssigned += bundleQuantity;
       }
 
@@ -396,23 +407,17 @@ export const createPackingBundles = async (req, res) => {
           });
       }
 
-      // console.log('packingDocuments', packingDocuments);
-
-      // 9. Save all Packing documents
-      const savedPackings = await Packing.insertMany(packingDocuments, { ordered: false });
-      // console.log("came here...");
-
-      // 10. Calculate balance quantity
+      // 9. Calculate balance quantity
       const balanceQuantity = totalAchievedQuantity - totalPackedQuantity - product_quantity;
 
-      // 11. Return success response with balance quantity details
-      return res.status(201).json({
+      // 10. Return bundle data with auto-generated QR IDs (NOT saved to database yet)
+      return res.status(200).json({
           success: true,
-          message: `Created ${numberOfBundles} packing bundles successfully`,
+          message: `Generated ${numberOfBundles} bundles with auto-generated QR IDs. Review and submit to create packing.`,
           total_achieved_quantity: totalAchievedQuantity,
           total_packed_quantity: totalPackedQuantity,
           balance_quantity: balanceQuantity,
-          data: savedPackings,
+          data: bundleData, // Return bundle data without saving to DB
       });
   } catch (error) {
       // Handle Zod validation errors
@@ -511,14 +516,21 @@ export const createPackingBundles = async (req, res) => {
 // }
 
 const createPackingSchema = z.object({
-    packings: z.array(
+    bundles: z.array(
       z.object({
-        packing_id: z.string().refine((val) => mongoose.isValidObjectId(val), {
-          message: 'Invalid packing ID',
+        work_order: z.string().optional(),
+        product: z.string().refine((val) => mongoose.isValidObjectId(val), {
+          message: 'Invalid product ID',
         }),
-        qrCodeId: z.string().min(1, 'QR code ID is required'),
+        product_quantity: z.number().positive('Product quantity must be positive'),
+        bundle_size: z.number().positive('Bundle size must be positive'),
+        uom: z.string().min(1, 'UOM is required'),
+        packed_by: z.string().refine((val) => mongoose.isValidObjectId(val), {
+          message: 'Invalid packed_by ID',
+        }),
+        qr_id: z.string().min(1, 'QR ID is required'),
       })
-    ).min(1, 'At least one packing record is required'),
+    ).min(1, 'At least one bundle is required'),
   }).strict();
   
   export const createPacking = async (req, res) => {
@@ -534,34 +546,43 @@ const createPackingSchema = z.object({
   
       // 2. Validate input
       const validatedData = createPackingSchema.parse(req.body);
-      const { packings } = validatedData;
+      const { bundles } = validatedData;
   
-      // 3. Process each packing record
-      const updatedPackings = [];
+      // 3. Process each bundle and create packing records
+      const createdPackings = [];
       const errors = [];
   
-      for (const { packing_id, qrCodeId } of packings) {
+      for (const bundle of bundles) {
         try {
-          const packing = await Packing.findById(packing_id);
-          // .session(session);
-        if (!packing) {
-          throw new Error('Packing record not found');
-        }
-          // Generate QR code
+          // Generate QR code image
           let qrCodeBuffer;
           try {
-            qrCodeBuffer = await QRCode.toBuffer(qrCodeId, {
+            qrCodeBuffer = await QRCode.toBuffer(bundle.qr_id, {
               type: 'png',
               errorCorrectionLevel: 'H',
               margin: 1,
               width: 200,
             });
           } catch (error) {
-            throw new Error(`Failed to generate QR code for ${qrCodeId}: ${error.message}`);
+            throw new Error(`Failed to generate QR code for ${bundle.qr_id}: ${error.message}`);
           }
   
-          // Upload QR code to S3
-          const fileName = `qr-codes/${packing_id}-${Date.now()}.png`;
+          // Create packing record first to get the ID
+          const newPacking = new Packing({
+            work_order: bundle.work_order || null,
+            product: bundle.product,
+            product_quantity: bundle.product_quantity,
+            bundle_size: bundle.bundle_size,
+            uom: bundle.uom,
+            packed_by: bundle.packed_by,
+            qr_id: bundle.qr_id,
+            delivery_stage: 'Packed',
+          });
+          
+          const savedPacking = await newPacking.save();
+  
+          // Upload QR code to S3 using the saved packing ID
+          const fileName = `qr-codes/${savedPacking._id}-${Date.now()}.png`;
           const file = {
             data: qrCodeBuffer,
             mimetype: 'image/png',
@@ -571,44 +592,31 @@ const createPackingSchema = z.object({
             const { url } = await putObject(file, fileName);
             qrCodeUrl = url;
           } catch (error) {
-            throw new Error(`Failed to upload QR code to S3 for ${qrCodeId}: ${error.message}`);
+            throw new Error(`Failed to upload QR code to S3 for ${bundle.qr_id}: ${error.message}`);
           }
   
-          // Update packing record
-          const updatedPacking = await Packing.findByIdAndUpdate(
-            packing_id,
-            {
-              qr_id: qrCodeId,
-              qr_code: qrCodeUrl,
-              updated_by: userId,
-              delivery_stage:"Packed"
-            },
-            { new: true, runValidators: true }
-          );
-  
-          // Check if packing record exists
-          if (!updatedPacking) {
-            throw new Error('Packing record not found');
-          }
+          // Update packing record with qr_code URL
+          savedPacking.qr_code = qrCodeUrl;
+          savedPacking.updated_by = userId;
+          await savedPacking.save();
 
-
+          // Update inventory
           const inventory = await Inventory.findOne({
-            work_order: packing.work_order,
-            product: packing.product,
+            work_order: savedPacking.work_order,
+            product: savedPacking.product,
           });
-          // .session(session);
+          
           if (inventory) {
-            inventory.packed_quantity += packing.product_quantity;
+            inventory.packed_quantity += savedPacking.product_quantity;
             inventory.available_stock = inventory.packed_quantity - inventory.dispatched_quantity;
             inventory.updated_by = userId;
-            await inventory.save({  }); //session
+            await inventory.save();
           }
   
-          updatedPackings.push(updatedPacking);
+          createdPackings.push(savedPacking);
         } catch (error) {
           errors.push({
-            packing_id,
-            qrCodeId,
+            qr_id: bundle.qr_id,
             error: error.message,
           });
         }
@@ -616,25 +624,25 @@ const createPackingSchema = z.object({
   
       // 4. Handle response based on results
       if (errors.length === 0) {
-        // All updates succeeded
-        return res.status(200).json({
+        // All succeeded
+        return res.status(201).json({
           success: true,
-          message: 'Packing records updated successfully',
-          data: updatedPackings,
+          message: 'Packing records created successfully',
+          data: createdPackings,
         });
-      } else if (updatedPackings.length > 0) {
+      } else if (createdPackings.length > 0) {
         // Partial success
         return res.status(207).json({
           success: false,
-          message: 'Some packing updates failed',
+          message: 'Some packing records failed to create',
           errors,
-          updated: updatedPackings,
+          created: createdPackings,
         });
       } else {
-        // All updates failed
+        // All failed
         return res.status(400).json({
           success: false,
-          message: 'All packing updates failed',
+          message: 'All packing records failed to create',
           errors,
         });
       }
@@ -672,7 +680,7 @@ const createPackingSchema = z.object({
       }
   
       // Handle other errors
-      console.error('Error updating Packing:', error);
+      console.error('Error creating Packing:', error);
       return res.status(500).json({
         success: false,
         message: 'Internal Server Error',
