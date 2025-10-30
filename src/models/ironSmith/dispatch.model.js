@@ -154,6 +154,10 @@ const ironDispatchSchema = new mongoose.Schema(
           type: Number,
           required: true,
         },
+        hsn_code: {
+          type: String,
+          required: false,
+        },
         qr_code: {
           type: String,
           required: true,

@@ -396,8 +396,9 @@ const createIronJobOrder1 = asyncHandler(async (req, res) => {
     throw new ApiError(400, 'Production is already in progress for this job order');
   }
 
-  // Create production records
-  const dailyProductionPromises = jobOrderData.products.map(async (product) => {
+  // Create production records sequentially to maintain order
+  const savedProductions = [];
+  for (const product of jobOrderData.products) {
     const schemaProduct = {
       shape_id: product.shape,
       planned_quantity: product.planned_quantity,
@@ -418,10 +419,9 @@ const createIronJobOrder1 = asyncHandler(async (req, res) => {
       status: 'Pending',
     });
 
-    return newProduction.save();
-  });
-
-  const savedProductions = await Promise.all(dailyProductionPromises);
+    const savedProduction = await newProduction.save();
+    savedProductions.push(savedProduction);
+  }
 
 
 
@@ -833,7 +833,9 @@ for (const product of value.products) {
   
 
 
-  const dailyProductionPromises = jobOrder.products.map(async (product) => {
+  // Create production records sequentially to maintain order
+  const savedProductions = [];
+  for (const product of jobOrder.products) {
     const schemaProduct = {
         object_id: product._id,
         shape_id: product.shape,
@@ -847,7 +849,7 @@ for (const product of value.products) {
     const newProduction = new ironDailyProduction({
         work_order: jobOrderData.work_order,
         job_order: jobOrder._id,
-        color:jobOrderData.color,
+        color: jobOrderData.color,
         products: [schemaProduct],
         // date: new Date(jobOrderData.date_range.from),
         submitted_by: userId,
@@ -856,10 +858,9 @@ for (const product of value.products) {
         status: 'Pending',
     });
 
-    return newProduction.save();
-});
-
-  const savedProductions = await Promise.all(dailyProductionPromises);
+    const savedProduction = await newProduction.save();
+    savedProductions.push(savedProduction);
+  }
 
   // 12. Populate and format response
   const populatedJobOrder = await mongoose
@@ -3242,7 +3243,12 @@ const getJobOrderById = asyncHandler(async (req, res) => {
     updatedAt: convertToIST(jobOrder.updatedAt),
     products: jobOrder.products.map((product) => {
       const workOrderProduct = jobOrder.work_order?.products?.find(
-        (wp) => wp.shapeId && wp.shapeId._id && product.shape._id && wp.shapeId._id.toString() === product.shape._id.toString() && wp.diameter === product.dia
+        (wp) => {
+          const shapeMatch = wp.shapeId && wp.shapeId._id && product.shape._id && wp.shapeId._id.toString() === product.shape._id.toString();
+          const diaMatch = wp.diameter === product.dia;
+          const barMarkMatch = (wp.barMark || '') === (product.barMark || '');
+          return shapeMatch && diaMatch && barMarkMatch;
+        }
       );
       return {
         _id: product._id,
@@ -3250,7 +3256,7 @@ const getJobOrderById = asyncHandler(async (req, res) => {
         shape_code: product.shape.shape_code,
         uom: workOrderProduct ? workOrderProduct.uom : product.shape.uom,
         member: workOrderProduct ? workOrderProduct.memberDetails : null,
-        barMark: workOrderProduct ? workOrderProduct.barMark : null,
+        barMark: product.barMark || (workOrderProduct ? workOrderProduct.barMark : null),
         weight: workOrderProduct ? workOrderProduct.weight : null,
         description: product.shape.description,
         planned_quantity: product.planned_quantity,

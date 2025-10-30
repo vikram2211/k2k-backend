@@ -437,6 +437,63 @@ const getProductionData = asyncHandler(async (req, res) => {
     }
   });
 
+  // 2.1. Enhance production records with job order product details
+  for (const production of productions) {
+    if (production.job_order && production.products && production.products.length > 0) {
+      // Fetch job order with populated products
+      const jobOrder = await mongoose
+        .model('ironJobOrder')
+        .findById(production.job_order._id)
+        .populate({
+          path: 'work_order',
+          select: '_id workOrderNumber products',
+        })
+        .lean();
+
+      if (jobOrder && jobOrder.products) {
+        // Enhance each production product with details from job order
+        production.products = production.products.map((prod) => {
+          const matchingJobProduct = jobOrder.products.find(
+            (jp) => jp._id.toString() === prod.object_id.toString()
+          );
+
+          if (matchingJobProduct) {
+            // Find corresponding work order product for PO quantity and other details
+            // Match by shape, diameter, and barMark to ensure we get the correct product
+            const shapeIdToMatch = prod.shape_id?._id || prod.shape_id;
+            const workOrderProduct = jobOrder.work_order?.products?.find(
+              (wp) => {
+                const wpShapeId = wp.shapeId?._id || wp.shapeId;
+                const shapeMatch = wpShapeId?.toString() === shapeIdToMatch?.toString();
+                
+                // Also match by diameter
+                const diameterMatch = (wp.diameter || wp.dia) === matchingJobProduct.dia;
+                
+                // Also match by barMark (handle empty/null cases)
+                const barMarkMatch = (wp.barMark || '') === (matchingJobProduct.barMark || '');
+                
+                return shapeMatch && diameterMatch && barMarkMatch;
+              }
+            );
+
+            return {
+              ...prod,
+              dia: matchingJobProduct.dia,
+              barMark: matchingJobProduct.barMark,
+              // Add PO quantity from work order
+              po_quantity: workOrderProduct?.quantity || null,
+              // Add weight and other details from work order
+              weight: workOrderProduct?.weight || null,
+              memberDetails: workOrderProduct?.memberDetails || null,
+              cuttingLength: workOrderProduct?.cuttingLength || null,
+            };
+          }
+          return prod;
+        });
+      }
+    }
+  }
+
   // 3. Categorize based on Job Order's date_range
   const categorizedProductions = {
     pastDPR: [],

@@ -718,7 +718,7 @@ const createDispatch = asyncHandler(async (req, res, next) => {
 
     // Validate each product
     let workOrderId = null; // ensure we capture the related job order id
-    for (const { object_id, dispatch_quantity, qr_code_id } of products) {
+    for (const { object_id, dispatch_quantity, qr_code_id, hsn_code, weight } of products) {
       if (!object_id || !dispatch_quantity || !qr_code_id) {
         await session.abortTransaction();
         session.endSession();
@@ -787,7 +787,7 @@ const createDispatch = asyncHandler(async (req, res, next) => {
 
     // Process dispatch
     const dispatchProducts = [];
-    for (const { object_id, dispatch_quantity, qr_code_id } of products) {
+    for (const { object_id, dispatch_quantity, qr_code_id, hsn_code, weight } of products) {
       // Update Job Order: deduct from packed_quantity, add to dispatched_quantity
       await ironJobOrder.findOneAndUpdate(
         { "products._id": object_id },
@@ -811,8 +811,20 @@ const createDispatch = asyncHandler(async (req, res, next) => {
       const jobOrderProductForItem = await ironJobOrder.findOne(
         { "products._id": object_id },
         { "products.$": 1, work_order: 1 }
-      ).session(session);
+      ).populate({
+        path: 'work_order',
+        select: 'products',
+      }).session(session);
       const joProduct = jobOrderProductForItem?.products?.[0];
+      
+      // Find the corresponding work order product to get weight and hsn_code
+      const workOrderProduct = jobOrderProductForItem?.work_order?.products?.find(
+        (wp) => {
+          const wpShapeId = wp.shapeId?._id || wp.shapeId;
+          const joShapeId = joProduct?.shape?._id || joProduct?.shape;
+          return wpShapeId?.toString() === joShapeId?.toString();
+        }
+      );
 
       // Add to dispatch products with required fields in schema
       dispatchProducts.push({
@@ -821,7 +833,8 @@ const createDispatch = asyncHandler(async (req, res, next) => {
         product_name: undefined,
         dispatch_quantity,
         bundle_size: dispatch_quantity, // fallback allocation
-        weight: 0, // fallback; update when actual weight is available
+        weight: weight ? parseFloat(weight) : (workOrderProduct?.weight ? parseFloat(workOrderProduct.weight) : 0),
+        hsn_code: hsn_code && hsn_code !== 'null' ? hsn_code : (workOrderProduct?.hsn_code || null),
         qr_code: qr_code_id,
         uom: 'Nos',
       });
@@ -979,12 +992,16 @@ const getScannedProducts_07_10_2025 = asyncHandler(async (req, res, next) => {
     );
 
     const barMark = product?.barMark || null;
+    const weight = product?.weight || null;
+    const hsn_code = product?.hsn_code || null;
 
     res.status(200).json({
       success: true,
       data: {
         ...getScannedProduct.toObject(),
         barMark, // Include barMark in the response
+        weight, // Include weight in the response
+        hsn_code, // Include hsn_code in the response
          object_id: getScannedProduct.object_id,
       },
     });
@@ -1396,6 +1413,8 @@ const getDispatchById = asyncHandler(async (req, res, next) => {
                 sr_no: index + 1,
                 shape_name: shape ? shape.shape_code : 'Unknown Shape',
                 dispatch_qty: product.dispatch_quantity,
+                hsn_code: product.hsn_code || 'N/A',
+                weight: product.weight || 'N/A',
                 date: dispatch.date,
                 invoice: dispatch.invoice_or_sto,
                 vehicle_number: dispatch.vehicle_number,
