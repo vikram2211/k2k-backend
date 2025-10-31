@@ -10,7 +10,7 @@ router.get('/test', (req, res) => {
 
 // Get recent activities for a specific company
 router.get('/:company/activities', getRecentActivities);
-console.log("here in activity routes");
+console.log("here in activity routes   ");
 
 
 export default router;
