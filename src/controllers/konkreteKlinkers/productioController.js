@@ -5175,6 +5175,113 @@ export const getKKMonthlyProductionCounts = async (req, res) => {
     }
 };
 
+// Get recent production DPRs for dashboard
+export const getRecentKKProductions = async (req, res) => {
+    try {
+        const limit = parseInt(req.query.limit) || 2;
+
+        const productions = await DailyProduction
+            .find()
+            .populate({
+                path: 'work_order',
+                select: '_id work_order_number',
+                populate: [
+                    {
+                        path: 'client_id',
+                        model: 'Client',
+                        select: 'name',
+                    },
+                    {
+                        path: 'project_id',
+                        model: 'Project',
+                        select: 'name',
+                    },
+                ],
+            })
+            .populate({
+                path: 'job_order',
+                select: 'job_order_id date products',
+                populate: {
+                    path: 'products.product',
+                    select: 'description material_code',
+                },
+            })
+            .populate({
+                path: 'products.product_id',
+                select: 'description material_code',
+            })
+            .populate({
+                path: 'submitted_by created_by',
+                select: 'username email',
+            })
+            .sort({ createdAt: -1 })
+            .limit(limit)
+            .lean();
+
+        // Transform the data to match dashboard format
+        const transformedProductions = productions.map((production) => {
+            // Calculate planned quantity from job order products
+            let totalPlanned = 0;
+            if (production.job_order?.products) {
+                totalPlanned = production.job_order.products.reduce((sum, jobProd) => {
+                    // Find matching product in daily production
+                    const matchingProd = production.products.find(dailyProd => 
+                        dailyProd.product_id.toString() === jobProd.product.toString()
+                    );
+                    if (matchingProd) {
+                        return sum + (jobProd.planned_quantity || 0);
+                    }
+                    return sum;
+                }, 0);
+            }
+            
+            const totalAchieved = production.products.reduce((sum, prod) => sum + prod.achieved_quantity, 0);
+            const totalRejected = production.products.reduce((sum, prod) => sum + (prod.rejected_quantity || 0), 0);
+            const progressPercentage = totalPlanned > 0 ? Math.round((totalAchieved / totalPlanned) * 100) : 0;
+
+            // Calculate days remaining from job order date range
+            let daysRemaining = 0;
+            if (production.job_order?.date?.to) {
+                const endDate = new Date(production.job_order.date.to);
+                const today = new Date();
+                daysRemaining = Math.max(0, Math.ceil((endDate - today) / (1000 * 60 * 60 * 24)));
+            }
+
+            return {
+                id: production._id,
+                title: production.work_order?.project_id?.name || 'Konkrete Klinkers Project',
+                status: production.status,
+                priority: daysRemaining < 7 ? 'HIGH' : daysRemaining < 30 ? 'MEDIUM' : 'LOW',
+                projectId: production.work_order?.work_order_number || 'KK-WO-001',
+                clientName: production.work_order?.client_id?.name || 'Unknown Client',
+                daysRemaining,
+                progressPercentage,
+                plannedQuantity: totalPlanned,
+                achievedQuantity: totalAchieved,
+                rejectedQuantity: totalRejected,
+                ordersCompleted: production.products.length,
+                ordersTotal: production.products.length,
+                budgetUsed: Math.round(Math.random() * 50 + 30), // Mock budget percentage
+                budgetRemaining: Math.round(Math.random() * 100000 + 50000), // Mock remaining budget
+                teamMembers: Math.round(Math.random() * 5 + 3), // Mock team size
+                dueDate: production.job_order?.date?.to ? new Date(production.job_order.date.to).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : 'TBD',
+                createdAt: production.createdAt,
+                products: production.products.map(prod => ({
+                    product: prod.product_id?.description || 'N/A',
+                    planned: prod.planned_quantity || 0,
+                    achieved: prod.achieved_quantity,
+                    rejected: prod.rejected_quantity
+                }))
+            };
+        });
+
+        return res.status(200).json({ success: true, data: transformedProductions });
+    } catch (error) {
+        console.error('Error fetching recent Konkrete Klinkers productions:', error);
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
 export const addDowntime = async (req, res, next) => {
   try {
     const { prodId, job_order, product_id, description, minutes, remarks, downtime_start_time } = req.body;

@@ -581,6 +581,95 @@ export const getIronMonthlyProductionCounts = asyncHandler(async (req, res) => {
   }
 });
 
+// Get recent production DPRs for dashboard
+export const getRecentIronProductions = asyncHandler(async (req, res) => {
+  try {
+    const limit = parseInt(req.query.limit) || 2;
+
+    const productions = await ironDailyProduction
+      .find()
+      .populate({
+        path: 'work_order',
+        select: '_id workOrderNumber',
+        populate: [
+          {
+            path: 'clientId',
+            model: 'ironClient',
+            select: 'name',
+          },
+          {
+            path: 'projectId',
+            model: 'ironProject',
+            select: 'name',
+          },
+        ],
+      })
+      .populate({
+        path: 'job_order',
+        select: 'job_order_number date_range',
+      })
+      .populate({
+        path: 'products.shape_id',
+        select: 'shape_code name',
+      })
+      .populate({
+        path: 'submitted_by created_by',
+        select: 'username email',
+      })
+      .sort({ createdAt: -1 })
+      .limit(limit)
+      .lean();
+
+    // Transform the data to match dashboard format
+    const transformedProductions = productions.map((production) => {
+      const totalPlanned = production.products.reduce((sum, prod) => sum + prod.planned_quantity, 0);
+      const totalAchieved = production.products.reduce((sum, prod) => sum + prod.achieved_quantity, 0);
+      const totalRejected = production.products.reduce((sum, prod) => sum + prod.rejected_quantity, 0);
+      const progressPercentage = totalPlanned > 0 ? Math.round((totalAchieved / totalPlanned) * 100) : 0;
+
+      // Calculate days remaining from job order date range
+      let daysRemaining = 0;
+      if (production.job_order?.date_range?.to) {
+        const endDate = new Date(production.job_order.date_range.to);
+        const today = new Date();
+        daysRemaining = Math.max(0, Math.ceil((endDate - today) / (1000 * 60 * 60 * 24)));
+      }
+
+      return {
+        id: production._id,
+        title: production.work_order?.projectId?.name || 'Iron Smith Project',
+        status: production.status,
+        priority: daysRemaining < 7 ? 'HIGH' : daysRemaining < 30 ? 'MEDIUM' : 'LOW',
+        projectId: production.work_order?.workOrderNumber || 'IS-WO-001',
+        clientName: production.work_order?.clientId?.name || 'Unknown Client',
+        daysRemaining,
+        progressPercentage,
+        plannedQuantity: totalPlanned,
+        achievedQuantity: totalAchieved,
+        rejectedQuantity: totalRejected,
+        ordersCompleted: production.products.length,
+        ordersTotal: production.products.length,
+        budgetUsed: Math.round(Math.random() * 50 + 30), // Mock budget percentage
+        budgetRemaining: Math.round(Math.random() * 100000 + 50000), // Mock remaining budget
+        teamMembers: Math.round(Math.random() * 5 + 3), // Mock team size
+        dueDate: production.job_order?.date_range?.to ? new Date(production.job_order.date_range.to).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : 'TBD',
+        createdAt: production.createdAt,
+        products: production.products.map(prod => ({
+          shape: prod.shape_id?.shape_code || 'N/A',
+          planned: prod.planned_quantity,
+          achieved: prod.achieved_quantity,
+          rejected: prod.rejected_quantity
+        }))
+      };
+    });
+
+    return res.status(200).json({ success: true, data: transformedProductions });
+  } catch (error) {
+    console.error('Error fetching recent Iron Smith productions:', error);
+    return res.status(500).json({ success: false, message: error.message });
+  }
+});
+
 
 const manageIronProductionActions1 = asyncHandler(async (req, res) => {
   try {
