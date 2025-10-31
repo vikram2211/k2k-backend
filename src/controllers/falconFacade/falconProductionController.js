@@ -59,6 +59,98 @@ export const getFFMonthlyProductionCounts = asyncHandler(async (req, res) => {
     }
 });
 
+// Get recent production DPRs for dashboard
+export const getRecentFFProductions = asyncHandler(async (req, res) => {
+    try {
+        const limit = parseInt(req.query.limit) || 2;
+
+        const productions = await falconProduction
+            .find()
+            .populate({
+                path: 'job_order',
+                select: 'job_order_id',
+                populate: {
+                    path: 'work_order_number',
+                    model: 'falconWorkOrder',
+                    select: 'work_order_number',
+                    populate: [
+                        {
+                            path: 'client_id',
+                            model: 'falconClient',
+                            select: 'name',
+                        },
+                        {
+                            path: 'project_id',
+                            model: 'falconProject',
+                            select: 'name',
+                        },
+                    ],
+                },
+            })
+            .populate({
+                path: 'internal_work_order',
+                select: 'int_work_order_id date',
+            })
+            .populate({
+                path: 'created_by',
+                select: 'username email',
+            })
+            .sort({ createdAt: -1 })
+            .limit(limit)
+            .lean();
+
+        // Transform the data to match dashboard format
+        const transformedProductions = productions.map((production) => {
+            const progressPercentage = production.product.po_quantity > 0 
+                ? Math.round((production.product.achieved_quantity / production.product.po_quantity) * 100) 
+                : 0;
+
+            // Calculate days remaining from internal work order date range
+            let daysRemaining = 0;
+            if (production.internal_work_order?.date?.to) {
+                const endDate = new Date(production.internal_work_order.date.to);
+                const today = new Date();
+                daysRemaining = Math.max(0, Math.ceil((endDate - today) / (1000 * 60 * 60 * 24)));
+            }
+
+
+            return {
+                id: production._id,
+                title: production.job_order?.work_order_number?.project_id?.name || 'Falcon Facade Project',
+                status: production.status,
+                priority: daysRemaining < 7 ? 'HIGH' : daysRemaining < 30 ? 'MEDIUM' : 'LOW',
+                projectId: production.job_order?.work_order_number?.work_order_number || 'FF-WO-001',
+                clientName: production.job_order?.work_order_number?.client_id?.name || 'Unknown Client',
+                daysRemaining,
+                progressPercentage,
+                plannedQuantity: production.product.po_quantity,
+                achievedQuantity: production.product.achieved_quantity,
+                rejectedQuantity: production.product.rejected_quantity || 0, // Ensure fallback to 0
+                ordersCompleted: 1,
+                ordersTotal: 1,
+                budgetUsed: Math.round(Math.random() * 50 + 30), // Mock budget percentage
+                budgetRemaining: Math.round(Math.random() * 100000 + 50000), // Mock remaining budget
+                teamMembers: Math.round(Math.random() * 5 + 3), // Mock team size
+                dueDate: production.internal_work_order?.date?.to ? new Date(production.internal_work_order.date.to).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : 'TBD',
+                createdAt: production.createdAt,
+                product: {
+                    code: production.product.code,
+                    width: production.product.width,
+                    height: production.product.height,
+                    planned: production.product.po_quantity,
+                    achieved: production.product.achieved_quantity,
+                    rejected: production.product.rejected_quantity || 0 // Ensure fallback to 0
+                }
+            };
+        });
+
+        return res.status(200).json({ success: true, data: transformedProductions });
+    } catch (error) {
+        console.error('Error fetching recent Falcon Facade productions:', error);
+        return res.status(500).json({ success: false, message: error.message });
+    }
+});
+
 
 const getProductionsByProcess_22_07_2025 = asyncHandler(async (req, res) => {
     try {
