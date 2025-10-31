@@ -718,7 +718,7 @@ const createDispatch = asyncHandler(async (req, res, next) => {
 
     // Validate each product
     let workOrderId = null; // ensure we capture the related job order id
-    for (const { object_id, dispatch_quantity, qr_code_id, hsn_code, weight } of products) {
+    for (const { object_id, dispatch_quantity, qr_code_id, hsn_code, weight, rate } of products) {
       if (!object_id || !dispatch_quantity || !qr_code_id) {
         await session.abortTransaction();
         session.endSession();
@@ -787,7 +787,7 @@ const createDispatch = asyncHandler(async (req, res, next) => {
 
     // Process dispatch
     const dispatchProducts = [];
-    for (const { object_id, dispatch_quantity, qr_code_id, hsn_code, weight } of products) {
+    for (const { object_id, dispatch_quantity, qr_code_id, hsn_code, weight, rate } of products) {
       // Update Job Order: deduct from packed_quantity, add to dispatched_quantity
       await ironJobOrder.findOneAndUpdate(
         { "products._id": object_id },
@@ -834,6 +834,7 @@ const createDispatch = asyncHandler(async (req, res, next) => {
         dispatch_quantity,
         bundle_size: dispatch_quantity, // fallback allocation
         weight: weight ? parseFloat(weight) : (workOrderProduct?.weight ? parseFloat(workOrderProduct.weight) : 0),
+        rate: rate !== undefined && rate !== null && rate !== '' ? Number(rate) : undefined,
         hsn_code: hsn_code && hsn_code !== 'null' ? hsn_code : (workOrderProduct?.hsn_code || null),
         qr_code: qr_code_id,
         uom: 'Nos',
@@ -1415,6 +1416,7 @@ const getDispatchById = asyncHandler(async (req, res, next) => {
                 dispatch_qty: product.dispatch_quantity,
                 hsn_code: product.hsn_code || 'N/A',
                 weight: product.weight || 'N/A',
+                rate: product.rate ?? null,
                 date: dispatch.date,
                 invoice: dispatch.invoice_or_sto,
                 vehicle_number: dispatch.vehicle_number,

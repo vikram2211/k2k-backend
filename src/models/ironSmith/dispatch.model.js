@@ -154,6 +154,10 @@ const ironDispatchSchema = new mongoose.Schema(
           type: Number,
           required: true,
         },
+        rate: {
+          type: Number,
+          required: false,
+        },
         hsn_code: {
           type: String,
           required: false,
