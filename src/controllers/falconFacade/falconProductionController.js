@@ -315,6 +315,64 @@ const getProductionsByProcess = asyncHandler(async (req, res) => {
                     preserveNullAndEmptyArrays: true
                 }
             },
+            // Compute semifinished remark from matched IWO product + semifinished
+            {
+                $addFields: {
+                    semifinished_remark: {
+                        $let: {
+                            vars: {
+                                matchedProduct: {
+                                    $first: {
+                                        $filter: {
+                                            input: {
+                                                $map: {
+                                                    input: {
+                                                        $ifNull: [
+                                                            '$internalWorkOrderDetails.products',
+                                                            []
+                                                        ]
+                                                    },
+                                                    as: 'prod',
+                                                    in: {
+                                                        product: '$$prod.product',
+                                                        code: '$$prod.code',
+                                                        semifinished_details: '$$prod.semifinished_details'
+                                                    }
+                                                }
+                                            },
+                                            as: 'mp',
+                                            cond: {
+                                                $and: [
+                                                    { $eq: ['$$mp.product', '$product.product_id'] },
+                                                    { $eq: ['$$mp.code', '$product.code'] }
+                                                ]
+                                            }
+                                        }
+                                    }
+                                }
+                            },
+                            in: {
+                                $let: {
+                                    vars: {
+                                        matchedSf: {
+                                            $first: {
+                                                $filter: {
+                                                    input: {
+                                                        $ifNull: ['$$matchedProduct.semifinished_details', []]
+                                                    },
+                                                    as: 'sf',
+                                                    cond: { $eq: ['$$sf.semifinished_id', '$semifinished_id'] }
+                                                }
+                                            }
+                                        }
+                                    },
+                                    in: '$$matchedSf.remarks'
+                                }
+                            }
+                        }
+                    }
+                }
+            },
             // Step 5: Lookup created_by details
             {
                 $lookup: {
@@ -339,6 +397,7 @@ const getProductionsByProcess = asyncHandler(async (req, res) => {
                     work_order_id: '$jobOrderDetails.work_order_number',
                     work_order_number: '$workOrderDetails.work_order_number',
                     semifinished_id: 1,
+                    semifinished_remark: 1,
                     product_id: '$product.product_id',
                     name: '$productDetails.name',
                     product: {
@@ -3342,6 +3401,69 @@ const getProductionsWithInviteQC = asyncHandler(async (req, res) => {
             },
             { $unwind: { path: '$productDetails', preserveNullAndEmptyArrays: true } },
 
+            // Lookup internal work order to compute semifinished remarks
+            {
+                $lookup: {
+                    from: 'falconinternalworkorders',
+                    localField: 'internal_work_order',
+                    foreignField: '_id',
+                    as: 'internalWorkOrderDetails'
+                }
+            },
+            { $unwind: { path: '$internalWorkOrderDetails', preserveNullAndEmptyArrays: true } },
+
+            // Compute semifinished remark similarly for invite-qc listing
+            {
+                $addFields: {
+                    semifinished_remark: {
+                        $let: {
+                            vars: {
+                                matchedProduct: {
+                                    $first: {
+                                        $filter: {
+                                            input: {
+                                                $map: {
+                                                    input: { $ifNull: ['$internalWorkOrderDetails.products', []] },
+                                                    as: 'prod',
+                                                    in: {
+                                                        product: '$$prod.product',
+                                                        code: '$$prod.code',
+                                                        semifinished_details: '$$prod.semifinished_details'
+                                                    }
+                                                }
+                                            },
+                                            as: 'mp',
+                                            cond: {
+                                                $and: [
+                                                    { $eq: ['$$mp.product', '$product.product_id'] },
+                                                    { $eq: ['$$mp.code', '$product.code'] }
+                                                ]
+                                            }
+                                        }
+                                    }
+                                }
+                            },
+                            in: {
+                                $let: {
+                                    vars: {
+                                        matchedSf: {
+                                            $first: {
+                                                $filter: {
+                                                    input: { $ifNull: ['$$matchedProduct.semifinished_details', []] },
+                                                    as: 'sf',
+                                                    cond: { $eq: ['$$sf.semifinished_id', '$semifinished_id'] }
+                                                }
+                                            }
+                                        }
+                                    },
+                                    in: '$$matchedSf.remarks'
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+
             // Step 5: Lookup created_by details
             {
                 $lookup: {
@@ -3361,6 +3483,7 @@ const getProductionsWithInviteQC = asyncHandler(async (req, res) => {
                     work_order_id: '$jobOrderDetails.work_order_number',
                     work_order_number: '$workOrderDetails.work_order_number',
                     semifinished_id: 1,
+                    semifinished_remark: 1,
                     product_id: '$product.product_id',
                     name: '$productDetails.name',
                     product: {

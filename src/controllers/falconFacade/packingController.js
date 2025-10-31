@@ -1195,6 +1195,8 @@ const getAllFalconPackings = asyncHandler(async (req, res) => {
 // Get Packing by ID
 const getFalconPackingById = asyncHandler(async (req, res) => {
     try {
+        console.log("insideeeeeeeeee");
+        
         const { workOrderId } = req.params;
         const { productId } = req.query; // Optional productId parameter
         console.log("workOrderId new 123489", workOrderId);
