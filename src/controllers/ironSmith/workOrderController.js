@@ -2010,7 +2010,40 @@ const getIronWorkOrderById = asyncHandler(async (req, res) => {
         quantitiesByShape[shapeId.toString()] = { achieved: 0, packed: 0, dispatched: 0, recycled: 0, rejected: 0 };
     });
 
+    // Holders for JO-based aggregates available in entire handler scope
+    let quantitiesByShapeAndBarMark = {}; // key: `${shapeId}|${normalizedBarMark}`
+    let shapeToBarMarks = {}; // shapeId -> Set of barMarks seen in JO
+
     try {
+        // Fetch quantities per shape and barMark directly from Job Orders
+        // This ensures rows with the same shape but different bar marks are differentiated
+        try {
+            const jobOrders = await mongoose.model('ironJobOrder')
+                .find({ work_order: workOrderId })
+                .select('products.shape products.barMark products.achieved_quantity products.packed_quantity products.dispatched_quantity products.rejected_quantity')
+                .lean();
+
+            (jobOrders || []).forEach((jo) => {
+                (jo.products || []).forEach((p) => {
+                    const sid = p?.shape?.toString();
+                    const bm = (p?.barMark || '').toString().trim().toLowerCase();
+                    if (!sid || !shapeIdStrings.includes(sid)) return;
+                    const key = `${sid}|${bm}`;
+                    if (!quantitiesByShapeAndBarMark[key]) {
+                        quantitiesByShapeAndBarMark[key] = { achieved: 0, packed: 0, dispatched: 0, recycled: 0, rejected: 0 };
+                    }
+                    if (!shapeToBarMarks[sid]) shapeToBarMarks[sid] = new Set();
+                    shapeToBarMarks[sid].add(bm);
+                    quantitiesByShapeAndBarMark[key].achieved += Number(p?.achieved_quantity) || 0;
+                    quantitiesByShapeAndBarMark[key].packed += Number(p?.packed_quantity) || 0;
+                    quantitiesByShapeAndBarMark[key].dispatched += Number(p?.dispatched_quantity) || 0;
+                    quantitiesByShapeAndBarMark[key].rejected += Number(p?.rejected_quantity) || 0;
+                });
+            });
+        } catch (e) {
+            console.error('Error aggregating from job orders:', e);
+        }
+
         // Fetch production data (achieved quantities)
         const productionData = await mongoose.model('ironDailyProduction')
             .find({ 
@@ -2032,22 +2065,8 @@ const getIronWorkOrderById = asyncHandler(async (req, res) => {
             });
         });
 
-        // Fetch packing data (packed quantities) - using ironPacking model
-        const packingData = await mongoose.model('ironPacking')
-            .find({ 
-                work_order: workOrderId,
-                shape_id: { $in: shapeIds }
-            })
-            .select('shape_id product_quantity')
-            .lean();
-
-        // Process packing data
-        packingData.forEach((pack) => {
-            const shapeId = pack.shape_id?.toString();
-            if (shapeId && shapeIdStrings.includes(shapeId)) {
-                quantitiesByShape[shapeId].packed += pack.product_quantity || 0;
-            }
-        });
+        // We still use production/dispatch/QC as fallbacks aggregated by shape,
+        // but when formatting products we prioritize Job Order per-barMark totals.
 
         // Fetch dispatch data (dispatched quantities)
         const dispatchData = await mongoose.model('ironDispatch')
@@ -2157,8 +2176,18 @@ const getIronWorkOrderById = asyncHandler(async (req, res) => {
         },
         products: workOrder.products.map((product) => {
             const shapeId = product.shapeId?._id?.toString();
-            const quantities = quantitiesByShape[shapeId] || { achieved: 0, packed: 0, dispatched: 0, recycled: 0, rejected: 0 };
-            const netPacked = Math.max(0, (quantities.packed || 0) - (quantities.dispatched || 0));
+            const barMark = (product.barMark || '').toString().trim().toLowerCase();
+            const joKey = `${shapeId}|${barMark}`;
+            let qFromJO = (typeof quantitiesByShapeAndBarMark !== 'undefined' && quantitiesByShapeAndBarMark[joKey])
+                ? quantitiesByShapeAndBarMark[joKey]
+                : null;
+            // Fallback: if no exact barMark match and JO has exactly one barMark for this shape, use that to avoid zeros
+            if (!qFromJO && shapeId && shapeToBarMarks[shapeId] && shapeToBarMarks[shapeId].size === 1) {
+                const onlyBM = Array.from(shapeToBarMarks[shapeId])[0];
+                const onlyKey = `${shapeId}|${onlyBM}`;
+                qFromJO = quantitiesByShapeAndBarMark[onlyKey] || null;
+            }
+            const quantities = qFromJO || (quantitiesByShape[shapeId] || { achieved: 0, packed: 0, dispatched: 0, recycled: 0, rejected: 0 });
             
             return {
                 shapeId: product.shapeId
@@ -2180,7 +2209,8 @@ const getIronWorkOrderById = asyncHandler(async (req, res) => {
                 _id: product._id,
                 // Add dynamic quantities
                 achieved_quantity: quantities.achieved,
-                packed_quantity: netPacked,
+                // Show packed as actual packed (not net of dispatch)
+                packed_quantity: quantities.packed,
                 dispatched_quantity: quantities.dispatched,
                 recycled_quantity: quantities.recycled,
                 rejected_quantity: quantities.rejected,

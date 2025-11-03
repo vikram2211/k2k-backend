@@ -3495,6 +3495,9 @@ const workOrderData = asyncHandler(async (req, res) => {
       products: jobOrder.products.map(product => ({
         shape: product.shape,
         planned_quantity: product.planned_quantity || 0,
+        // Include packed and dispatched so UI can compute Achieved = packed + dispatched
+        packed_quantity: product.packed_quantity || 0,
+        dispatched_quantity: product.dispatched_quantity || 0,
         achieved_quantity: product.achieved_quantity || 0,
         rejected_quantity: product.rejected_quantity || 0,
         dia: product.dia,
