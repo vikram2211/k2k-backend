@@ -241,19 +241,16 @@ const dispatchSchema_26_09_2025 = Joi.object({
     }, {});
     const products = Object.values(productMap);
   
-    // Handle file uploads
+  // Handle file uploads
     let invoiceFileUrls = [];
     if (req.files && req.files.length > 0) {
       for (const file of req.files) {
-        const tempFilePath = path.join('./public/temp', file.filename);
-        const fileBuffer = fs.readFileSync(tempFilePath);
-  
+        const buffer = file.buffer || (file.path ? fs.readFileSync(file.path) : null);
         const { url } = await putObject(
-          { data: fileBuffer, mimetype: file.mimetype },
+          { data: buffer, mimetype: file.mimetype },
           `irondispatch/${Date.now()}-${file.originalname}`
         );
         invoiceFileUrls.push(url);
-        fs.unlinkSync(tempFilePath);
       }
     } else if (preUploadedFiles && preUploadedFiles.length > 0) {
       invoiceFileUrls = preUploadedFiles;
@@ -646,11 +643,9 @@ const createDispatch_07_10_2025 = asyncHandler(async (req, res, next) => {
   let invoiceFileUrls = [];
   if (req.files?.length) {
     for (const file of req.files) {
-      const tempFilePath = path.join('./public/temp', file.filename);
-      const fileBuffer = fs.readFileSync(tempFilePath);
-      const { url } = await putObject({ data: fileBuffer, mimetype: file.mimetype }, `irondispatch/${Date.now()}-${file.originalname}`);
+      const buffer = file.buffer || (file.path ? fs.readFileSync(file.path) : null);
+      const { url } = await putObject({ data: buffer, mimetype: file.mimetype }, `irondispatch/${Date.now()}-${file.originalname}`);
       invoiceFileUrls.push(url);
-      fs.unlinkSync(tempFilePath);
     }
   } else if (preUploadedFiles?.length) {
     invoiceFileUrls = preUploadedFiles;
