@@ -3,7 +3,7 @@ import { verifyJWT } from '../../middlewares/auth.middleware.js';
 import { upload } from '../../middlewares/multer.middleware.js';
 
 import {
-    createIronWorkOrder, getAllIronWorkOrders, getIronWorkOrderById, updateIronWorkOrder, deleteIronWorkOrder
+    createIronWorkOrder, getAllIronWorkOrders, getIronWorkOrderById, updateIronWorkOrder, deleteIronWorkOrder, manualUpdateIronWorkOrderStatus
 } from '../../controllers/ironSmith/workOrderController.js';
 
 import { getIronProjectBasedOnClient,getIronDimensionBasedOnShape,getRawMaterialDataByProjectId } from '../../controllers/ironSmith/ironDropdownApis/dropdownApis.js'
@@ -15,6 +15,7 @@ router.route('/workorder/create').post(upload.array('files'), createIronWorkOrde
 router.route('/workorder/get').get(getAllIronWorkOrders);
 router.route('/workorder/:workOrderId').get(getIronWorkOrderById).put(upload.array('files'), updateIronWorkOrder);
 router.route('/workorder/:workOrderId').delete(deleteIronWorkOrder);
+router.route('/workorder/:workOrderId/update-status').post(manualUpdateIronWorkOrderStatus);
 router.route('/workorders-getProject').get(getIronProjectBasedOnClient);
 router.route('/dimension-by-shape/:shapeId').get(getIronDimensionBasedOnShape);
 router.route('/raw-data/:projectId').get(getRawMaterialDataByProjectId);

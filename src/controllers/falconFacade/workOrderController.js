@@ -1747,7 +1747,7 @@ const getFalconWorkOrderById = asyncHandler(async (req, res) => {
 
     // Fetch work order (without products)
     const workOrder = await falconWorkOrder.findById(id)
-        .select('work_order_number client_id project_id files date remarks createdAt updatedAt products')
+        .select('work_order_number client_id project_id files date remarks createdAt updatedAt products status')
         .populate({ path: 'client_id', select: 'name address', match: { isDeleted: false } })
         .populate({ path: 'project_id', select: 'name address', match: { isDeleted: false } })
         .lean();
@@ -2515,17 +2515,41 @@ const getFalconProjectBasedOnClient = async (req, res, next) => {
  */
 const manualUpdateWorkOrderStatus = asyncHandler(async (req, res) => {
     const { workOrderId } = req.params;
+    const { status } = req.body;
+    
+    console.log("workOrderId", workOrderId);
+    console.log("status", status);
     
     if (!mongoose.Types.ObjectId.isValid(workOrderId)) {
         throw new ApiError(400, `Invalid work order ID: ${workOrderId}`);
     }
 
+    // Validate status
+    const validStatuses = ['Pending', 'In Progress', 'Completed', 'Cancelled'];
+    if (!status || !validStatuses.includes(status)) {
+        throw new ApiError(400, `Invalid status. Must be one of: ${validStatuses.join(', ')}`);
+    }
+
     try {
-        const statusData = await updateWorkOrderStatus(workOrderId);
-        
+        // Find the work order
+        const workOrder = await falconWorkOrder.findById(workOrderId);
+        if (!workOrder) {
+            throw new ApiError(404, `Work order with ID ${workOrderId} not found`);
+        }
+
+        // Directly update the status without any calculations
+        workOrder.status = status;
+        const updatedWorkOrder = await workOrder.save();
+
+        console.log(`Work Order ${workOrderId} status directly updated to: ${status}`);
+
         return sendResponse(
             res,
-            new ApiResponse(200, statusData, 'Work order status updated manually')
+            new ApiResponse(200, {
+                work_order_id: updatedWorkOrder._id,
+                work_order_number: updatedWorkOrder.work_order_number,
+                status: updatedWorkOrder.status
+            }, 'Work order status updated successfully')
         );
     } catch (error) {
         console.error('Error in manual status update:', error);

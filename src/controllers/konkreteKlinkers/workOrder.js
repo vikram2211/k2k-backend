@@ -2437,6 +2437,44 @@ export const updateAllWorkOrderStatuses = async (req, res) => {
     });
   }
 };
+
+// Manually set work order status directly (no calculations)
+export const manualUpdateWorkOrderStatus = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status } = req.body;
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ success: false, message: `Invalid work order ID: ${id}` });
+    }
+
+    const validStatuses = ['Pending', 'In Progress', 'Completed', 'Cancelled'];
+    if (!status || !validStatuses.includes(status)) {
+      return res.status(400).json({ success: false, message: `Invalid status. Must be one of: ${validStatuses.join(', ')}` });
+    }
+
+    const workOrder = await WorkOrder.findById(id);
+    if (!workOrder) {
+      return res.status(404).json({ success: false, message: `Work order not found: ${id}` });
+    }
+
+    workOrder.status = status;
+    await workOrder.save();
+
+    return res.status(200).json({
+      success: true,
+      message: 'Work order status updated successfully',
+      data: {
+        work_order_id: workOrder._id,
+        work_order_number: workOrder.work_order_number,
+        status: workOrder.status,
+      },
+    });
+  } catch (error) {
+    console.error('Error manually updating work order status:', error);
+    return res.status(500).json({ success: false, message: 'Failed to update work order status' });
+  }
+};
 // export const updateWorkOrder = async (req, res) => {
 //   // console.log(req.body);
 

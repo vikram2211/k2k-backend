@@ -99,7 +99,7 @@
             },
             status: {
                 type: String,
-                enum: ['Pending', 'Approved', 'Rejected', 'In Progress'],
+                enum: ['Pending', 'Approved', 'Rejected', 'In Progress','Completed'],
                 default: 'Pending',
             },
         },

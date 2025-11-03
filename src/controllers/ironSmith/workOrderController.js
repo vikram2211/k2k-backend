@@ -3530,4 +3530,33 @@ const deleteIronWorkOrder = asyncHandler(async (req, res) => {
 
 
 
-export { createIronWorkOrder, getAllIronWorkOrders, getIronWorkOrderById, updateIronWorkOrder, deleteIronWorkOrder };
+// Manually set iron work order status (direct update)
+const manualUpdateIronWorkOrderStatus = asyncHandler(async (req, res) => {
+    const { workOrderId } = req.params;
+    const { status } = req.body;
+
+    if (!mongoose.Types.ObjectId.isValid(workOrderId)) {
+        throw new ApiError(400, `Invalid work order ID: ${workOrderId}`);
+    }
+
+    const validStatuses = ['Pending', 'In Progress', 'Completed', 'Cancelled'];
+    if (!status || !validStatuses.includes(status)) {
+        throw new ApiError(400, `Invalid status. Must be one of: ${validStatuses.join(', ')}`);
+    }
+
+    const workOrder = await ironWorkOrder.findById(workOrderId);
+    if (!workOrder) {
+        throw new ApiError(404, `Work order not found: ${workOrderId}`);
+    }
+
+    workOrder.status = status;
+    await workOrder.save();
+
+    return res.status(200).json(new ApiResponse(200, {
+        work_order_id: workOrder._id,
+        work_order_number: workOrder.workOrderNumber,
+        status: workOrder.status
+    }, 'Work order status updated successfully'));
+});
+
+export { createIronWorkOrder, getAllIronWorkOrders, getIronWorkOrderById, updateIronWorkOrder, deleteIronWorkOrder, manualUpdateIronWorkOrderStatus };
